@@ -7,21 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned for v0.2.0
+### Planned for v0.4.0
 - Vector index for fast similarity search (HNSW)
-- Code-aware chunking (Python AST, JavaScript/TypeScript)
 - Compression for KV-cache files (zstd)
 - Chunk versioning and history
-- Advanced semantic signatures (TF-IDF, local embeddings)
 - Multi-document sessions
 - Selective KV loading by query
 
-### Planned for v0.1.x
-- Comprehensive test suite (>90% coverage)
-- Performance benchmarks
-- Configuration file support (.chunkforge.toml)
-- Bug fixes for edge cases (empty files, binary files, large files)
-- Improved error handling and validation
+## [0.3.0] - 2026-03-12
+
+### Added
+- **Multi-modal support** with modular chunker architecture
+- **ImageChunker**: Image indexing with perceptual hashing and color histograms (requires Pillow)
+- **PDFChunker**: PDF text extraction by page with metadata (requires pymupdf)
+- **AudioChunker**: Audio segmentation with MFCC and spectral features (requires librosa)
+- **VideoChunker**: Video keyframe extraction with frame hashing (requires opencv-python)
+- **CodeChunker**: Code-aware chunking with AST parsing for Python and regex for other languages
+- **TextChunker**: Refactored text chunker with enhanced semantic signatures
+- **BaseChunker**: Abstract base class for all chunkers
+- New MCP tools: `detect_modality()` and `get_supported_formats()`
+- Optional dependency extras: `[image]`, `[pdf]`, `[audio]`, `[video]`, `[all]`
+- Lazy imports for optional dependencies (graceful fallback if not installed)
+
+### Changed
+- Core ChunkForge class now initializes and manages multiple chunkers
+- `index_documents()` automatically selects appropriate chunker based on file type
+- `detect_modality()` method to identify file type
+- README updated with multi-modal documentation and supported formats
+
+### Security
+- All optional dependencies are 100% offline (no network access)
+- Zero required dependencies maintained for core functionality
+
+## [0.2.0] - 2026-03-12
+
+### Added
+- Comprehensive test suite (14 passing tests)
+- GitHub Actions CI/CD (test on Python 3.9-3.12)
+- GitHub Actions publish workflow (PyPI)
+- Issue templates (bug report, feature request, question)
+- Pull request template
+- CONTRIBUTING.md with detailed guidelines
+- CHANGELOG.md
+- pytest.ini configuration
+- V0.2 roadmap and release checklist
+
+### Changed
+- Made msgspec and numpy optional dependencies (zero required dependencies)
+- Added `[performance]` extra for optional msgspec/numpy
+- Added mypy and ruff to dev dependencies
+- README updated with security section and badges
 
 ## [0.1.0] - 2026-03-12
 

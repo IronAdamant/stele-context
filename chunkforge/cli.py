@@ -45,7 +45,7 @@ Examples:
     parser.add_argument(
         "--version",
         action="version",
-        version="chunkforge 0.1.0",
+        version="chunkforge 0.3.0",
     )
     
     parser.add_argument(

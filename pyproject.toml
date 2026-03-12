@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chunkforge"
-version = "0.1.0"
+version = "0.3.0"
 description = "Purely local, persistent KV-cache rollback and offload engine with dynamic semantic chunking and hybrid vector-database-style indexing"
 readme = "README.md"
 requires-python = ">=3.9"
