@@ -12,7 +12,8 @@ ChunkForge enables long-horizon agents (especially 1M+ context models) to avoid 
 
 - **100% Offline & Local-Only**: No internet access, no external API calls, no cloud components
 - **Zero Required Dependencies**: Runs on Python stdlib alone—no supply chain risks
-- **Dynamic Semantic Chunking**: Automatically splits text/code into ~256-token chunks, then intelligently merges them into larger coherent blocks based on semantic similarity
+- **Multi-Modal Support**: Text, code, images, PDFs, audio, and video (optional dependencies)
+- **Dynamic Semantic Chunking**: Automatically splits content into ~256-token chunks, then intelligently merges them into larger coherent blocks based on semantic similarity
 - **Hybrid Indexing**: SHA-256 content hashes + lightweight semantic signatures (TF-style features + cosine similarity)
 - **Instant KV Restoration**: Unchanged chunks load pre-saved KV tensors instantly—no LLM re-processing
 - **Lazy Double-Check**: Modified chunks trigger targeted semantic comparison before re-processing
@@ -41,11 +42,24 @@ pip install -e ".[dev]"
 - Python 3.9+
 - **Zero required dependencies**
 
-Optional (for performance):
-- `msgspec` - Fast serialization (100% offline, no network)
-- `numpy` - Vector math (100% offline, no network)
+Optional (all 100% offline, no network):
 
-All features work with Python standard library alone.
+| Extra | Packages | Use Case |
+|-------|----------|----------|
+| `performance` | msgspec, numpy | Faster serialization & vector math |
+| `image` | Pillow | Image indexing & similarity |
+| `pdf` | pymupdf | PDF text extraction |
+| `audio` | librosa, numpy | Audio segmentation & features |
+| `video` | opencv-python, numpy | Video keyframe extraction |
+| `all` | All of the above | Everything |
+
+```bash
+# Install with specific modalities
+pip install chunkforge[image,pdf]
+pip install chunkforge[all]
+```
+
+All features work with Python standard library alone (text/code).
 
 ## Security & Supply Chain
 
@@ -62,6 +76,26 @@ For maximum security:
 # Install with zero dependencies
 pip install chunkforge --no-deps
 ```
+
+## Supported Formats
+
+### Text & Code (Zero Dependencies)
+- `.txt`, `.md`, `.rst`, `.csv`, `.log`
+- `.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.cpp`, `.c`, `.h`
+- `.go`, `.rs`, `.rb`, `.php`, `.swift`, `.sh`, `.bash`
+- `.json`, `.yaml`, `.yml`, `.toml`, `.xml`, `.html`, `.css`, `.sql`
+
+### Images (requires Pillow)
+- `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.ico`
+
+### PDFs (requires pymupdf)
+- `.pdf`
+
+### Audio (requires librosa)
+- `.mp3`, `.wav`, `.ogg`, `.flac`, `.m4a`, `.aac`, `.wma`
+
+### Video (requires opencv-python)
+- `.mp4`, `.avi`, `.mov`, `.mkv`, `.webm`, `.flv`, `.wmv`
 
 ## Quick Start
 

@@ -33,6 +33,28 @@ performance = [
     "msgspec>=0.18.0",
     "numpy>=1.24.0",
 ]
+image = [
+    "Pillow>=10.0",
+]
+pdf = [
+    "pymupdf>=1.23.0",
+]
+audio = [
+    "librosa>=0.10.0",
+    "numpy>=1.24.0",
+]
+video = [
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+]
+all = [
+    "msgspec>=0.18.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0",
+    "pymupdf>=1.23.0",
+    "librosa>=0.10.0",
+    "opencv-python>=4.8.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

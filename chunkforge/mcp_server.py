@@ -7,6 +7,8 @@ library (http.server + json) with zero external dependencies.
 
 The server implements the MCP tool discovery protocol, allowing agents
 to discover and call ChunkForge tools naturally.
+
+Supports multi-modal content: text, code, images, PDFs, audio, video.
 """
 
 import json
@@ -17,6 +19,12 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 from chunkforge.core import ChunkForge
+from chunkforge.chunkers import (
+    HAS_IMAGE_CHUNKER,
+    HAS_PDF_CHUNKER,
+    HAS_AUDIO_CHUNKER,
+    HAS_VIDEO_CHUNKER,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -67,14 +75,14 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         tools = [
             {
                 "name": "index_documents",
-                "description": "Index one or more documents for KV-cache management. Performs dynamic semantic chunking and stores chunk metadata.",
+                "description": "Index one or more documents for KV-cache management. Supports text, code, images, PDFs, audio, and video. Performs dynamic semantic chunking and stores chunk metadata.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "paths": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "List of document paths to index",
+                            "description": "List of document paths to index (supports .txt, .md, .py, .js, .png, .jpg, .pdf, .mp3, .mp4, etc.)",
                         },
                         "force_reindex": {
                             "type": "boolean",
@@ -83,6 +91,29 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                         },
                     },
                     "required": ["paths"],
+                },
+            },
+            {
+                "name": "detect_modality",
+                "description": "Detect the modality of a file (text, code, image, pdf, audio, video).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to file",
+                        },
+                    },
+                    "required": ["path"],
+                },
+            },
+            {
+                "name": "get_supported_formats",
+                "description": "Get list of supported file formats by modality.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
                 },
             },
             {
@@ -235,6 +266,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         Returns:
             Tool execution result
         """
+        # Standard tools
         tool_map: Dict[str, Callable[..., Any]] = {
             "index_documents": self.chunkforge.index_documents,
             "detect_changes_and_update": self.chunkforge.detect_changes_and_update,
@@ -244,10 +276,32 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "prune_chunks": self.chunkforge.prune_chunks,
         }
         
+        # Multi-modal tools
+        if tool_name == "detect_modality":
+            path = parameters.get("path", "")
+            modality = self.chunkforge.detect_modality(path)
+            return {"success": True, "result": {"path": path, "modality": modality}}
+        
+        if tool_name == "get_supported_formats":
+            formats = {
+                "text": self.chunkforge.chunkers["text"].supported_extensions(),
+                "code": self.chunkforge.chunkers["code"].supported_extensions(),
+            }
+            if HAS_IMAGE_CHUNKER:
+                formats["image"] = self.chunkforge.chunkers["image"].supported_extensions()
+            if HAS_PDF_CHUNKER:
+                formats["pdf"] = self.chunkforge.chunkers["pdf"].supported_extensions()
+            if HAS_AUDIO_CHUNKER:
+                formats["audio"] = self.chunkforge.chunkers["audio"].supported_extensions()
+            if HAS_VIDEO_CHUNKER:
+                formats["video"] = self.chunkforge.chunkers["video"].supported_extensions()
+            
+            return {"success": True, "result": {"formats": formats}}
+        
         if tool_name not in tool_map:
             return {
                 "error": f"Unknown tool: {tool_name}",
-                "available_tools": list(tool_map.keys()),
+                "available_tools": list(tool_map.keys()) + ["detect_modality", "get_supported_formats"],
             }
         
         try:

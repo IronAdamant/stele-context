@@ -7,6 +7,7 @@ Provides the main ChunkForge class with:
 - Change detection and lazy double-check
 - KV-cache management and persistence
 - Session management with rollback support
+- Multi-modal support (text, code, image, PDF, audio, video)
 
 All operations are 100% offline and local-only.
 """
@@ -59,6 +60,24 @@ except ImportError:
     np = _NumpyFallback()  # type: ignore
 
 from chunkforge.storage import StorageBackend
+from chunkforge.chunkers import (
+    TextChunker,
+    CodeChunker,
+    HAS_IMAGE_CHUNKER,
+    HAS_PDF_CHUNKER,
+    HAS_AUDIO_CHUNKER,
+    HAS_VIDEO_CHUNKER,
+)
+
+# Import optional chunkers
+if HAS_IMAGE_CHUNKER:
+    from chunkforge.chunkers import ImageChunker
+if HAS_PDF_CHUNKER:
+    from chunkforge.chunkers import PDFChunker
+if HAS_AUDIO_CHUNKER:
+    from chunkforge.chunkers import AudioChunker
+if HAS_VIDEO_CHUNKER:
+    from chunkforge.chunkers import VideoChunker
 
 
 class Chunk:
@@ -270,6 +289,98 @@ class ChunkForge:
         self.max_chunk_size = max_chunk_size
         self.merge_threshold = merge_threshold
         self.change_threshold = change_threshold
+        
+        # Initialize chunkers
+        self._init_chunkers()
+    
+    def _init_chunkers(self) -> None:
+        """Initialize modality-specific chunkers."""
+        self.chunkers: Dict[str, Any] = {
+            "text": TextChunker(
+                chunk_size=self.chunk_size,
+                max_chunk_size=self.max_chunk_size,
+            ),
+            "code": CodeChunker(
+                chunk_size=self.chunk_size,
+                max_chunk_size=self.max_chunk_size,
+            ),
+        }
+        
+        # Add optional chunkers if dependencies available
+        if HAS_IMAGE_CHUNKER:
+            self.chunkers["image"] = ImageChunker()
+        
+        if HAS_PDF_CHUNKER:
+            self.chunkers["pdf"] = PDFChunker(
+                chunk_size=self.chunk_size,
+                max_chunk_size=self.max_chunk_size,
+            )
+        
+        if HAS_AUDIO_CHUNKER:
+            self.chunkers["audio"] = AudioChunker()
+        
+        if HAS_VIDEO_CHUNKER:
+            self.chunkers["video"] = VideoChunker()
+    
+    def get_chunker(self, file_path: str) -> Optional[Any]:
+        """
+        Get appropriate chunker for a file.
+        
+        Args:
+            file_path: Path to file
+            
+        Returns:
+            Chunker instance or None if no chunker available
+        """
+        ext = Path(file_path).suffix.lower()
+        
+        # Check code chunker first (more specific)
+        if self.chunkers["code"].can_handle(file_path):
+            return self.chunkers["code"]
+        
+        # Check other chunkers
+        for modality, chunker in self.chunkers.items():
+            if modality in ("text", "code"):
+                continue
+            if chunker.can_handle(file_path):
+                return chunker
+        
+        # Fall back to text chunker
+        if self.chunkers["text"].can_handle(file_path):
+            return self.chunkers["text"]
+        
+        return None
+    
+    def detect_modality(self, file_path: str) -> str:
+        """
+        Detect file modality.
+        
+        Args:
+            file_path: Path to file
+            
+        Returns:
+            Modality string ("text", "code", "image", "pdf", "audio", "video", "unknown")
+        """
+        ext = Path(file_path).suffix.lower()
+        
+        # Code extensions
+        code_extensions = self.chunkers["code"].supported_extensions()
+        if ext in code_extensions:
+            return "code"
+        
+        # Other modalities
+        for modality, chunker in self.chunkers.items():
+            if modality == "text":
+                continue
+            if ext in chunker.supported_extensions():
+                return modality
+        
+        # Text extensions
+        text_extensions = self.chunkers["text"].supported_extensions()
+        if ext in text_extensions:
+            return "text"
+        
+        return "unknown"
     
     def index_documents(
         self,
