@@ -2,18 +2,23 @@
 
 **Purely local, persistent KV-cache rollback and offload engine with dynamic semantic chunking and hybrid vector-database-style indexing.**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/ChunkForge)
+
 ChunkForge enables long-horizon agents (especially 1M+ context models) to avoid ever re-scanning or re-processing unmodified documents or code. Unchanged chunks instantly restore pre-computed KV states; only modified chunks trigger a lightweight double-check. This dramatically reduces token usage and latency over multi-turn sessions or across days of development.
 
 ## Key Features
 
 - **100% Offline & Local-Only**: No internet access, no external API calls, no cloud components
+- **Zero Required Dependencies**: Runs on Python stdlib alone—no supply chain risks
 - **Dynamic Semantic Chunking**: Automatically splits text/code into ~256-token chunks, then intelligently merges them into larger coherent blocks based on semantic similarity
 - **Hybrid Indexing**: SHA-256 content hashes + lightweight semantic signatures (TF-style features + cosine similarity)
 - **Instant KV Restoration**: Unchanged chunks load pre-saved KV tensors instantly—no LLM re-processing
 - **Lazy Double-Check**: Modified chunks trigger targeted semantic comparison before re-processing
 - **Persistent Storage**: SQLite metadata + filesystem KV-cache with full rollback support
 - **Built-in MCP Server**: Minimal HTTP/JSON server for agent integration
-- **Minimal Dependencies**: Only `msgspec` and `numpy` (both optional, with stdlib fallbacks)
+- **Optional Performance**: `msgspec` and `numpy` for speed (both 100% offline, with stdlib fallbacks)
 
 ## Installation
 
@@ -34,10 +39,29 @@ pip install -e ".[dev]"
 ### Requirements
 
 - Python 3.9+
-- `msgspec` (optional, for fast serialization)
-- `numpy` (optional, for vector math)
+- **Zero required dependencies**
 
-All features work with Python standard library only if these are not available.
+Optional (for performance):
+- `msgspec` - Fast serialization (100% offline, no network)
+- `numpy` - Vector math (100% offline, no network)
+
+All features work with Python standard library alone.
+
+## Security & Supply Chain
+
+ChunkForge is designed with security in mind:
+
+- **Zero required dependencies** - No supply chain attack surface for core functionality
+- **No model downloads** - Semantic signatures use simple TF-style features, not ML models
+- **No API calls** - Everything runs locally, no data leaves your machine
+- **Optional deps are safe** - `msgspec` and `numpy` are pure computation libraries with no network access
+- **Minimal codebase** - ~2,000 lines of Python, easy to audit
+
+For maximum security:
+```bash
+# Install with zero dependencies
+pip install chunkforge --no-deps
+```
 
 ## Quick Start
 
