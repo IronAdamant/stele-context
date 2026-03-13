@@ -171,13 +171,21 @@ class StorageBackend:
             conn.commit()
 
     def _migrate_database(self) -> None:
-        """Run database migrations (add content column if missing)."""
+        """Run database migrations for schema changes."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("PRAGMA table_info(chunks)")
             columns = {row[1] for row in cursor.fetchall()}
 
+            changed = False
             if "content" not in columns:
                 conn.execute("ALTER TABLE chunks ADD COLUMN content TEXT")
+                changed = True
+            if "version" not in columns:
+                conn.execute(
+                    "ALTER TABLE chunks ADD COLUMN version INTEGER DEFAULT 1"
+                )
+                changed = True
+            if changed:
                 conn.commit()
 
     def store_chunk(
