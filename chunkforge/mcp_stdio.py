@@ -34,6 +34,9 @@ try:
         ResourceTemplate,
     )
 
+    from mcp.server import InitializationOptions
+    from mcp.types import ServerCapabilities
+
     HAS_MCP = True
 except ImportError:
     HAS_MCP = False
@@ -240,10 +243,17 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
 
 async def _run_server(storage_dir: Optional[str] = None) -> None:
     """Run the MCP server over stdio."""
+    from chunkforge import __version__
+
     server = create_server(storage_dir)
+    init_options = InitializationOptions(
+        server_name="chunkforge",
+        server_version=__version__,
+        capabilities=ServerCapabilities(tools=None, resources=None),
+    )
 
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream)
+        await server.run(read_stream, write_stream, init_options)
 
 
 def main(storage_dir: Optional[str] = None) -> None:

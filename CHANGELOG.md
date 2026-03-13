@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.4] - 2026-03-13
 
 ### Fixed
+- **MCP server crash on startup** — `Server.run()` in MCP SDK v1.26+ requires `InitializationOptions` with server name, version, and capabilities. Added proper initialization.
 - **CLI `--version` stale** — was hardcoded `"0.5.0"`, now uses `__version__` dynamically
 - **`engine.py` version hardcoded** — `get_stats()` now uses `__version__` via lazy import
 - **Sliding window infinite loop risk** — overlap could equal chunk size causing zero forward progress; now caps overlap to ensure at least 1 sentence advance

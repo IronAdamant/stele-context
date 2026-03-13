@@ -146,7 +146,7 @@ chunkforge search "authentication logic" --top-k 5
 chunkforge search "error handling" --json
 ```
 
-### 3. MCP Server (for Claude Desktop)
+### 3. MCP Server (for Claude Code / Claude Desktop)
 
 ```bash
 # Install MCP dependency
@@ -156,7 +156,7 @@ pip install chunkforge[mcp]
 chunkforge serve-mcp
 ```
 
-Claude Desktop config (`claude_desktop_config.json`):
+**Claude Code** (`~/.claude/settings.json`):
 ```json
 {
   "mcpServers": {
@@ -167,6 +167,20 @@ Claude Desktop config (`claude_desktop_config.json`):
   }
 }
 ```
+
+**Claude Desktop** (`~/.config/Claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "chunkforge": {
+      "command": "chunkforge",
+      "args": ["serve-mcp"]
+    }
+  }
+}
+```
+
+> **Tip:** If installed in a virtualenv, use the full path to the `chunkforge` binary (e.g., `/path/to/.venv/bin/chunkforge`).
 
 ### 4. HTTP REST Server
 
