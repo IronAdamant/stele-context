@@ -26,8 +26,11 @@ def compute_chunk_ids_hash(storage: Any) -> str:
     Used to detect whether the persisted index is stale
     (chunks added or removed since last save).
     """
-    chunks = storage.search_chunks()
-    chunk_ids = sorted(c["chunk_id"] for c in chunks)
+    import sqlite3
+
+    with sqlite3.connect(storage.db_path) as conn:
+        cursor = conn.execute("SELECT chunk_id FROM chunks ORDER BY chunk_id")
+        chunk_ids = [row[0] for row in cursor.fetchall()]
     id_string = "|".join(chunk_ids)
     return hashlib.sha256(id_string.encode("utf-8")).hexdigest()
 

@@ -29,15 +29,12 @@ from chunkforge.index_store import (
 from chunkforge.session import SessionManager
 from chunkforge.storage import StorageBackend
 
-# Import optional chunkers
-if HAS_IMAGE_CHUNKER:
-    from chunkforge.chunkers import ImageChunker
-if HAS_PDF_CHUNKER:
-    from chunkforge.chunkers import PDFChunker
-if HAS_AUDIO_CHUNKER:
-    from chunkforge.chunkers import AudioChunker
-if HAS_VIDEO_CHUNKER:
-    from chunkforge.chunkers import VideoChunker
+
+def _get_version() -> str:
+    """Get version without circular import."""
+    from chunkforge import __version__
+
+    return __version__
 
 
 class ChunkForge:
@@ -67,6 +64,13 @@ class ChunkForge:
 
     def _init_chunkers(self) -> None:
         """Initialize modality-specific chunkers."""
+        from chunkforge.chunkers import (
+            ImageChunker,
+            PDFChunker,
+            AudioChunker,
+            VideoChunker,
+        )
+
         self.chunkers: Dict[str, Any] = {
             "text": TextChunker(
                 chunk_size=self.chunk_size,
@@ -78,16 +82,16 @@ class ChunkForge:
             ),
         }
 
-        if HAS_IMAGE_CHUNKER:
+        if HAS_IMAGE_CHUNKER and ImageChunker is not None:
             self.chunkers["image"] = ImageChunker()
-        if HAS_PDF_CHUNKER:
+        if HAS_PDF_CHUNKER and PDFChunker is not None:
             self.chunkers["pdf"] = PDFChunker(
                 chunk_size=self.chunk_size,
                 max_chunk_size=self.max_chunk_size,
             )
-        if HAS_AUDIO_CHUNKER:
+        if HAS_AUDIO_CHUNKER and AudioChunker is not None:
             self.chunkers["audio"] = AudioChunker()
-        if HAS_VIDEO_CHUNKER:
+        if HAS_VIDEO_CHUNKER and VideoChunker is not None:
             self.chunkers["video"] = VideoChunker()
 
     def _load_or_rebuild_index(self) -> VectorIndex:
@@ -557,7 +561,7 @@ class ChunkForge:
         index_stats = self.vector_index.get_stats()
 
         return {
-            "version": "0.5.3",
+            "version": _get_version(),
             "storage": storage_stats,
             "index": index_stats,
             "config": {

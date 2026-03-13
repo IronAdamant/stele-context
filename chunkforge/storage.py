@@ -317,13 +317,7 @@ class StorageBackend:
 
     def get_document_chunks(self, document_path: str) -> List[Dict[str, Any]]:
         """Get all chunks for a document."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM chunks WHERE document_path = ? ORDER BY start_pos",
-                (document_path,),
-            )
-            return [dict(row) for row in cursor.fetchall()]
+        return self.search_chunks(document_path=document_path)
 
     def store_document(
         self,

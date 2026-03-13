@@ -1,5 +1,6 @@
 """Tests for ChunkForge engine."""
 
+from chunkforge import __version__
 from chunkforge.engine import ChunkForge
 from chunkforge.chunkers.base import Chunk
 
@@ -196,7 +197,7 @@ def multiply(a, b):
 
         assert "index" in stats
         assert "chunk_count" in stats["index"]
-        assert stats["version"] == "0.5.3"
+        assert stats["version"] == __version__
 
     def test_save_and_load_state_alias(self, tmp_path):
         """Test that save_state is an alias for save_kv_state."""

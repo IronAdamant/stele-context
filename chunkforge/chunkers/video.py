@@ -14,13 +14,11 @@ from chunkforge.chunkers.base import BaseChunker, Chunk
 # Check for opencv
 try:
     import cv2
-    import numpy as np
 
     HAS_OPENCV = True
 except ImportError:
     HAS_OPENCV = False
     cv2 = None  # type: ignore
-    np = None  # type: ignore
 
 
 class VideoChunker(BaseChunker):

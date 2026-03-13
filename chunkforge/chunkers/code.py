@@ -258,11 +258,16 @@ class CodeChunker(BaseChunker):
         chunk_index = 0
 
         # Language-specific patterns for function/class definitions
+        _js = r"(?:^|\n)(?:export\s+)?(?:async\s+)?function\s+\w+|(?:^|\n)(?:export\s+)?class\s+\w+|(?:^|\n)(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:function|\()"
+        _ts = r"(?:^|\n)(?:export\s+)?(?:async\s+)?function\s+\w+|(?:^|\n)(?:export\s+)?(?:abstract\s+)?class\s+\w+|(?:^|\n)(?:export\s+)?interface\s+\w+|(?:^|\n)(?:export\s+)?type\s+\w+"
+        _shell = r"(?:^|\n)(?:function\s+)?\w+\s*\(\s*\)\s*\{"
         patterns = {
-            "js": r"(?:^|\n)(?:export\s+)?(?:async\s+)?function\s+\w+|(?:^|\n)(?:export\s+)?class\s+\w+|(?:^|\n)(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:function|\()",
-            "jsx": r"(?:^|\n)(?:export\s+)?(?:async\s+)?function\s+\w+|(?:^|\n)(?:export\s+)?class\s+\w+|(?:^|\n)(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:function|\()",
-            "ts": r"(?:^|\n)(?:export\s+)?(?:async\s+)?function\s+\w+|(?:^|\n)(?:export\s+)?(?:abstract\s+)?class\s+\w+|(?:^|\n)(?:export\s+)?interface\s+\w+|(?:^|\n)(?:export\s+)?type\s+\w+",
-            "tsx": r"(?:^|\n)(?:export\s+)?(?:async\s+)?function\s+\w+|(?:^|\n)(?:export\s+)?(?:abstract\s+)?class\s+\w+|(?:^|\n)(?:export\s+)?interface\s+\w+|(?:^|\n)(?:export\s+)?type\s+\w+",
+            "js": _js,
+            "jsx": _js,
+            "mjs": _js,
+            "cjs": _js,
+            "ts": _ts,
+            "tsx": _ts,
             "java": r"(?:^|\n)(?:public\s+)?(?:private\s+)?(?:protected\s+)?(?:static\s+)?(?:abstract\s+)?(?:class|interface|enum)\s+\w+|(?:^|\n)(?:public\s+)?(?:private\s+)?(?:protected\s+)?(?:static\s+)?(?:final\s+)?(?:synchronized\s+)?(?:native\s+)?(?:abstract\s+)?[\w<>\[\]]+\s+\w+\s*\(",
             "cpp": r"(?:^|\n)(?:[\w:]+\s+)?(?:[\w:]+\s+)?[\w:]+\s+\w+\s*\([^)]*\)\s*(?:const\s*)?\{",
             "c": r"(?:^|\n)(?:[\w*]+\s+)+\w+\s*\([^)]*\)\s*\{",
@@ -271,8 +276,9 @@ class CodeChunker(BaseChunker):
             "rb": r"(?:^|\n)def\s+\w+|(?:^|\n)class\s+\w+|(?:^|\n)module\s+\w+",
             "php": r"(?:^|\n)(?:abstract\s+)?(?:class|interface|trait)\s+\w+|(?:^|\n)(?:public\s+)?(?:private\s+)?(?:protected\s+)?(?:static\s+)?function\s+\w+",
             "swift": r"(?:^|\n)(?:public\s+)?(?:private\s+)?(?:internal\s+)?(?:open\s+)?(?:final\s+)?class\s+\w+|(?:^|\n)(?:public\s+)?(?:private\s+)?(?:internal\s+)?(?:static\s+)?func\s+\w+",
-            "sh": r"(?:^|\n)(?:function\s+)?\w+\s*\(\s*\)\s*\{",
-            "bash": r"(?:^|\n)(?:function\s+)?\w+\s*\(\s*\)\s*\{",
+            "sh": _shell,
+            "bash": _shell,
+            "zsh": _shell,
         }
 
         pattern = patterns.get(language, patterns.get("js", r"(?:^|\n)\w+"))

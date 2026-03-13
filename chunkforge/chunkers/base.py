@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional
 
 from chunkforge.chunkers.numpy_compat import (
     np,
-    HAS_NUMPY,
     cosine_similarity,
 )
 
@@ -194,10 +193,7 @@ class Chunk:
         # Normalize to unit vector
         norm = np.linalg.norm(signature)
         if norm > 0:
-            if HAS_NUMPY:
-                signature = signature / norm
-            else:
-                signature = [x / norm for x in signature]
+            signature = [x / norm for x in signature]
 
         return signature
 

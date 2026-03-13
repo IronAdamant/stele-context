@@ -18,7 +18,7 @@ Key Features:
 All operations are 100% offline and local-only. No internet access required.
 """
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
 __author__ = "ChunkForge Contributors"
 __license__ = "MIT"
 

@@ -14,6 +14,7 @@ import json
 import sys
 from typing import List, Optional
 
+from chunkforge import __version__ as chunkforge_version
 from chunkforge.engine import ChunkForge
 from chunkforge.mcp_server import MCPServer
 
@@ -46,7 +47,7 @@ Examples:
     parser.add_argument(
         "--version",
         action="version",
-        version="chunkforge 0.5.0",
+        version=f"chunkforge {chunkforge_version}",
     )
 
     parser.add_argument(

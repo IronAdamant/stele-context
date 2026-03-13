@@ -273,6 +273,5 @@ class ImageChunker(BaseChunker):
 
             return combined[: bins * 3]
 
-        else:
-            # Other modes - return empty
-            return [0.0] * bins
+        # Fallback for unexpected modes (images are converted to RGB/L above)
+        return [0.0] * bins

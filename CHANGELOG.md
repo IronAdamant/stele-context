@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-03-13
+
+### Fixed
+- **CLI `--version` stale** — was hardcoded `"0.5.0"`, now uses `__version__` dynamically
+- **`engine.py` version hardcoded** — `get_stats()` now uses `__version__` via lazy import
+- **Sliding window infinite loop risk** — overlap could equal chunk size causing zero forward progress; now caps overlap to ensure at least 1 sentence advance
+- **Last chunk missing metadata** — `_chunk_by_paragraphs` final chunk now includes adaptive density/size metadata
+- **Version tests fragile** — 3 test files now use `__version__` instead of hardcoded strings
+
+### Removed
+- **Dead `IndexNode` methods** — `distance()` and `cosine_similarity()` never called; `HNSWIndex` has its own
+- **Dead `core.py` re-exports** — `np`, `HAS_NUMPY`, `_cosine_similarity` imported but nothing used them from core
+- **Redundant engine imports** — module-level conditional imports for optional chunkers; now lazy-imported in `_init_chunkers()`
+- **Unused `numpy` import** in `video.py`
+- **Unused `HAS_NUMPY` import** in `base.py` (normalization simplified)
+- **Empty `conftest.py`** — contained only a docstring with no fixtures
+
+### Changed
+- **`get_document_chunks` delegates** to `search_chunks()` instead of duplicating the SQL query
+- **Regex patterns deduplicated** in `code.py` — js/jsx/mjs/cjs, ts/tsx, sh/bash/zsh share patterns
+- **Signature normalization simplified** — removed HAS_NUMPY branch; list comprehension works for both paths
+- **`compute_chunk_ids_hash` optimized** — uses `SELECT chunk_id` instead of `SELECT *` (avoids fetching content + BLOBs)
+
+### Tests
+- All 102 tests passing, 1 skipped (MCP SDK not installed)
+
 ## [0.5.3] - 2026-03-13
 
 ### Changed
@@ -259,6 +285,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.5.4 | 2026-03-13 | Codebase audit: bug fixes, dead code removal, deduplication, dynamic versioning |
 | 0.5.3 | 2026-03-13 | Better signatures (bigrams, positional features), regex tokenizer, HNSW performance (array.array, cached norms) |
 | 0.5.2 | 2026-03-13 | Persistent HNSW index serialization — skip rebuild on startup |
 | 0.5.1 | 2026-03-13 | Codebase audit: bug fixes, dead code removal, deduplication, engine delegates to SessionManager |

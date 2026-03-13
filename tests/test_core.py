@@ -1,6 +1,6 @@
 """Tests for ChunkForge core functionality (backward compat)."""
 
-from chunkforge import ChunkForge
+from chunkforge import ChunkForge, __version__
 from chunkforge.core import Chunk
 
 
@@ -194,7 +194,7 @@ class TestChunkForge:
         assert "version" in stats
         assert "storage" in stats
         assert "config" in stats
-        assert stats["version"] == "0.5.3"
+        assert stats["version"] == __version__
 
 
 class TestStorageBackend:

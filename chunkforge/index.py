@@ -42,20 +42,6 @@ class IndexNode:
             self._norm = math.sqrt(sum(x * x for x in self.vector))
         return self._norm
 
-    def distance(self, other: Any) -> float:
-        """Compute Euclidean distance to another vector."""
-        return math.sqrt(sum((a - b) ** 2 for a, b in zip(self.vector, other)))
-
-    def cosine_similarity(self, other: Any) -> float:
-        """Compute cosine similarity to another vector."""
-        dot = sum(a * b for a, b in zip(self.vector, other))
-        norm2 = math.sqrt(sum(b * b for b in other))
-
-        if self.norm == 0 or norm2 == 0:
-            return 0.0
-
-        return dot / (self.norm * norm2)
-
 
 class HNSWIndex:
     """

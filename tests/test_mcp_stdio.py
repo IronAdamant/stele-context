@@ -2,6 +2,7 @@
 
 import pytest
 
+from chunkforge import __version__
 from chunkforge.engine import ChunkForge
 from chunkforge.mcp_stdio import HAS_MCP
 
@@ -85,5 +86,5 @@ class TestMCPStdioIntegration:
         result = engine.get_stats()
 
         assert "version" in result
-        assert result["version"] == "0.5.3"
+        assert result["version"] == __version__
         assert "index" in result

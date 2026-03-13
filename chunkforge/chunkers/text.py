@@ -160,6 +160,7 @@ class TextChunker(BaseChunker):
                 end_pos=current_start + len(current_text),
                 document_path=document_path,
                 chunk_index=chunk_index,
+                metadata=metadata,
             )
             chunks.append(chunk)
 
@@ -230,7 +231,7 @@ class TextChunker(BaseChunker):
             chunks.append(chunk)
             chunk_index += 1
 
-            # Move back for overlap
+            # Move back for overlap, but always advance at least 1 sentence
             if self.overlap > 0 and i < len(sentences):
                 overlap_tokens = 0
                 overlap_count = 0
@@ -242,6 +243,8 @@ class TextChunker(BaseChunker):
                     overlap_tokens += sentence_tokens
                     overlap_count += 1
 
+                # Ensure at least 1 sentence of forward progress
+                overlap_count = min(overlap_count, len(chunk_sentences) - 1)
                 i -= overlap_count
 
         # Handle empty content
