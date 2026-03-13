@@ -156,11 +156,13 @@ class ChunkForge:
                 existing_doc = self.storage.get_document(str(path))
                 if existing_doc and not force_reindex:
                     if existing_doc["content_hash"] == content_hash:
-                        results["skipped"].append({
-                            "path": path_str,
-                            "reason": "Unchanged",
-                            "chunk_count": existing_doc["chunk_count"],
-                        })
+                        results["skipped"].append(
+                            {
+                                "path": path_str,
+                                "reason": "Unchanged",
+                                "chunk_count": existing_doc["chunk_count"],
+                            }
+                        )
                         continue
 
                 # Route through appropriate chunker
@@ -173,7 +175,9 @@ class ChunkForge:
 
                 # Store chunks with content
                 for chunk in chunks:
-                    chunk_content = chunk.content if isinstance(chunk.content, str) else None
+                    chunk_content = (
+                        chunk.content if isinstance(chunk.content, str) else None
+                    )
                     self.storage.store_chunk(
                         chunk_id=chunk.chunk_id,
                         document_path=str(path),
@@ -199,12 +203,14 @@ class ChunkForge:
                 )
 
                 total_tokens = sum(c.token_count for c in chunks)
-                results["indexed"].append({
-                    "path": path_str,
-                    "chunk_count": len(chunks),
-                    "total_tokens": total_tokens,
-                    "modality": modality,
-                })
+                results["indexed"].append(
+                    {
+                        "path": path_str,
+                        "chunk_count": len(chunks),
+                        "total_tokens": total_tokens,
+                        "modality": modality,
+                    }
+                )
                 results["total_chunks"] += len(chunks)
                 results["total_tokens"] += total_tokens
 
@@ -247,7 +253,9 @@ class ChunkForge:
 
                 if should_merge:
                     # Merge content based on type
-                    if isinstance(current.content, str) and isinstance(next_chunk.content, str):
+                    if isinstance(current.content, str) and isinstance(
+                        next_chunk.content, str
+                    ):
                         merged_content = current.content + "\n\n" + next_chunk.content
                     else:
                         merged_content = current.content
@@ -328,11 +336,13 @@ class ChunkForge:
                         if kv_data is not None:
                             results["kv_restored"] += 1
             else:
-                results["modified"].append({
-                    "path": doc_path,
-                    "old_hash": stored_doc["content_hash"][:16],
-                    "new_hash": current_hash[:16],
-                })
+                results["modified"].append(
+                    {
+                        "path": doc_path,
+                        "old_hash": stored_doc["content_hash"][:16],
+                        "new_hash": current_hash[:16],
+                    }
+                )
 
                 # Re-chunk through proper chunker
                 modality = self.detect_modality(doc_path)
@@ -352,20 +362,27 @@ class ChunkForge:
                         search_results = self.vector_index.search(
                             sig_to_list(new_chunk.semantic_signature), k=1
                         )
-                        if search_results and search_results[0][1] >= self.change_threshold:
+                        if (
+                            search_results
+                            and search_results[0][1] >= self.change_threshold
+                        ):
                             results["kv_restored"] += 1
                         else:
-                            results["new"].append({
-                                "path": doc_path,
-                                "chunk_id": new_chunk.chunk_id,
-                                "reason": "New chunk",
-                            })
+                            results["new"].append(
+                                {
+                                    "path": doc_path,
+                                    "chunk_id": new_chunk.chunk_id,
+                                    "reason": "New chunk",
+                                }
+                            )
                             results["kv_reprocessed"] += 1
                     elif new_chunk.content_hash == old_meta["content_hash"]:
                         results["kv_restored"] += 1
                     else:
                         old_sig = sig_from_bytes(old_meta["semantic_signature"])
-                        similarity = cosine_similarity(old_sig, new_chunk.semantic_signature)
+                        similarity = cosine_similarity(
+                            old_sig, new_chunk.semantic_signature
+                        )
 
                         if similarity >= self.change_threshold:
                             results["kv_restored"] += 1
@@ -373,7 +390,11 @@ class ChunkForge:
                             results["kv_reprocessed"] += 1
 
                     # Persist updated chunk
-                    chunk_content = new_chunk.content if isinstance(new_chunk.content, str) else None
+                    chunk_content = (
+                        new_chunk.content
+                        if isinstance(new_chunk.content, str)
+                        else None
+                    )
                     self.storage.store_chunk(
                         chunk_id=new_chunk.chunk_id,
                         document_path=doc_path,
@@ -427,15 +448,17 @@ class ChunkForge:
 
             content = self.storage.get_chunk_content(chunk_id)
 
-            results.append({
-                "chunk_id": chunk_id,
-                "content": content,
-                "document_path": chunk_meta["document_path"],
-                "relevance_score": float(similarity_score),
-                "token_count": chunk_meta["token_count"],
-                "start_pos": chunk_meta["start_pos"],
-                "end_pos": chunk_meta["end_pos"],
-            })
+            results.append(
+                {
+                    "chunk_id": chunk_id,
+                    "content": content,
+                    "document_path": chunk_meta["document_path"],
+                    "relevance_score": float(similarity_score),
+                    "token_count": chunk_meta["token_count"],
+                    "start_pos": chunk_meta["start_pos"],
+                    "end_pos": chunk_meta["end_pos"],
+                }
+            )
 
         return results
 
@@ -473,24 +496,30 @@ class ChunkForge:
                 chunks = self.storage.search_chunks(document_path=doc_path)
                 chunk_data = []
                 for chunk in chunks:
-                    chunk_data.append({
-                        "chunk_id": chunk["chunk_id"],
-                        "content": chunk.get("content"),
-                        "start_pos": chunk["start_pos"],
-                        "end_pos": chunk["end_pos"],
-                        "token_count": chunk["token_count"],
-                    })
-                result["unchanged"].append({
-                    "path": doc_path,
-                    "chunks": chunk_data,
-                    "total_tokens": sum(c["token_count"] for c in chunk_data),
-                })
+                    chunk_data.append(
+                        {
+                            "chunk_id": chunk["chunk_id"],
+                            "content": chunk.get("content"),
+                            "start_pos": chunk["start_pos"],
+                            "end_pos": chunk["end_pos"],
+                            "token_count": chunk["token_count"],
+                        }
+                    )
+                result["unchanged"].append(
+                    {
+                        "path": doc_path,
+                        "chunks": chunk_data,
+                        "total_tokens": sum(c["token_count"] for c in chunk_data),
+                    }
+                )
             else:
-                result["changed"].append({
-                    "path": doc_path,
-                    "old_hash": stored_doc["content_hash"][:16],
-                    "new_hash": current_hash[:16],
-                })
+                result["changed"].append(
+                    {
+                        "path": doc_path,
+                        "old_hash": stored_doc["content_hash"][:16],
+                        "new_hash": current_hash[:16],
+                    }
+                )
 
         return result
 
@@ -504,7 +533,9 @@ class ChunkForge:
         return self.session_manager.get_relevant_chunks(session_id, query, top_k)
 
     def save_kv_state(
-        self, session_id: str, kv_data: Dict[str, Any],
+        self,
+        session_id: str,
+        kv_data: Dict[str, Any],
         chunk_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Save KV-cache state for a session."""
@@ -526,7 +557,7 @@ class ChunkForge:
         index_stats = self.vector_index.get_stats()
 
         return {
-            "version": "0.5.0",
+            "version": "0.5.3",
             "storage": storage_stats,
             "index": index_stats,
             "config": {

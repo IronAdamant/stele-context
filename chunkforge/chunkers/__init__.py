@@ -21,6 +21,7 @@ from chunkforge.chunkers.code import CodeChunker
 # but the constructor raises ImportError. Check the inner availability flag.
 try:
     from chunkforge.chunkers.image import ImageChunker, HAS_PIL
+
     HAS_IMAGE_CHUNKER = HAS_PIL
 except ImportError:
     HAS_IMAGE_CHUNKER = False
@@ -28,6 +29,7 @@ except ImportError:
 
 try:
     from chunkforge.chunkers.pdf import PDFChunker, HAS_PYMUPDF
+
     HAS_PDF_CHUNKER = HAS_PYMUPDF
 except ImportError:
     HAS_PDF_CHUNKER = False
@@ -35,6 +37,7 @@ except ImportError:
 
 try:
     from chunkforge.chunkers.audio import AudioChunker, HAS_LIBROSA
+
     HAS_AUDIO_CHUNKER = HAS_LIBROSA
 except ImportError:
     HAS_AUDIO_CHUNKER = False
@@ -42,6 +45,7 @@ except ImportError:
 
 try:
     from chunkforge.chunkers.video import VideoChunker, HAS_OPENCV
+
     HAS_VIDEO_CHUNKER = HAS_OPENCV
 except ImportError:
     HAS_VIDEO_CHUNKER = False

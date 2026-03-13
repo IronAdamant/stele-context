@@ -1,7 +1,5 @@
 """Tests for ChunkForge core functionality (backward compat)."""
 
-import pytest
-
 from chunkforge import ChunkForge
 from chunkforge.core import Chunk
 
@@ -64,8 +62,9 @@ class TestChunk:
         )
 
         assert chunk.token_count > 0
-        expected = len("Hello, world! This is a test.") // 4
-        assert chunk.token_count == expected
+        # Regex tokenizer: "Hello", ",", " ", "world", "!", " ", "This", " ",
+        # "is", " ", "a", " ", "test", "." = ~14 tokens
+        assert 8 <= chunk.token_count <= 20
 
     def test_chunk_id(self):
         """Test chunk ID generation."""
@@ -195,7 +194,7 @@ class TestChunkForge:
         assert "version" in stats
         assert "storage" in stats
         assert "config" in stats
-        assert stats["version"] == "0.5.0"
+        assert stats["version"] == "0.5.3"
 
 
 class TestStorageBackend:
@@ -222,6 +221,7 @@ class TestStorageBackend:
 
         try:
             import numpy as np
+
             sig = np.zeros(128, dtype=np.float32)
         except ImportError:
             sig = [0.0] * 128

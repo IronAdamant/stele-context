@@ -88,18 +88,20 @@ class SessionManager:
 
         for chunk_id, score in scored:
             content = self.storage.get_chunk_content(chunk_id)
-            chunk_meta = self.storage.get_chunk(chunk_id)
-            if chunk_meta is None:
+            chunk_info = self.storage.get_chunk(chunk_id)
+            if chunk_info is None:
                 continue
 
-            result_chunks.append({
-                "chunk_id": chunk_id,
-                "content": content,
-                "document_path": chunk_meta["document_path"],
-                "relevance_score": float(score),
-                "token_count": chunk_meta["token_count"],
-            })
-            total_tokens += chunk_meta["token_count"]
+            result_chunks.append(
+                {
+                    "chunk_id": chunk_id,
+                    "content": content,
+                    "document_path": chunk_info["document_path"],
+                    "relevance_score": float(score),
+                    "token_count": chunk_info["token_count"],
+                }
+            )
+            total_tokens += chunk_info["token_count"]
 
         return {
             "query": query,
@@ -172,7 +174,9 @@ class SessionManager:
 
         current_turn = session["turn_count"]
         if target_turn >= current_turn:
-            return {"error": f"Target turn {target_turn} >= current turn {current_turn}"}
+            return {
+                "error": f"Target turn {target_turn} >= current turn {current_turn}"
+            }
         if target_turn < 0:
             return {"error": "Target turn must be non-negative"}
 

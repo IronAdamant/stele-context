@@ -1,7 +1,5 @@
 """Tests for persistent HNSW index serialization."""
 
-import pytest
-
 from chunkforge.engine import ChunkForge
 from chunkforge.index import HNSWIndex, VectorIndex
 from chunkforge.index_store import (

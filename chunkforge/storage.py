@@ -125,9 +125,15 @@ class StorageBackend:
                 )
             """)
 
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_hash ON chunks(content_hash)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_path)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_session_chunks_session ON session_chunks(session_id)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_hash ON chunks(content_hash)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_path)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_session_chunks_session ON session_chunks(session_id)"
+            )
 
             conn.commit()
 
@@ -179,33 +185,62 @@ class StorageBackend:
 
             # Store current version in history
             if row:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO chunk_history
                     (chunk_id, version, content_hash, semantic_signature, created_at)
                     SELECT chunk_id, version, content_hash, semantic_signature, created_at
                     FROM chunks WHERE chunk_id = ?
-                """, (chunk_id,))
+                """,
+                    (chunk_id,),
+                )
 
             # Update or insert chunk (preserve access_count on update)
             if row:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE chunks SET
                         document_path = ?, content_hash = ?, semantic_signature = ?,
                         start_pos = ?, end_pos = ?, token_count = ?,
                         last_accessed = ?, version = ?, content = ?
                     WHERE chunk_id = ?
-                """, (document_path, content_hash, sig_bytes,
-                      start_pos, end_pos, token_count, now, version, content,
-                      chunk_id))
+                """,
+                    (
+                        document_path,
+                        content_hash,
+                        sig_bytes,
+                        start_pos,
+                        end_pos,
+                        token_count,
+                        now,
+                        version,
+                        content,
+                        chunk_id,
+                    ),
+                )
             else:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO chunks
                     (chunk_id, document_path, content_hash, semantic_signature,
                      start_pos, end_pos, token_count, created_at, last_accessed,
                      access_count, version, content)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-                """, (chunk_id, document_path, content_hash, sig_bytes,
-                      start_pos, end_pos, token_count, now, now, version, content))
+                """,
+                    (
+                        chunk_id,
+                        document_path,
+                        content_hash,
+                        sig_bytes,
+                        start_pos,
+                        end_pos,
+                        token_count,
+                        now,
+                        now,
+                        version,
+                        content,
+                    ),
+                )
             conn.commit()
 
     def get_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
@@ -220,11 +255,14 @@ class StorageBackend:
             if row is None:
                 return None
 
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE chunks
                 SET last_accessed = ?, access_count = access_count + 1
                 WHERE chunk_id = ?
-            """, (time.time(), chunk_id))
+            """,
+                (time.time(), chunk_id),
+            )
             conn.commit()
 
             return dict(row)
@@ -259,7 +297,7 @@ class StorageBackend:
             if document_path:
                 cursor = conn.execute(
                     "SELECT * FROM chunks WHERE document_path = ? ORDER BY start_pos",
-                    (document_path,)
+                    (document_path,),
                 )
             else:
                 cursor = conn.execute(
@@ -283,7 +321,7 @@ class StorageBackend:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT * FROM chunks WHERE document_path = ? ORDER BY start_pos",
-                (document_path,)
+                (document_path,),
             )
             return [dict(row) for row in cursor.fetchall()]
 
@@ -297,11 +335,14 @@ class StorageBackend:
         """Store document indexing information."""
         now = time.time()
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO documents
                 (document_path, content_hash, chunk_count, indexed_at, last_modified)
                 VALUES (?, ?, ?, ?, ?)
-            """, (document_path, content_hash, chunk_count, now, last_modified))
+            """,
+                (document_path, content_hash, chunk_count, now, last_modified),
+            )
             conn.commit()
 
     def get_document(self, document_path: str) -> Optional[Dict[str, Any]]:
@@ -420,9 +461,12 @@ class StorageBackend:
         """Get version history for a chunk."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT * FROM chunk_history
                 WHERE chunk_id = ?
                 ORDER BY version DESC
-            """, (chunk_id,))
+            """,
+                (chunk_id,),
+            )
             return [dict(row) for row in cursor.fetchall()]

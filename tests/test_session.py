@@ -1,7 +1,5 @@
 """Tests for ChunkForge session management."""
 
-import pytest
-
 from chunkforge.engine import ChunkForge
 from chunkforge.session import SessionManager
 
@@ -13,7 +11,8 @@ class TestSessionManager:
         """Create a ChunkForge instance and index a test file."""
         storage_dir = str(tmp_path / "storage")
         test_file = tmp_path / "test.py"
-        test_file.write_text("""
+        test_file.write_text(
+            """
 def add(a, b):
     return a + b
 
@@ -22,7 +21,8 @@ def subtract(a, b):
 
 def multiply(a, b):
     return a * b
-""".strip())
+""".strip()
+        )
 
         cf = ChunkForge(storage_dir=storage_dir)
         cf.index_documents([str(test_file)])

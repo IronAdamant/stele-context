@@ -3,7 +3,6 @@
 import json
 import sqlite3
 import zlib
-import pytest
 
 from chunkforge.storage import StorageBackend
 
@@ -127,10 +126,14 @@ class TestStorageMigration:
             """)
 
             import struct
-            sig_bytes = struct.pack('128f', *([0.0] * 128))
-            conn.execute("""
+
+            sig_bytes = struct.pack("128f", *([0.0] * 128))
+            conn.execute(
+                """
                 INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
-            """, ("old-chunk", "test.txt", "hash123", sig_bytes, 0, 50, 12, 0.0, 0.0))
+            """,
+                ("old-chunk", "test.txt", "hash123", sig_bytes, 0, 50, 12, 0.0, 0.0),
+            )
             conn.commit()
 
         # Now create StorageBackend — should migrate
@@ -191,6 +194,7 @@ class TestSessionStorageJSON:
         kv_path = storage.store_kv_state("compress-test", "chunk-2", 0, kv_data)
 
         from pathlib import Path
+
         raw = Path(kv_path).read_bytes()
 
         # Should be zlib compressed

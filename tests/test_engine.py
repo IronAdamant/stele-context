@@ -1,7 +1,5 @@
 """Tests for ChunkForge engine."""
 
-import pytest
-
 from chunkforge.engine import ChunkForge
 from chunkforge.chunkers.base import Chunk
 
@@ -19,7 +17,8 @@ class TestChunkForgeEngine:
     def test_python_file_uses_code_chunker(self, tmp_path):
         """Test that .py files are routed through CodeChunker."""
         test_file = tmp_path / "test.py"
-        test_file.write_text("""
+        test_file.write_text(
+            """
 def hello():
     print("hello")
 
@@ -29,7 +28,8 @@ def goodbye():
 class Greeter:
     def greet(self, name):
         return f"Hello, {name}!"
-""".strip())
+""".strip()
+        )
 
         cf = ChunkForge(storage_dir=str(tmp_path / "storage"))
         result = cf.index_documents([str(test_file)])
@@ -95,13 +95,15 @@ class Greeter:
     def test_search_returns_results(self, tmp_path):
         """Test that search() returns relevant chunks with content."""
         test_file = tmp_path / "test.py"
-        test_file.write_text("""
+        test_file.write_text(
+            """
 def add(a, b):
     return a + b
 
 def multiply(a, b):
     return a * b
-""".strip())
+""".strip()
+        )
 
         cf = ChunkForge(storage_dir=str(tmp_path / "storage"))
         cf.index_documents([str(test_file)])
@@ -194,7 +196,7 @@ def multiply(a, b):
 
         assert "index" in stats
         assert "chunk_count" in stats["index"]
-        assert stats["version"] == "0.5.0"
+        assert stats["version"] == "0.5.3"
 
     def test_save_and_load_state_alias(self, tmp_path):
         """Test that save_state is an alias for save_kv_state."""
@@ -209,10 +211,22 @@ def multiply(a, b):
         )
 
         chunks = [
-            Chunk(content="Hello world foo bar", modality="text",
-                  start_pos=0, end_pos=19, document_path="t.txt", chunk_index=0),
-            Chunk(content="Hello world foo baz", modality="text",
-                  start_pos=19, end_pos=38, document_path="t.txt", chunk_index=1),
+            Chunk(
+                content="Hello world foo bar",
+                modality="text",
+                start_pos=0,
+                end_pos=19,
+                document_path="t.txt",
+                chunk_index=0,
+            ),
+            Chunk(
+                content="Hello world foo baz",
+                modality="text",
+                start_pos=19,
+                end_pos=38,
+                document_path="t.txt",
+                chunk_index=1,
+            ),
         ]
 
         merged = cf._merge_similar_chunks(chunks)

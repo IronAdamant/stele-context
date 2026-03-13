@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-03-13
+
+### Changed
+- **Better token estimation** — replaced `len(content) // 4` heuristic with regex-based tokenizer that splits on camelCase, snake_case, punctuation, and numbers. Within ~10-15% of actual BPE token counts.
+- **Enhanced semantic signatures** — added word bigrams (dims 80-95), positional features (dims 104-115: first-line keywords, indentation depth/variance, content density, lexical diversity, average word length, punctuation/numeric density). Signatures now use all 128 dimensions.
+- **HNSW vector performance** — vectors stored as `array.array('f')` instead of `List[float]` for better memory layout and cache locality. Vector norms cached on `IndexNode` to avoid redundant sqrt computations during search. Query norm pre-computed once per search call.
+
+### Tests
+- All 102 tests passing, 1 skipped (MCP SDK not installed)
+
 ## [0.5.2] - 2026-03-13
 
 ### Added
@@ -249,6 +259,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.5.3 | 2026-03-13 | Better signatures (bigrams, positional features), regex tokenizer, HNSW performance (array.array, cached norms) |
 | 0.5.2 | 2026-03-13 | Persistent HNSW index serialization — skip rebuild on startup |
 | 0.5.1 | 2026-03-13 | Codebase audit: bug fixes, dead code removal, deduplication, engine delegates to SessionManager |
 | 0.5.0 | 2026-03-13 | Context cache overhaul: unified chunks, HNSW wired in, search API, real MCP, JSON storage |

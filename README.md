@@ -478,7 +478,7 @@ Typical token savings with ChunkForge:
 
 ## Limitations
 
-- **Semantic signatures are approximate**: The TF-style features provide good but not perfect semantic similarity
+- **Semantic signatures are approximate**: The feature-based signatures (trigrams, bigrams, positional features) provide good but not perfect semantic similarity
 - **No GPU acceleration**: All operations run on CPU
 - **Single-machine only**: No distributed storage or multi-node support
 - **KV-cache format**: Assumes JSON-serializable KV data (falls back to msgspec for complex types)

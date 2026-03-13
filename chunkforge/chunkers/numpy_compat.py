@@ -11,6 +11,7 @@ from typing import Any, List
 
 try:
     import numpy as np
+
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
@@ -42,7 +43,7 @@ except ImportError:
         def frombuffer(data: bytes, dtype: Any = None) -> List[float]:
             """Convert bytes to array."""
             count = len(data) // 4  # float32 = 4 bytes
-            return list(struct.unpack(f'{count}f', data))
+            return list(struct.unpack(f"{count}f", data))
 
     np = _NumpyFallback()  # type: ignore
 
@@ -59,9 +60,9 @@ def cosine_similarity(sig1: Any, sig2: Any) -> float:
 
 def sig_to_bytes(sig: Any) -> bytes:
     """Convert a semantic signature to bytes for storage."""
-    if HAS_NUMPY and hasattr(sig, 'tobytes'):
+    if HAS_NUMPY and hasattr(sig, "tobytes"):
         return sig.tobytes()
-    return struct.pack(f'{len(sig)}f', *sig)
+    return struct.pack(f"{len(sig)}f", *sig)
 
 
 def sig_from_bytes(data: bytes) -> Any:
@@ -71,6 +72,6 @@ def sig_from_bytes(data: bytes) -> Any:
 
 def sig_to_list(sig: Any) -> List[float]:
     """Convert a semantic signature to a plain list."""
-    if hasattr(sig, 'tolist'):
+    if hasattr(sig, "tolist"):
         return sig.tolist()
     return list(sig)

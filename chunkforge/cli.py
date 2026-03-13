@@ -67,15 +67,20 @@ Examples:
         help="Start the HTTP REST server",
     )
     serve_parser.add_argument(
-        "--host", type=str, default="localhost",
+        "--host",
+        type=str,
+        default="localhost",
         help="Host to bind to (default: localhost)",
     )
     serve_parser.add_argument(
-        "--port", type=int, default=9876,
+        "--port",
+        type=int,
+        default=9876,
         help="Port to bind to (default: 9876)",
     )
     serve_parser.add_argument(
-        "--blocking", action="store_true",
+        "--blocking",
+        action="store_true",
         help="Run in blocking mode (default: background)",
     )
 
@@ -91,11 +96,13 @@ Examples:
         help="Index documents",
     )
     index_parser.add_argument(
-        "paths", nargs="+",
+        "paths",
+        nargs="+",
         help="Document paths to index",
     )
     index_parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Force re-indexing even if unchanged",
     )
 
@@ -109,11 +116,15 @@ Examples:
         help="Search query text",
     )
     search_parser.add_argument(
-        "--top-k", type=int, default=10,
+        "--top-k",
+        type=int,
+        default=10,
         help="Number of results (default: 10)",
     )
     search_parser.add_argument(
-        "--json", action="store_true", dest="output_json",
+        "--json",
+        action="store_true",
+        dest="output_json",
         help="Output as JSON",
     )
 
@@ -123,11 +134,14 @@ Examples:
         help="Detect changes in indexed documents",
     )
     detect_parser.add_argument(
-        "--session", type=str, default="default",
+        "--session",
+        type=str,
+        default="default",
         help="Session ID (default: default)",
     )
     detect_parser.add_argument(
-        "paths", nargs="*",
+        "paths",
+        nargs="*",
         help="Document paths to check (default: all indexed)",
     )
 
@@ -143,7 +157,8 @@ Examples:
         help="Clear all stored data",
     )
     clear_parser.add_argument(
-        "--confirm", action="store_true",
+        "--confirm",
+        action="store_true",
         help="Skip confirmation prompt",
     )
 
@@ -167,6 +182,7 @@ def cmd_serve(args: argparse.Namespace, chunkforge: ChunkForge) -> int:
 
             try:
                 import time
+
                 while True:
                     time.sleep(1)
             except KeyboardInterrupt:
@@ -182,9 +198,10 @@ def cmd_serve(args: argparse.Namespace, chunkforge: ChunkForge) -> int:
         return 0
 
 
-def cmd_serve_mcp(args: argparse.Namespace, chunkforge: ChunkForge) -> int:
+def cmd_serve_mcp(args: argparse.Namespace, chunkforge: Optional[ChunkForge]) -> int:
     """Start the stdio MCP server."""
     from chunkforge.mcp_stdio import main as mcp_main
+
     mcp_main(storage_dir=args.storage_dir)
     return 0
 
@@ -202,8 +219,10 @@ def cmd_index(args: argparse.Namespace, chunkforge: ChunkForge) -> int:
         print(f"\nIndexed {len(result['indexed'])} document(s):")
         for item in result["indexed"]:
             modality = item.get("modality", "unknown")
-            print(f"  {item['path']}: {item['chunk_count']} chunks, "
-                  f"{item['total_tokens']} tokens [{modality}]")
+            print(
+                f"  {item['path']}: {item['chunk_count']} chunks, "
+                f"{item['total_tokens']} tokens [{modality}]"
+            )
 
     if result["skipped"]:
         print(f"\nSkipped {len(result['skipped'])} unchanged document(s):")
@@ -285,7 +304,9 @@ def cmd_detect(args: argparse.Namespace, chunkforge: ChunkForge) -> int:
         for path in result["removed"]:
             print(f"  {path}")
 
-    print(f"\nCache: {result['kv_restored']} restored, {result['kv_reprocessed']} reprocessed")
+    print(
+        f"\nCache: {result['kv_restored']} restored, {result['kv_reprocessed']} reprocessed"
+    )
     return 0
 
 

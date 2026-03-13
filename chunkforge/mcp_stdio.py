@@ -33,6 +33,7 @@ try:
         Resource,
         ResourceTemplate,
     )
+
     HAS_MCP = True
 except ImportError:
     HAS_MCP = False
@@ -41,6 +42,7 @@ except ImportError:
 def _create_engine(storage_dir: Optional[str] = None):
     """Create a ChunkForge engine instance."""
     from chunkforge.engine import ChunkForge
+
     return ChunkForge(storage_dir=storage_dir)
 
 
@@ -171,15 +173,19 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
             else:
                 result = {"error": f"Unknown tool: {name}"}
 
-            return [TextContent(
-                type="text",
-                text=json.dumps(result, indent=2, default=str),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(result, indent=2, default=str),
+                )
+            ]
         except Exception as e:
-            return [TextContent(
-                type="text",
-                text=json.dumps({"error": str(e)}),
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps({"error": str(e)}),
+                )
+            ]
 
     @server.list_resources()
     async def list_resources() -> List[Resource]:
@@ -219,7 +225,7 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
             return json.dumps(docs, indent=2, default=str)
 
         if uri_str.startswith("chunkforge://document/"):
-            doc_path = uri_str[len("chunkforge://document/"):]
+            doc_path = uri_str[len("chunkforge://document/") :]
             chunks = engine.storage.search_chunks(document_path=doc_path)
             # Convert non-serializable fields
             for chunk in chunks:

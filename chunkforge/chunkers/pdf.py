@@ -14,6 +14,7 @@ from chunkforge.chunkers.base import BaseChunker, Chunk
 # Check for pymupdf
 try:
     import fitz  # pymupdf
+
     HAS_PYMUPDF = True
 except ImportError:
     HAS_PYMUPDF = False
@@ -23,15 +24,15 @@ except ImportError:
 class PDFChunker(BaseChunker):
     """
     Chunker for PDF files.
-    
+
     Supports:
     - Page-based chunking
     - Text extraction
     - Metadata extraction (title, author, etc.)
-    
+
     Requires: pymupdf (pip install chunkforge[pdf])
     """
-    
+
     def __init__(
         self,
         chunk_size: int = 256,
@@ -40,7 +41,7 @@ class PDFChunker(BaseChunker):
     ):
         """
         Initialize PDF chunker.
-        
+
         Args:
             chunk_size: Target tokens per chunk
             max_chunk_size: Maximum tokens per chunk
@@ -51,15 +52,15 @@ class PDFChunker(BaseChunker):
                 "pymupdf is required for PDF support. "
                 "Install with: pip install chunkforge[pdf]"
             )
-        
+
         self.chunk_size = chunk_size
         self.max_chunk_size = max_chunk_size
         self.pages_per_chunk = pages_per_chunk
-    
+
     def supported_extensions(self) -> List[str]:
         """Return supported PDF file extensions."""
         return [".pdf"]
-    
+
     def chunk(
         self,
         content: Any,
@@ -68,12 +69,12 @@ class PDFChunker(BaseChunker):
     ) -> List[Chunk]:
         """
         Split PDF into chunks.
-        
+
         Args:
             content: PDF content (bytes or file path)
             document_path: Path to source document
             **kwargs: Additional options
-            
+
         Returns:
             List of Chunk objects
         """
@@ -84,22 +85,22 @@ class PDFChunker(BaseChunker):
             doc = fitz.open(content)
         else:
             raise ValueError(f"Unsupported content type: {type(content)}")
-        
+
         try:
             # Extract metadata
             metadata = self._extract_metadata(doc)
-            
+
             # Chunk by pages
             chunks = self._chunk_by_pages(doc, document_path, metadata)
-            
+
             return chunks
         finally:
             doc.close()
-    
+
     def _extract_metadata(self, doc: Any) -> Dict[str, Any]:
         """Extract PDF metadata."""
         meta = doc.metadata or {}
-        
+
         return {
             "title": meta.get("title", ""),
             "author": meta.get("author", ""),
@@ -107,7 +108,7 @@ class PDFChunker(BaseChunker):
             "keywords": meta.get("keywords", ""),
             "page_count": doc.page_count,
         }
-    
+
     def _chunk_by_pages(
         self,
         doc: Any,
@@ -117,10 +118,10 @@ class PDFChunker(BaseChunker):
         """Create chunks from PDF pages."""
         chunks: List[Chunk] = []
         chunk_index = 0
-        
+
         for page_start in range(0, doc.page_count, self.pages_per_chunk):
             page_end = min(page_start + self.pages_per_chunk, doc.page_count)
-            
+
             # Extract text from pages
             text_parts = []
             for page_num in range(page_start, page_end):
@@ -128,16 +129,16 @@ class PDFChunker(BaseChunker):
                 text = page.get_text()
                 if text.strip():
                     text_parts.append(f"[Page {page_num + 1}]\n{text}")
-            
+
             if not text_parts:
                 continue
-            
+
             chunk_text = "\n\n".join(text_parts)
-            
+
             # Compute position (approximate)
             start_pos = page_start * 1000  # Approximate
             end_pos = page_end * 1000
-            
+
             chunk = Chunk(
                 content=chunk_text,
                 modality="pdf",
@@ -154,17 +155,19 @@ class PDFChunker(BaseChunker):
             )
             chunks.append(chunk)
             chunk_index += 1
-        
+
         # Handle empty PDF
         if not chunks:
-            chunks.append(Chunk(
-                content="",
-                modality="pdf",
-                start_pos=0,
-                end_pos=0,
-                document_path=document_path,
-                chunk_index=0,
-                metadata={"pdf_metadata": metadata},
-            ))
-        
+            chunks.append(
+                Chunk(
+                    content="",
+                    modality="pdf",
+                    start_pos=0,
+                    end_pos=0,
+                    document_path=document_path,
+                    chunk_index=0,
+                    metadata={"pdf_metadata": metadata},
+                )
+            )
+
         return chunks

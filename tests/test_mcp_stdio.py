@@ -85,5 +85,5 @@ class TestMCPStdioIntegration:
         result = engine.get_stats()
 
         assert "version" in result
-        assert result["version"] == "0.5.0"
+        assert result["version"] == "0.5.3"
         assert "index" in result

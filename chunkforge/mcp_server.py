@@ -37,39 +37,39 @@ logger = logging.getLogger(__name__)
 class MCPRequestHandler(BaseHTTPRequestHandler):
     """
     HTTP request handler for MCP server.
-    
+
     Handles tool discovery and execution requests from agents.
     """
-    
+
     def __init__(self, *args: Any, chunkforge: ChunkForge, **kwargs: Any):
         """Initialize with ChunkForge instance."""
         self.chunkforge = chunkforge
         super().__init__(*args, **kwargs)
-    
+
     def log_message(self, format: str, *args: Any) -> None:
         """Override to use our logger."""
         logger.info(format % args)
-    
+
     def do_GET(self) -> None:
         """Handle GET requests (tool discovery)."""
         parsed = urlparse(self.path)
-        
+
         if parsed.path == "/tools":
             self._handle_tools_discovery()
         elif parsed.path == "/health":
             self._handle_health()
         else:
             self._send_error(404, "Not found")
-    
+
     def do_POST(self) -> None:
         """Handle POST requests (tool execution)."""
         parsed = urlparse(self.path)
-        
+
         if parsed.path == "/call":
             self._handle_tool_call()
         else:
             self._send_error(404, "Not found")
-    
+
     def _handle_tools_discovery(self) -> None:
         """Return list of available tools."""
         tools = [
@@ -252,18 +252,20 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                 },
             },
         ]
-        
+
         self._send_json_response({"tools": tools})
-    
+
     def _handle_health(self) -> None:
         """Return health status."""
         stats = self.chunkforge.get_stats()
-        self._send_json_response({
-            "status": "healthy",
-            "version": stats["version"],
-            "storage": stats["storage"],
-        })
-    
+        self._send_json_response(
+            {
+                "status": "healthy",
+                "version": stats["version"],
+                "storage": stats["storage"],
+            }
+        )
+
     def _handle_tool_call(self) -> None:
         """Handle tool execution request."""
         try:
@@ -271,32 +273,34 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
             request = json.loads(body.decode("utf-8"))
-            
+
             tool_name = request.get("tool")
             parameters = request.get("parameters", {})
-            
+
             if not tool_name:
                 self._send_error(400, "Missing 'tool' field")
                 return
-            
+
             # Execute tool
             result = self._execute_tool(tool_name, parameters)
             self._send_json_response(result)
-            
+
         except json.JSONDecodeError:
             self._send_error(400, "Invalid JSON")
         except Exception as e:
             logger.exception("Error executing tool")
             self._send_error(500, str(e))
-    
-    def _execute_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+
+    def _execute_tool(
+        self, tool_name: str, parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Execute a ChunkForge tool.
-        
+
         Args:
             tool_name: Name of the tool to execute
             parameters: Tool parameters
-            
+
         Returns:
             Tool execution result
         """
@@ -311,35 +315,42 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "search": self.chunkforge.search,
             "get_context": self.chunkforge.get_context,
         }
-        
+
         # Multi-modal tools
         if tool_name == "detect_modality":
             path = parameters.get("path", "")
             modality = self.chunkforge.detect_modality(path)
             return {"success": True, "result": {"path": path, "modality": modality}}
-        
+
         if tool_name == "get_supported_formats":
             formats = {
                 "text": self.chunkforge.chunkers["text"].supported_extensions(),
                 "code": self.chunkforge.chunkers["code"].supported_extensions(),
             }
             if HAS_IMAGE_CHUNKER:
-                formats["image"] = self.chunkforge.chunkers["image"].supported_extensions()
+                formats["image"] = self.chunkforge.chunkers[
+                    "image"
+                ].supported_extensions()
             if HAS_PDF_CHUNKER:
                 formats["pdf"] = self.chunkforge.chunkers["pdf"].supported_extensions()
             if HAS_AUDIO_CHUNKER:
-                formats["audio"] = self.chunkforge.chunkers["audio"].supported_extensions()
+                formats["audio"] = self.chunkforge.chunkers[
+                    "audio"
+                ].supported_extensions()
             if HAS_VIDEO_CHUNKER:
-                formats["video"] = self.chunkforge.chunkers["video"].supported_extensions()
-            
+                formats["video"] = self.chunkforge.chunkers[
+                    "video"
+                ].supported_extensions()
+
             return {"success": True, "result": {"formats": formats}}
-        
+
         if tool_name not in tool_map:
             return {
                 "error": f"Unknown tool: {tool_name}",
-                "available_tools": list(tool_map.keys()) + ["detect_modality", "get_supported_formats"],
+                "available_tools": list(tool_map.keys())
+                + ["detect_modality", "get_supported_formats"],
             }
-        
+
         try:
             result = tool_map[tool_name](**parameters)
             return {"success": True, "result": result}
@@ -351,19 +362,19 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             return {
                 "error": f"Tool execution failed: {e}",
             }
-    
+
     def _send_json_response(self, data: Dict[str, Any], status: int = 200) -> None:
         """Send JSON response."""
         response = json.dumps(data, indent=2).encode("utf-8")
-        
+
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(response)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        
+
         self.wfile.write(response)
-    
+
     def _send_error(self, status: int, message: str) -> None:
         """Send error response."""
         self._send_json_response({"error": message}, status)
@@ -372,11 +383,11 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
 class MCPServer:
     """
     MCP server for ChunkForge.
-    
+
     Provides a minimal HTTP server that exposes ChunkForge tools
     for compatible coding agents.
     """
-    
+
     def __init__(
         self,
         chunkforge: ChunkForge,
@@ -385,7 +396,7 @@ class MCPServer:
     ):
         """
         Initialize MCP server.
-        
+
         Args:
             chunkforge: ChunkForge instance to use
             host: Host to bind to (default: localhost)
@@ -396,27 +407,28 @@ class MCPServer:
         self.port = port
         self.server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
-    
+
     def start(self, blocking: bool = False) -> None:
         """
         Start the MCP server.
-        
+
         Args:
             blocking: If True, block the current thread. If False, run in background.
         """
+
         # Create handler factory
         def handler_factory(*args: Any, **kwargs: Any) -> MCPRequestHandler:
             return MCPRequestHandler(*args, chunkforge=self.chunkforge, **kwargs)
-        
+
         # Create server
         self.server = HTTPServer((self.host, self.port), handler_factory)
-        
+
         logger.info(f"ChunkForge MCP server starting on http://{self.host}:{self.port}")
         logger.info("Available endpoints:")
         logger.info("  GET  /tools   - Discover available tools")
         logger.info("  GET  /health  - Health check")
         logger.info("  POST /call    - Execute a tool")
-        
+
         if blocking:
             self.server.serve_forever()
         else:
@@ -427,18 +439,18 @@ class MCPServer:
             )
             self._thread.start()
             logger.info("Server running in background thread")
-    
+
     def stop(self) -> None:
         """Stop the MCP server."""
         if self.server:
             logger.info("Stopping ChunkForge MCP server")
             self.server.shutdown()
             self.server = None
-        
+
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
-    
+
     def get_url(self) -> str:
         """Get the server URL."""
         return f"http://{self.host}:{self.port}"

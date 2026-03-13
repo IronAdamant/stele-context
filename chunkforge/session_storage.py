@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 try:
     import msgspec
+
     HAS_MSGSPEC = True
 except ImportError:
     HAS_MSGSPEC = False
@@ -46,11 +47,14 @@ class SessionStorage:
         """Create a new session (no-op if exists)."""
         now = time.time()
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR IGNORE INTO sessions
                 (session_id, created_at, last_updated, turn_count, total_tokens)
                 VALUES (?, ?, ?, 0, 0)
-            """, (session_id, now, now))
+            """,
+                (session_id, now, now),
+            )
             conn.commit()
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -86,8 +90,7 @@ class SessionStorage:
 
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                f"UPDATE sessions SET {', '.join(updates)} WHERE session_id = ?",
-                params
+                f"UPDATE sessions SET {', '.join(updates)} WHERE session_id = ?", params
             )
             conn.commit()
 
@@ -128,11 +131,14 @@ class SessionStorage:
         kv_path.write_bytes(zlib.compress(encoded))
 
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO session_chunks
                 (session_id, chunk_id, turn_number, kv_path, relevance_score)
                 VALUES (?, ?, ?, ?, ?)
-            """, (session_id, chunk_id, turn_number, str(kv_path), relevance_score))
+            """,
+                (session_id, chunk_id, turn_number, str(kv_path), relevance_score),
+            )
             conn.commit()
 
         return str(kv_path)
@@ -145,10 +151,13 @@ class SessionStorage:
     ) -> Optional[Any]:
         """Load KV-cache state for a chunk in a session."""
         with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT kv_path FROM session_chunks
                 WHERE session_id = ? AND chunk_id = ? AND turn_number = ?
-            """, (session_id, chunk_id, turn_number))
+            """,
+                (session_id, chunk_id, turn_number),
+            )
             row = cursor.fetchone()
 
         if row is None or row[0] is None:
@@ -186,21 +195,27 @@ class SessionStorage:
             conn.row_factory = sqlite3.Row
 
             if turn_number is not None:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT sc.*, c.content_hash, c.semantic_signature, c.token_count
                     FROM session_chunks sc
                     JOIN chunks c ON sc.chunk_id = c.chunk_id
                     WHERE sc.session_id = ? AND sc.turn_number = ?
                     ORDER BY sc.relevance_score DESC
-                """, (session_id, turn_number))
+                """,
+                    (session_id, turn_number),
+                )
             else:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT sc.*, c.content_hash, c.semantic_signature, c.token_count
                     FROM session_chunks sc
                     JOIN chunks c ON sc.chunk_id = c.chunk_id
                     WHERE sc.session_id = ?
                     ORDER BY sc.turn_number DESC, sc.relevance_score DESC
-                """, (session_id,))
+                """,
+                    (session_id,),
+                )
 
             return [dict(row) for row in cursor.fetchall()]
 
@@ -208,8 +223,7 @@ class SessionStorage:
         """Rollback session to a previous turn. Returns chunks removed."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "SELECT turn_count FROM sessions WHERE session_id = ?",
-                (session_id,)
+                "SELECT turn_count FROM sessions WHERE session_id = ?", (session_id,)
             )
             row = cursor.fetchone()
             if row is None:
@@ -219,16 +233,22 @@ class SessionStorage:
             if target_turn >= current_turn:
                 return 0
 
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 DELETE FROM session_chunks
                 WHERE session_id = ? AND turn_number > ?
-            """, (session_id, target_turn))
+            """,
+                (session_id, target_turn),
+            )
             removed_count = cursor.rowcount
 
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE sessions SET turn_count = ?, last_updated = ?
                 WHERE session_id = ?
-            """, (target_turn, time.time(), session_id))
+            """,
+                (target_turn, time.time(), session_id),
+            )
 
             conn.commit()
 
@@ -240,13 +260,16 @@ class SessionStorage:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT sc.chunk_id, sc.turn_number, c.token_count, sc.relevance_score
                 FROM session_chunks sc
                 JOIN chunks c ON sc.chunk_id = c.chunk_id
                 WHERE sc.session_id = ?
                 ORDER BY sc.relevance_score ASC
-            """, (session_id,))
+            """,
+                (session_id,),
+            )
 
             chunks = [dict(row) for row in cursor.fetchall()]
 
@@ -259,20 +282,26 @@ class SessionStorage:
                 if total_tokens <= max_tokens:
                     break
 
-                conn.execute("""
+                conn.execute(
+                    """
                     DELETE FROM session_chunks
                     WHERE session_id = ? AND chunk_id = ? AND turn_number = ?
-                """, (session_id, chunk["chunk_id"], chunk["turn_number"]))
+                """,
+                    (session_id, chunk["chunk_id"], chunk["turn_number"]),
+                )
 
                 total_tokens -= chunk["token_count"]
                 pruned_count += 1
 
             # Update total_tokens in sessions table
             if pruned_count > 0:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE sessions SET total_tokens = ?, last_updated = ?
                     WHERE session_id = ?
-                """, (total_tokens, time.time(), session_id))
+                """,
+                    (total_tokens, time.time(), session_id),
+                )
 
             conn.commit()
 
@@ -287,8 +316,7 @@ class SessionStorage:
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "SELECT kv_path FROM session_chunks WHERE session_id = ?",
-                (session_id,)
+                "SELECT kv_path FROM session_chunks WHERE session_id = ?", (session_id,)
             )
             referenced_paths = {row[0] for row in cursor.fetchall() if row[0]}
 
