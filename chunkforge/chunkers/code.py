@@ -9,7 +9,7 @@ import ast
 import re
 from typing import Any, Dict, List
 
-from chunkforge.chunkers.base import BaseChunker, Chunk
+from chunkforge.chunkers.base import BaseChunker, Chunk, estimate_tokens
 
 
 class CodeChunker(BaseChunker):
@@ -171,18 +171,19 @@ class CodeChunker(BaseChunker):
         # Create chunks from definitions
         current_chunk_lines: List[str] = []
         current_start = 0
+        current_tokens = 0
         last_end = 0
 
         for defn in definitions:
             # Add lines before this definition to current chunk
             if defn["start_line"] > last_end:
-                current_chunk_lines.extend(lines[last_end : defn["start_line"]])
+                pre_lines = lines[last_end : defn["start_line"]]
+                current_chunk_lines.extend(pre_lines)
+                current_tokens += estimate_tokens("".join(pre_lines))
 
             # Check if adding this definition would exceed chunk size
             def_lines = lines[defn["start_line"] : defn["end_line"]]
-            def_tokens = sum(len(line) for line in def_lines) // 4
-
-            current_tokens = sum(len(line) for line in current_chunk_lines) // 4
+            def_tokens = estimate_tokens("".join(def_lines))
 
             if current_tokens + def_tokens > self.chunk_size and current_chunk_lines:
                 # Create chunk from accumulated lines
@@ -203,9 +204,11 @@ class CodeChunker(BaseChunker):
                 # Start new chunk
                 current_start = current_start + len("".join(current_chunk_lines))
                 current_chunk_lines = []
+                current_tokens = 0
 
             # Add definition to current chunk
             current_chunk_lines.extend(def_lines)
+            current_tokens += def_tokens
             last_end = defn["end_line"]
 
         # Add remaining lines
@@ -377,8 +380,10 @@ class CodeChunker(BaseChunker):
         chunks: List[Chunk] = []
         chunk_index = 0
 
-        # Estimate lines per chunk (assuming ~4 tokens per line)
-        lines_per_chunk = max(1, self.chunk_size // 4)
+        # Estimate lines per chunk from actual content
+        total_tokens = estimate_tokens(content) if content else 1
+        avg_tokens_per_line = max(1, total_tokens // max(len(lines), 1))
+        lines_per_chunk = max(1, self.chunk_size // avg_tokens_per_line)
 
         for i in range(0, len(lines), lines_per_chunk):
             chunk_lines = lines[i : i + lines_per_chunk]

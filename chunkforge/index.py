@@ -94,9 +94,13 @@ class HNSWIndex:
             level += 1
         return level
 
-    def _distance(self, vec1: List[float], vec2: List[float]) -> float:
-        """Compute Euclidean distance between vectors."""
-        return math.sqrt(sum((a - b) ** 2 for a, b in zip(vec1, vec2)))
+    def _distance(self, vec1: Any, vec2: Any) -> float:
+        """Distance for normalized vectors (1 - dot product).
+
+        For L2-normalized vectors this preserves the same ordering as
+        Euclidean distance but avoids the sqrt and per-element subtract.
+        """
+        return 1.0 - sum(a * b for a, b in zip(vec1, vec2))
 
     def _cosine_similarity(
         self,
@@ -396,11 +400,30 @@ class HNSWIndex:
 
         node = self.nodes[node_id]
 
-        # Remove connections from neighbors
+        # Remove connections and repair graph connectivity
         for level, neighbors in node.connections.items():
-            for neighbor_id in neighbors:
-                if neighbor_id in self.nodes:
-                    self.nodes[neighbor_id].connections[level].discard(node_id)
+            neighbor_list = [n for n in neighbors if n in self.nodes]
+            max_conn = self.M_max0 if level == 0 else self.M
+
+            # Remove the deleted node from all neighbours
+            for neighbor_id in neighbor_list:
+                self.nodes[neighbor_id].connections[level].discard(node_id)
+
+            # Reconnect neighbours to each other to prevent graph fragmentation
+            for neighbor_id in neighbor_list:
+                neighbor = self.nodes[neighbor_id]
+                if len(neighbor.connections[level]) < max_conn:
+                    for other_id in neighbor_list:
+                        if (
+                            other_id != neighbor_id
+                            and other_id not in neighbor.connections[level]
+                        ):
+                            if len(neighbor.connections[level]) >= max_conn:
+                                break
+                            neighbor.connections[level].add(other_id)
+                            self.nodes[other_id].connections[level].add(
+                                neighbor_id
+                            )
 
         # Remove node
         del self.nodes[node_id]
@@ -522,7 +545,6 @@ class VectorIndex:
             ef_construction=ef_construction,
             ef_search=ef_search,
         )
-        self.chunk_vectors: Dict[str, List[float]] = {}
 
     def add_chunk(self, chunk_id: str, vector: List[float]) -> None:
         """
@@ -532,7 +554,6 @@ class VectorIndex:
             chunk_id: Chunk identifier
             vector: Semantic signature vector
         """
-        self.chunk_vectors[chunk_id] = vector
         self.index.insert(chunk_id, vector)
 
     def search(
@@ -562,29 +583,25 @@ class VectorIndex:
         Returns:
             True if removed
         """
-        if chunk_id in self.chunk_vectors:
-            del self.chunk_vectors[chunk_id]
         return self.index.remove(chunk_id)
 
     def get_stats(self) -> Dict[str, Any]:
         """Get index statistics."""
         stats = self.index.get_stats()
-        stats["chunk_count"] = len(self.chunk_vectors)
+        stats["chunk_count"] = len(self.index.nodes)
         return stats
 
     def clear(self) -> None:
         """Clear all chunks from the index."""
         self.index.clear()
-        self.chunk_vectors.clear()
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize to dict (HNSW graph + chunk vectors)."""
-        return {"hnsw": self.index.to_dict(), "vectors": self.chunk_vectors}
+        """Serialize to dict (HNSW graph with embedded vectors)."""
+        return {"hnsw": self.index.to_dict()}
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "VectorIndex":
-        """Reconstruct from serialized dict."""
+        """Reconstruct from serialized dict (handles old and new format)."""
         vi = cls.__new__(cls)
         vi.index = HNSWIndex.from_dict(data["hnsw"])
-        vi.chunk_vectors = data["vectors"]
         return vi

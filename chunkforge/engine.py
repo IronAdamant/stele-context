@@ -44,6 +44,13 @@ class ChunkForge:
     DEFAULT_MAX_CHUNK_SIZE = 4096
     DEFAULT_MERGE_THRESHOLD = 0.7
     DEFAULT_CHANGE_THRESHOLD = 0.85
+    DEFAULT_SEARCH_ALPHA = 0.7
+
+    MODALITY_THRESHOLDS = {
+        "text": {"merge": 0.70, "change": 0.85},
+        "code": {"merge": 0.85, "change": 0.80},
+        "pdf": {"merge": 0.75, "change": 0.85},
+    }
 
     def __init__(
         self,
@@ -52,15 +59,19 @@ class ChunkForge:
         max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
         merge_threshold: float = DEFAULT_MERGE_THRESHOLD,
         change_threshold: float = DEFAULT_CHANGE_THRESHOLD,
+        search_alpha: float = DEFAULT_SEARCH_ALPHA,
     ):
         self.storage = StorageBackend(storage_dir)
         self.chunk_size = chunk_size
         self.max_chunk_size = max_chunk_size
         self.merge_threshold = merge_threshold
         self.change_threshold = change_threshold
+        self.search_alpha = search_alpha
         self._init_chunkers()
         self.vector_index = self._load_or_rebuild_index()
         self.session_manager = SessionManager(self.storage, self.vector_index)
+        self.bm25_index = None
+        self._bm25_ready = False
 
     def _init_chunkers(self) -> None:
         """Initialize modality-specific chunkers."""
@@ -107,7 +118,7 @@ class ChunkForge:
                 sig = sig_from_bytes(chunk["semantic_signature"])
                 index.add_chunk(chunk["chunk_id"], sig_to_list(sig))
             except Exception:
-                pass
+                continue
         save_index(index, current_hash, self.storage.index_dir)
         return index
 
@@ -115,6 +126,56 @@ class ChunkForge:
         """Persist current index to disk."""
         current_hash = compute_chunk_ids_hash(self.storage)
         save_index(self.vector_index, current_hash, self.storage.index_dir)
+
+    def _ensure_bm25(self) -> None:
+        """Lazily initialize BM25 index from stored chunk content."""
+        if self._bm25_ready:
+            return
+        from chunkforge.bm25 import BM25Index
+
+        self.bm25_index = BM25Index()
+        for chunk in self.storage.search_chunks():
+            content = chunk.get("content")
+            if content:
+                self.bm25_index.add_document(chunk["chunk_id"], content)
+        self._bm25_ready = True
+
+    def _persist_chunks(
+        self, chunks: List[Chunk], doc_path: str
+    ) -> None:
+        """Store chunks and add them to the vector and keyword indexes."""
+        for chunk in chunks:
+            chunk_content = (
+                chunk.content if isinstance(chunk.content, str) else None
+            )
+            self.storage.store_chunk(
+                chunk_id=chunk.chunk_id,
+                document_path=doc_path,
+                content_hash=chunk.content_hash,
+                semantic_signature=chunk.semantic_signature,
+                start_pos=chunk.start_pos,
+                end_pos=chunk.end_pos,
+                token_count=chunk.token_count,
+                content=chunk_content,
+            )
+            self.vector_index.add_chunk(
+                chunk.chunk_id,
+                sig_to_list(chunk.semantic_signature),
+            )
+            if self._bm25_ready and chunk_content:
+                self.bm25_index.add_document(chunk.chunk_id, chunk_content)
+
+    def _remove_stale_chunks(
+        self, old_ids: set, new_ids: set
+    ) -> None:
+        """Remove chunks that no longer exist after re-indexing."""
+        stale_ids = old_ids - new_ids
+        if stale_ids:
+            for cid in stale_ids:
+                self.vector_index.remove_chunk(cid)
+                if self._bm25_ready:
+                    self.bm25_index.remove_document(cid)
+            self.storage.delete_chunks(list(stale_ids))
 
     def detect_modality(self, file_path: str) -> str:
         """Detect file modality."""
@@ -169,45 +230,39 @@ class ChunkForge:
                         )
                         continue
 
+                # Build signature cache from old chunks (skip recomputation)
+                old_chunks_meta = []
+                if existing_doc:
+                    old_chunks_meta = self.storage.get_document_chunks(
+                        str(path)
+                    )
+                sig_cache = {
+                    c["content_hash"]: c["semantic_signature"]
+                    for c in old_chunks_meta
+                }
+
                 # Route through appropriate chunker
                 modality = self.detect_modality(str(path))
                 chunker = self.chunkers.get(modality, self.chunkers["text"])
                 chunks = chunker.chunk(content, str(path))
 
+                # Inject cached signatures for unchanged chunks
+                for chunk in chunks:
+                    cached_sig = sig_cache.get(chunk.content_hash)
+                    if cached_sig is not None:
+                        chunk._semantic_signature = sig_from_bytes(cached_sig)
+
                 # Post-process: merge similar adjacent chunks
                 chunks = self._merge_similar_chunks(chunks)
 
                 # Clean up stale chunks from previous indexing
-                if existing_doc:
-                    old_chunks = self.storage.get_document_chunks(str(path))
-                    old_ids = {c["chunk_id"] for c in old_chunks}
+                if old_chunks_meta:
+                    old_ids = {c["chunk_id"] for c in old_chunks_meta}
                     new_ids = {c.chunk_id for c in chunks}
-                    stale_ids = old_ids - new_ids
-                    if stale_ids:
-                        for cid in stale_ids:
-                            self.vector_index.remove_chunk(cid)
-                        self.storage.delete_chunks(list(stale_ids))
+                    self._remove_stale_chunks(old_ids, new_ids)
 
                 # Store chunks with content
-                for chunk in chunks:
-                    chunk_content = (
-                        chunk.content if isinstance(chunk.content, str) else None
-                    )
-                    self.storage.store_chunk(
-                        chunk_id=chunk.chunk_id,
-                        document_path=str(path),
-                        content_hash=chunk.content_hash,
-                        semantic_signature=chunk.semantic_signature,
-                        start_pos=chunk.start_pos,
-                        end_pos=chunk.end_pos,
-                        token_count=chunk.token_count,
-                        content=chunk_content,
-                    )
-                    # Add to HNSW index
-                    self.vector_index.add_chunk(
-                        chunk.chunk_id,
-                        sig_to_list(chunk.semantic_signature),
-                    )
+                self._persist_chunks(chunks, str(path))
 
                 last_modified = path.stat().st_mtime
                 self.storage.store_document(
@@ -247,60 +302,44 @@ class ChunkForge:
         return result
 
     def _merge_similar_chunks(self, chunks: List[Chunk]) -> List[Chunk]:
-        """Merge adjacent chunks with high similarity."""
+        """Merge adjacent chunks with high similarity (single-pass).
+
+        Uses modality-specific merge thresholds: code chunks require
+        higher similarity to merge (preserving AST boundaries), while
+        prose chunks merge more aggressively.
+        """
         if len(chunks) <= 1:
             return chunks
 
-        merged = list(chunks)
-        changed = True
+        modality = chunks[0].modality if chunks else "text"
+        threshold = self.MODALITY_THRESHOLDS.get(modality, {}).get(
+            "merge", self.merge_threshold
+        )
 
-        while changed:
-            changed = False
-            new_merged: List[Chunk] = []
-            i = 0
+        merged = [chunks[0]]
+        for chunk in chunks[1:]:
+            current = merged[-1]
+            similarity = current.similarity(chunk)
+            combined_tokens = current.token_count + chunk.token_count
 
-            while i < len(merged):
-                if i == len(merged) - 1:
-                    new_merged.append(merged[i])
-                    i += 1
-                    continue
-
-                current = merged[i]
-                next_chunk = merged[i + 1]
-
-                similarity = current.similarity(next_chunk)
-                combined_tokens = current.token_count + next_chunk.token_count
-                should_merge = (
-                    similarity >= self.merge_threshold
-                    and combined_tokens <= self.max_chunk_size
+            if (
+                similarity >= threshold
+                and combined_tokens <= self.max_chunk_size
+                and isinstance(current.content, str)
+                and isinstance(chunk.content, str)
+            ):
+                merged_content = current.content + "\n\n" + chunk.content
+                merged[-1] = Chunk(
+                    content=merged_content,
+                    modality=current.modality,
+                    start_pos=current.start_pos,
+                    end_pos=chunk.end_pos,
+                    document_path=current.document_path,
+                    chunk_index=current.chunk_index,
+                    metadata={**current.metadata, **chunk.metadata},
                 )
-
-                if should_merge:
-                    # Merge content based on type
-                    if isinstance(current.content, str) and isinstance(
-                        next_chunk.content, str
-                    ):
-                        merged_content = current.content + "\n\n" + next_chunk.content
-                    else:
-                        merged_content = current.content
-
-                    merged_chunk = Chunk(
-                        content=merged_content,
-                        modality=current.modality,
-                        start_pos=current.start_pos,
-                        end_pos=next_chunk.end_pos,
-                        document_path=current.document_path,
-                        chunk_index=current.chunk_index,
-                        metadata={**current.metadata, **next_chunk.metadata},
-                    )
-                    new_merged.append(merged_chunk)
-                    i += 2
-                    changed = True
-                else:
-                    new_merged.append(current)
-                    i += 1
-
-            merged = new_merged
+            else:
+                merged.append(chunk)
 
         return merged
 
@@ -455,6 +494,7 @@ class ChunkForge:
 
             if not path.exists():
                 results["removed"].append(doc_path)
+                self.remove_document(doc_path)
                 continue
 
             try:
@@ -494,10 +534,24 @@ class ChunkForge:
                 # Re-chunk through proper chunker
                 modality = self.detect_modality(doc_path)
                 chunker = self.chunkers.get(modality, self.chunkers["text"])
-                new_chunks = chunker.chunk(content, doc_path)
-                new_chunks = self._merge_similar_chunks(new_chunks)
+                change_thresh = self.MODALITY_THRESHOLDS.get(
+                    modality, {}
+                ).get("change", self.change_threshold)
 
                 old_chunks_meta = self.storage.get_document_chunks(doc_path)
+
+                # Inject cached signatures for unchanged chunks
+                sig_cache = {
+                    c["content_hash"]: c["semantic_signature"]
+                    for c in old_chunks_meta
+                }
+                new_chunks = chunker.chunk(content, doc_path)
+                for nc in new_chunks:
+                    cached = sig_cache.get(nc.content_hash)
+                    if cached is not None:
+                        nc._semantic_signature = sig_from_bytes(cached)
+                new_chunks = self._merge_similar_chunks(new_chunks)
+
                 old_by_pos: Dict = {}
                 for meta in old_chunks_meta:
                     old_by_pos[(meta["start_pos"], meta["end_pos"])] = meta
@@ -511,7 +565,7 @@ class ChunkForge:
                         )
                         if (
                             search_results
-                            and search_results[0][1] >= self.change_threshold
+                            and search_results[0][1] >= change_thresh
                         ):
                             results["kv_restored"] += 1
                         else:
@@ -531,40 +585,16 @@ class ChunkForge:
                             old_sig, new_chunk.semantic_signature
                         )
 
-                        if similarity >= self.change_threshold:
+                        if similarity >= change_thresh:
                             results["kv_restored"] += 1
                         else:
                             results["kv_reprocessed"] += 1
 
-                    # Persist updated chunk
-                    chunk_content = (
-                        new_chunk.content
-                        if isinstance(new_chunk.content, str)
-                        else None
-                    )
-                    self.storage.store_chunk(
-                        chunk_id=new_chunk.chunk_id,
-                        document_path=doc_path,
-                        content_hash=new_chunk.content_hash,
-                        semantic_signature=new_chunk.semantic_signature,
-                        start_pos=new_chunk.start_pos,
-                        end_pos=new_chunk.end_pos,
-                        token_count=new_chunk.token_count,
-                        content=chunk_content,
-                    )
-                    self.vector_index.add_chunk(
-                        new_chunk.chunk_id,
-                        sig_to_list(new_chunk.semantic_signature),
-                    )
-
-                # Clean up stale chunks
+                # Persist updated chunks and clean up stale ones
+                self._persist_chunks(new_chunks, doc_path)
                 old_chunk_ids = {m["chunk_id"] for m in old_chunks_meta}
                 new_chunk_ids = {c.chunk_id for c in new_chunks}
-                stale_ids = old_chunk_ids - new_chunk_ids
-                if stale_ids:
-                    for cid in stale_ids:
-                        self.vector_index.remove_chunk(cid)
-                    self.storage.delete_chunks(list(stale_ids))
+                self._remove_stale_chunks(old_chunk_ids, new_chunk_ids)
 
                 # Update document record
                 self.storage.store_document(
@@ -588,7 +618,12 @@ class ChunkForge:
         query: str,
         top_k: int = 10,
     ) -> List[Dict[str, Any]]:
-        """Semantic search across all indexed chunks."""
+        """Hybrid semantic + keyword search across all indexed chunks.
+
+        Combines HNSW vector similarity with BM25 keyword scoring.
+        The blend is controlled by search_alpha (1.0 = pure vector,
+        0.0 = pure keyword).
+        """
         query_chunk = Chunk(
             content=query,
             modality="text",
@@ -598,10 +633,40 @@ class ChunkForge:
         )
 
         query_sig = sig_to_list(query_chunk.semantic_signature)
-        search_results = self.vector_index.search(query_sig, k=top_k)
+
+        # Widen HNSW candidate set for re-ranking
+        hnsw_results = self.vector_index.search(query_sig, k=top_k * 3)
+
+        if not hnsw_results:
+            return []
+
+        # BM25 re-ranking
+        self._ensure_bm25()
+        candidate_ids = [cid for cid, _ in hnsw_results]
+        hnsw_scores = {cid: score for cid, score in hnsw_results}
+        bm25_scores = self.bm25_index.score_batch(query, candidate_ids)
+
+        # Normalize BM25 scores to [0, 1]
+        max_bm25 = max(bm25_scores.values()) if bm25_scores else 0.0
+        if max_bm25 > 0:
+            bm25_norm = {k: v / max_bm25 for k, v in bm25_scores.items()}
+        else:
+            bm25_norm = bm25_scores
+
+        # Blend: alpha * vector + (1 - alpha) * keyword
+        alpha = self.search_alpha
+        combined = {}
+        for cid in candidate_ids:
+            vec_score = hnsw_scores.get(cid, 0.0)
+            kw_score = bm25_norm.get(cid, 0.0)
+            combined[cid] = alpha * vec_score + (1.0 - alpha) * kw_score
+
+        ranked = sorted(
+            combined.items(), key=lambda x: x[1], reverse=True
+        )[:top_k]
 
         results = []
-        for chunk_id, similarity_score in search_results:
+        for chunk_id, score in ranked:
             chunk_meta = self.storage.get_chunk(chunk_id)
             if chunk_meta is None:
                 continue
@@ -613,7 +678,7 @@ class ChunkForge:
                     "chunk_id": chunk_id,
                     "content": content,
                     "document_path": chunk_meta["document_path"],
-                    "relevance_score": float(similarity_score),
+                    "relevance_score": float(score),
                     "token_count": chunk_meta["token_count"],
                     "start_pos": chunk_meta["start_pos"],
                     "end_pos": chunk_meta["end_pos"],
@@ -725,5 +790,6 @@ class ChunkForge:
                 "max_chunk_size": self.max_chunk_size,
                 "merge_threshold": self.merge_threshold,
                 "change_threshold": self.change_threshold,
+                "search_alpha": self.search_alpha,
             },
         }

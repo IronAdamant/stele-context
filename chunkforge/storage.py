@@ -286,27 +286,24 @@ class StorageBackend:
 
     def get_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve chunk metadata by ID."""
+        now = time.time()
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM chunks WHERE chunk_id = ?", (chunk_id,)
-            )
-            row = cursor.fetchone()
-
-            if row is None:
-                return None
-
             conn.execute(
                 """
                 UPDATE chunks
                 SET last_accessed = ?, access_count = access_count + 1
                 WHERE chunk_id = ?
             """,
-                (time.time(), chunk_id),
+                (now, chunk_id),
             )
+            cursor = conn.execute(
+                "SELECT * FROM chunks WHERE chunk_id = ?", (chunk_id,)
+            )
+            row = cursor.fetchone()
             conn.commit()
 
-            return dict(row)
+            return dict(row) if row else None
 
     def get_chunk_content(self, chunk_id: str) -> Optional[str]:
         """Retrieve chunk text content by ID."""
@@ -345,15 +342,6 @@ class StorageBackend:
                     "SELECT * FROM chunks ORDER BY document_path, start_pos"
                 )
 
-            return [dict(row) for row in cursor.fetchall()]
-
-    def get_chunks_by_hash(self, content_hash: str) -> List[Dict[str, Any]]:
-        """Find all chunks with a given content hash."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM chunks WHERE content_hash = ?", (content_hash,)
-            )
             return [dict(row) for row in cursor.fetchall()]
 
     def get_document_chunks(self, document_path: str) -> List[Dict[str, Any]]:
@@ -546,7 +534,7 @@ class StorageBackend:
             history_count = cursor.fetchone()[0]
 
         kv_size = sum(f.stat().st_size for f in self.kv_dir.rglob("*") if f.is_file())
-        db_size = self.db_path.stat().st_size if self.db_path.exists() else 0
+        db_size = self.db_path.stat().st_size
 
         return {
             "chunk_count": chunk_count,
@@ -604,13 +592,32 @@ class StorageBackend:
                 (document_path,),
             )
             annotations_removed = cursor.rowcount
-            conn.commit()
 
-        # Delete chunks and their related data
-        chunks_removed = self.delete_chunks(chunk_ids)
+            # Delete chunks and their related data
+            if chunk_ids:
+                placeholders = ",".join("?" * len(chunk_ids))
+                conn.execute(
+                    f"DELETE FROM session_chunks WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
+                conn.execute(
+                    f"DELETE FROM chunk_history WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
+                conn.execute(
+                    f"DELETE FROM annotations WHERE target IN ({placeholders}) "
+                    "AND target_type = 'chunk'",
+                    chunk_ids,
+                )
+                cursor = conn.execute(
+                    f"DELETE FROM chunks WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
+                chunks_removed = cursor.rowcount
+            else:
+                chunks_removed = 0
 
-        # Delete document record
-        with sqlite3.connect(self.db_path) as conn:
+            # Delete document record
             conn.execute(
                 "DELETE FROM documents WHERE document_path = ?", (document_path,)
             )
@@ -638,16 +645,3 @@ class StorageBackend:
         for kv_file in self.kv_dir.rglob("*.kv"):
             kv_file.unlink()
 
-    def get_chunk_history(self, chunk_id: str) -> List[Dict[str, Any]]:
-        """Get version history for a chunk."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                """
-                SELECT * FROM chunk_history
-                WHERE chunk_id = ?
-                ORDER BY version DESC
-            """,
-                (chunk_id,),
-            )
-            return [dict(row) for row in cursor.fetchall()]

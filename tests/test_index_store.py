@@ -73,9 +73,8 @@ class TestVectorIndexSerialization:
         data = vi.to_dict()
         restored = VectorIndex.from_dict(data)
 
-        assert len(restored.chunk_vectors) == 2
-        assert "chunk1" in restored.chunk_vectors
-        assert restored.chunk_vectors["chunk1"] == [1.0, 0.0, 0.0]
+        assert len(restored.index.nodes) == 2
+        assert "chunk1" in restored.index.nodes
 
         results = restored.search([1.0, 0.0, 0.0], k=1)
         assert results[0][0] == "chunk1"
@@ -114,7 +113,7 @@ class TestIndexStore:
 
         result = load_if_fresh(tmp_path, "abc123")
         assert result is not None
-        assert len(result.chunk_vectors) == 1
+        assert len(result.index.nodes) == 1
 
     def test_load_if_fresh_stale(self, tmp_path):
         """Test load_if_fresh returns None when hash differs."""

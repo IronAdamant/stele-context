@@ -135,7 +135,7 @@ class TestVectorIndex:
         index = VectorIndex(M=16, ef_construction=200, ef_search=50)
 
         assert index.index is not None
-        assert len(index.chunk_vectors) == 0
+        assert len(index.index.nodes) == 0
 
     def test_add_chunk(self):
         """Test adding chunks."""
@@ -144,9 +144,9 @@ class TestVectorIndex:
         index.add_chunk("chunk1", [1.0, 2.0, 3.0])
         index.add_chunk("chunk2", [4.0, 5.0, 6.0])
 
-        assert len(index.chunk_vectors) == 2
-        assert "chunk1" in index.chunk_vectors
-        assert "chunk2" in index.chunk_vectors
+        assert len(index.index.nodes) == 2
+        assert "chunk1" in index.index.nodes
+        assert "chunk2" in index.index.nodes
 
     def test_search(self):
         """Test searching for similar chunks."""
@@ -171,13 +171,13 @@ class TestVectorIndex:
         index.add_chunk("chunk1", [1.0, 2.0, 3.0])
         index.add_chunk("chunk2", [4.0, 5.0, 6.0])
 
-        assert len(index.chunk_vectors) == 2
+        assert len(index.index.nodes) == 2
 
         result = index.remove_chunk("chunk1")
 
         assert result is True
-        assert len(index.chunk_vectors) == 1
-        assert "chunk1" not in index.chunk_vectors
+        assert len(index.index.nodes) == 1
+        assert "chunk1" not in index.index.nodes
 
     def test_get_stats(self):
         """Test getting statistics."""
@@ -198,8 +198,8 @@ class TestVectorIndex:
         for i in range(10):
             index.add_chunk(f"chunk{i}", [float(i), float(i * 2)])
 
-        assert len(index.chunk_vectors) == 10
+        assert len(index.index.nodes) == 10
 
         index.clear()
 
-        assert len(index.chunk_vectors) == 0
+        assert len(index.index.nodes) == 0

@@ -12,7 +12,7 @@ Provides CLI commands for:
 import argparse
 import json
 import sys
-from typing import List, Optional
+from typing import Optional
 
 from chunkforge import __version__ as chunkforge_version
 from chunkforge.engine import ChunkForge
@@ -344,7 +344,7 @@ def cmd_serve(args: argparse.Namespace, chunkforge: ChunkForge) -> int:
         return 0
 
 
-def cmd_serve_mcp(args: argparse.Namespace, chunkforge: Optional[ChunkForge]) -> int:
+def cmd_serve_mcp(args: argparse.Namespace, _chunkforge: None = None) -> int:
     """Start the stdio MCP server."""
     from chunkforge.mcp_stdio import main as mcp_main
 
@@ -517,11 +517,16 @@ def cmd_clear(args: argparse.Namespace, chunkforge: ChunkForge) -> int:
 
     print("Clearing all data...")
     chunkforge.storage.clear_all()
+    # Clear persisted HNSW index files
+    for idx_file in chunkforge.storage.index_dir.glob("*"):
+        idx_file.unlink()
+    # Reset in-memory vector index
+    chunkforge.vector_index = chunkforge._load_or_rebuild_index()
     print("Done")
     return 0
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """Main entry point for ChunkForge CLI."""
     parser = create_parser()
     args = parser.parse_args(argv)

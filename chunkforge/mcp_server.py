@@ -304,7 +304,26 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         Returns:
             Tool execution result
         """
-        # Standard tools
+        def _get_supported_formats(**_: Any) -> Dict[str, Any]:
+            formats = {
+                "text": self.chunkforge.chunkers["text"].supported_extensions(),
+                "code": self.chunkforge.chunkers["code"].supported_extensions(),
+            }
+            for modality, flag in [
+                ("image", HAS_IMAGE_CHUNKER),
+                ("pdf", HAS_PDF_CHUNKER),
+                ("audio", HAS_AUDIO_CHUNKER),
+                ("video", HAS_VIDEO_CHUNKER),
+            ]:
+                if flag and modality in self.chunkforge.chunkers:
+                    formats[modality] = self.chunkforge.chunkers[
+                        modality
+                    ].supported_extensions()
+            return {"formats": formats}
+
+        def _detect_modality(path: str = "", **_: Any) -> Dict[str, Any]:
+            return {"path": path, "modality": self.chunkforge.detect_modality(path)}
+
         tool_map: Dict[str, Callable[..., Any]] = {
             "index_documents": self.chunkforge.index_documents,
             "detect_changes_and_update": self.chunkforge.detect_changes_and_update,
@@ -314,41 +333,14 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "prune_chunks": self.chunkforge.prune_chunks,
             "search": self.chunkforge.search,
             "get_context": self.chunkforge.get_context,
+            "detect_modality": _detect_modality,
+            "get_supported_formats": _get_supported_formats,
         }
-
-        # Multi-modal tools
-        if tool_name == "detect_modality":
-            path = parameters.get("path", "")
-            modality = self.chunkforge.detect_modality(path)
-            return {"success": True, "result": {"path": path, "modality": modality}}
-
-        if tool_name == "get_supported_formats":
-            formats = {
-                "text": self.chunkforge.chunkers["text"].supported_extensions(),
-                "code": self.chunkforge.chunkers["code"].supported_extensions(),
-            }
-            if HAS_IMAGE_CHUNKER:
-                formats["image"] = self.chunkforge.chunkers[
-                    "image"
-                ].supported_extensions()
-            if HAS_PDF_CHUNKER:
-                formats["pdf"] = self.chunkforge.chunkers["pdf"].supported_extensions()
-            if HAS_AUDIO_CHUNKER:
-                formats["audio"] = self.chunkforge.chunkers[
-                    "audio"
-                ].supported_extensions()
-            if HAS_VIDEO_CHUNKER:
-                formats["video"] = self.chunkforge.chunkers[
-                    "video"
-                ].supported_extensions()
-
-            return {"success": True, "result": {"formats": formats}}
 
         if tool_name not in tool_map:
             return {
                 "error": f"Unknown tool: {tool_name}",
-                "available_tools": list(tool_map.keys())
-                + ["detect_modality", "get_supported_formats"],
+                "available_tools": list(tool_map.keys()),
             }
 
         try:

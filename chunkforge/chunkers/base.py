@@ -23,6 +23,16 @@ from chunkforge.chunkers.numpy_compat import (
 _TOKEN_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)|[0-9]+|[^\w\s]|\s+")
 
 
+def estimate_tokens(text: str) -> int:
+    """Estimate token count using regex-based splitting.
+
+    Approximates BPE tokenization by splitting on camelCase boundaries,
+    snake_case parts, numbers, and punctuation. Use this instead of
+    len(text) // 4 for consistent and more accurate token estimation.
+    """
+    return max(1, len(_TOKEN_RE.findall(text)))
+
+
 @dataclass
 class Chunk:
     """
@@ -121,13 +131,15 @@ class Chunk:
 
         # Feature 2a: Word unigram frequencies (dims 64-79)
         words = self._extract_words()
+        total_words = sum(words.values()) or 1
         for i, (_, count) in enumerate(words.most_common(16)):
-            signature[64 + i] = count / max(len(words), 1)
+            signature[64 + i] = count / total_words
 
         # Feature 2b: Word bigram frequencies (dims 80-95)
         bigrams = self._extract_bigrams()
+        total_bigrams = sum(bigrams.values()) or 1
         for i, (_, count) in enumerate(bigrams.most_common(16)):
-            signature[80 + i] = count / max(len(bigrams), 1)
+            signature[80 + i] = count / total_bigrams
 
         # Feature 3: Structural features (dims 96-103)
         lines = self.content.split("\n")
@@ -193,9 +205,9 @@ class Chunk:
         # Normalize to unit vector
         norm = np.linalg.norm(signature)
         if norm > 0:
-            signature = [x / norm for x in signature]
+            return [x / norm for x in signature]
 
-        return signature
+        return [float(x) for x in signature]
 
     def _extract_trigrams(self) -> Counter:
         """Extract character trigrams from content."""
@@ -219,15 +231,9 @@ class Chunk:
         )
 
     def _estimate_token_count(self) -> int:
-        """
-        Estimate token count using regex-based splitting.
-
-        Approximates BPE tokenization by splitting on camelCase boundaries,
-        snake_case parts, numbers, and punctuation. Within ~10-15% of actual
-        BPE token counts for typical code and prose.
-        """
+        """Estimate token count using the shared regex tokenizer."""
         if isinstance(self.content, str):
-            return max(1, len(_TOKEN_RE.findall(self.content)))
+            return estimate_tokens(self.content)
         if isinstance(self.content, bytes):
             return max(1, len(self.content) // 4)
         return 1

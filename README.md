@@ -254,10 +254,13 @@ cf = ChunkForge(
     storage_dir="~/.chunkforge",
     chunk_size=256,           # Target tokens per initial chunk
     max_chunk_size=4096,      # Maximum tokens per merged chunk
-    merge_threshold=0.7,      # Similarity threshold for merging
-    change_threshold=0.85,    # Similarity threshold for "unchanged"
+    merge_threshold=0.7,      # Default similarity threshold for merging
+    change_threshold=0.85,    # Default similarity threshold for "unchanged"
+    search_alpha=0.7,         # Blend weight: 1.0 = pure vector, 0.0 = pure keyword
 )
 ```
+
+> **Note:** Per-modality thresholds override `merge_threshold` and `change_threshold` for specific content types. Code uses merge=0.85 (preserves AST boundaries) and change=0.80 (tolerates incremental edits).
 
 ## MCP Server API
 
@@ -482,7 +485,8 @@ Storage format:
 | `chunk_size` | 256 | Target tokens per initial chunk |
 | `max_chunk_size` | 4096 | Maximum tokens per merged chunk |
 | `merge_threshold` | 0.7 | Similarity threshold for merging chunks |
-| `change_threshold` | 0.85 | Similarity threshold for "unchanged" |
+| `change_threshold` | 0.85 | Default similarity threshold for "unchanged" |
+| `search_alpha` | 0.7 | Hybrid search blend (1.0 = pure vector, 0.0 = pure keyword) |
 | `host` | localhost | MCP server host |
 | `port` | 9876 | MCP server port |
 

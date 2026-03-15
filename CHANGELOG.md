@@ -8,10 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Hybrid search (BM25 + HNSW)** — `search()` now widens HNSW to 3x candidates and re-ranks with BM25 keyword scores. Blend controlled by `search_alpha` (default 0.7). BM25 index lazily initialized on first search, maintained incrementally.
+- **`chunkforge/bm25.py`** — Pure-Python Okapi BM25 keyword index with zero dependencies
+- **Per-modality thresholds** — `MODALITY_THRESHOLDS` dict: code uses merge=0.85 (preserves AST boundaries) and change=0.80 (tolerates incremental edits); text and PDF keep existing defaults
+- **Signature cache for incremental indexing** — On re-index, unchanged chunks reuse cached semantic signatures instead of recomputing. Applied in both `index_documents()` and `detect_changes_and_update()`
+- **`estimate_tokens()` function** — Exported from `chunkers/base.py` as the single source of truth for token estimation
 - **Document removal** — `remove` MCP tool and CLI command to unindex a document and clean up all its chunks, annotations, and index entries
 - **Stale chunk cleanup** — Re-indexing and change detection now automatically delete old chunks that no longer exist in the new chunking
 - `delete_chunks()` and `remove_document()` storage methods
 - Schema migration for `version` column on older databases
+
+### Changed
+- **Single-pass merge** — `_merge_similar_chunks()` replaced O(n^2) `while changed` loop with single left-to-right pass
+- **HNSW distance metric** — Replaced Euclidean distance with `1 - dot_product` for normalized vectors (avoids per-comparison sqrt)
+- **HNSW remove() repairs graph** — Removing a node now reconnects orphaned neighbours to maintain graph connectivity
+- **Vector storage deduplicated** — Removed redundant `chunk_vectors` dict from `VectorIndex`; vectors live only in HNSW nodes (~40% index memory reduction)
+- **Token estimation consistency** — Replaced all 5 instances of `len(text) // 4` in `text.py` and `code.py` with `estimate_tokens()` regex tokenizer. Incremental tracking in hot loops avoids O(n^2).
 
 ### Fixed
 - **Schema migration gap** — Databases created before v0.4.0 lacked the `version` column on chunks table, causing index errors

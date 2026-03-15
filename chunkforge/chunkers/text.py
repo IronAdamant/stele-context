@@ -9,7 +9,7 @@ chunk sizing and sliding window for overlapping chunks. Zero dependencies.
 import re
 from typing import Any, Dict, List
 
-from chunkforge.chunkers.base import BaseChunker, Chunk
+from chunkforge.chunkers.base import BaseChunker, Chunk, estimate_tokens
 
 
 class TextChunker(BaseChunker):
@@ -109,6 +109,7 @@ class TextChunker(BaseChunker):
 
         chunks: List[Chunk] = []
         current_text = ""
+        current_tokens = 0
         current_start = 0
         chunk_index = 0
 
@@ -129,9 +130,9 @@ class TextChunker(BaseChunker):
             else:
                 target_size = self.chunk_size
 
-            combined_tokens = (len(current_text) + len(para)) // 4
+            para_tokens = estimate_tokens(para)
 
-            if combined_tokens > target_size and current_text:
+            if current_tokens + para_tokens > target_size and current_text:
                 chunk = Chunk(
                     content=current_text.strip(),
                     modality="text",
@@ -146,11 +147,13 @@ class TextChunker(BaseChunker):
 
                 current_start = current_start + len(current_text)
                 current_text = para + "\n\n"
+                current_tokens = para_tokens
             else:
                 if current_text:
                     current_text += para + "\n\n"
                 else:
                     current_text = para + "\n\n"
+                current_tokens += para_tokens
 
         if current_text.strip():
             chunk = Chunk(
@@ -199,7 +202,7 @@ class TextChunker(BaseChunker):
 
             while i < len(sentences) and token_count < self.chunk_size:
                 sentence = sentences[i]
-                sentence_tokens = len(sentence) // 4
+                sentence_tokens = estimate_tokens(sentence)
 
                 if token_count + sentence_tokens > self.max_chunk_size:
                     break
@@ -237,7 +240,7 @@ class TextChunker(BaseChunker):
                 overlap_count = 0
 
                 for j in range(len(chunk_sentences) - 1, -1, -1):
-                    sentence_tokens = len(chunk_sentences[j]) // 4
+                    sentence_tokens = estimate_tokens(chunk_sentences[j])
                     if overlap_tokens + sentence_tokens > self.overlap:
                         break
                     overlap_tokens += sentence_tokens
