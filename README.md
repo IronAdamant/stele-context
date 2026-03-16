@@ -24,6 +24,9 @@ ChunkForge helps LLM agents avoid re-reading unchanged files by caching chunk da
 - **Hybrid Indexing**: SHA-256 content hashes + 128-dim semantic signatures
 - **Change Detection**: Unchanged = instant cache hit; similar = lightweight double-check; different = reprocess
 - **JSON Serialization**: KV-cache stored as JSON+zlib (no pickle, safe for agent-facing tools)
+- **Symbol Graph**: Cross-file reference tracking — `find_references`, `find_definition`, `impact_radius`
+- **Cross-Language Linking**: HTML `class="btn"` → CSS `.btn {}`, JS `querySelector('.btn')` → CSS, `onclick="fn()"` → JS
+- **Impact Analysis**: "What breaks if I change this?" — BFS over symbol edges with configurable depth
 - **Annotations**: Attach metadata notes to documents and chunks for LLM navigation
 - **Project Map**: `map` tool returns all documents with chunk counts, tokens, and annotations
 - **Change History**: Automatic recording of change detection results with optional reasons
@@ -82,7 +85,7 @@ ChunkForge is designed with security in mind:
 - **No API calls** - Everything runs locally, no data leaves your machine
 - **Optional deps are safe** - `msgspec` and `numpy` are pure computation libraries with no network access
 - **No pickle** - Session data serialized with JSON+zlib, safe for agent-facing tools
-- **Minimal codebase** - ~7,000 lines of Python, easy to audit
+- **Minimal codebase** - ~8,000 lines of Python, easy to audit
 
 For maximum security:
 ```bash
@@ -240,6 +243,24 @@ for doc in project_map["documents"]:
 # View change history
 for entry in cf.get_history(limit=10):
     print(f"[{entry['reason']}] {entry['session_id']}")
+
+# Symbol graph — cross-file reference tracking
+refs = cf.find_references("ChunkForge")
+print(f"{len(refs['definitions'])} definitions, {len(refs['references'])} references")
+
+# Find where a symbol is defined (with full content)
+defn = cf.find_definition("StorageBackend")
+for d in defn["definitions"]:
+    print(f"{d['kind']} in {d['document_path']}:{d['line_number']}")
+
+# Impact analysis — what breaks if this chunk changes?
+impact = cf.impact_radius(chunk_id="abc123", depth=2)
+for c in impact["chunks"]:
+    print(f"  depth={c['depth']} {c['document_path']} ({c['token_count']} tokens)")
+
+# Rebuild symbol graph (after upgrade or to repair)
+result = cf.rebuild_symbol_graph()
+print(f"{result['symbols']} symbols, {result['edges']} edges")
 
 # Session management
 cf.save_kv_state("my-session", {"chunk_id": {"key": "value"}})
@@ -456,19 +477,27 @@ Storage format:
 ├──────────────────────────────────────────────────────────┤
 │  index_documents()  │  search()    │  get_context()      │
 │  detect_changes()   │  rollback()  │  save/load state    │
+│  find_references()  │  find_definition()                  │
+│  impact_radius()    │  rebuild_symbol_graph()             │
 └──────────────────────────────────────────────────────────┘
           │                  │                   │
   ┌───────▼──────┐   ┌──────▼──────┐   ┌────────▼────────┐
   │  Chunkers    │   │ VectorIndex │   │  StorageBackend  │
   │  text, code  │   │   (HNSW)    │   │  + SessionStore  │
-  │  image, pdf  │   │  index.py   │   │  storage.py      │
-  │  audio,video │   └─────────────┘   └─────────────────┘
-  └──────────────┘                            │
-                                     ┌────────▼────────┐
-  ┌──────────────┐                   │  SQLite + JSON   │
-  │  MCP Servers │                   │  (chunk content  │
-  │  stdio + HTTP│                   │   + metadata)    │
-  └──────────────┘                   └─────────────────┘
+  │  image, pdf  │   │  index.py   │   │  + SymbolStore   │
+  │  audio,video │   └─────────────┘   │  storage.py      │
+  └──────────────┘                     └─────────────────┘
+          │                                     │
+  ┌───────▼──────┐                     ┌────────▼────────┐
+  │  Symbols     │                     │  SQLite + JSON   │
+  │  extraction  │                     │  (chunks, symbols│
+  │  + resolution│                     │   edges, meta)   │
+  └──────────────┘                     └─────────────────┘
+
+  ┌──────────────┐
+  │  MCP Servers │
+  │  stdio + HTTP│
+  └──────────────┘
 ```
 
 ## Configuration

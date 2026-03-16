@@ -31,6 +31,7 @@ from chunkforge.index_store import (
 )
 from chunkforge.session import SessionManager
 from chunkforge.storage import StorageBackend
+from chunkforge.symbols import SymbolExtractor, Symbol, resolve_symbols
 
 
 def _get_version() -> str:
@@ -75,6 +76,7 @@ class ChunkForge:
         self.session_manager = SessionManager(self.storage, self.vector_index)
         self.bm25_index = None
         self._bm25_ready = False
+        self._symbol_extractor = SymbolExtractor()
 
     def _init_chunkers(self) -> None:
         """Initialize modality-specific chunkers."""
@@ -313,6 +315,9 @@ class ChunkForge:
                 # Store chunks with content
                 self._persist_chunks(chunks, str(path))
 
+                # Extract symbols for cross-file linking
+                self._extract_document_symbols(str(path), chunks)
+
                 last_modified = path.stat().st_mtime
                 self.storage.store_document(
                     document_path=str(path),
@@ -339,6 +344,7 @@ class ChunkForge:
         if results["indexed"]:
             self._save_index()
             self._save_bm25()
+            self._rebuild_edges()
 
         return results
 
@@ -851,6 +857,199 @@ class ChunkForge:
     def prune_chunks(self, session_id: str, max_tokens: int) -> Dict[str, Any]:
         """Prune low-relevance chunks to stay under token limit."""
         return self.session_manager.prune(session_id, max_tokens)
+
+    # -- Symbol graph ---------------------------------------------------------
+
+    def _extract_document_symbols(
+        self, doc_path: str, chunks: List[Chunk]
+    ) -> None:
+        """Extract symbols from a document's chunks and store them."""
+        self.storage.clear_document_symbols(doc_path)
+        ext = Path(doc_path).suffix.lstrip(".").lower()
+        doc_symbols = []
+        for chunk in chunks:
+            if isinstance(chunk.content, str):
+                syms = self._symbol_extractor.extract(
+                    chunk.content, doc_path, chunk.chunk_id, ext
+                )
+                doc_symbols.extend(syms)
+        if doc_symbols:
+            self.storage.store_symbols(doc_symbols)
+
+    def _rebuild_edges(self) -> None:
+        """Rebuild all symbol edges from current symbols."""
+        all_syms_raw = self.storage.get_all_symbols()
+        if not all_syms_raw:
+            self.storage.clear_all_edges()
+            return
+
+        all_syms = [
+            Symbol(
+                name=s["name"],
+                kind=s["kind"],
+                role=s["role"],
+                chunk_id=s["chunk_id"],
+                document_path=s["document_path"],
+                line_number=s["line_number"],
+            )
+            for s in all_syms_raw
+        ]
+        edges = resolve_symbols(all_syms)
+        self.storage.clear_all_edges()
+        self.storage.store_edges(edges)
+
+    def find_references(self, symbol: str) -> Dict[str, Any]:
+        """Find all references to a symbol across the codebase.
+
+        Returns definitions and references with chunk content previews.
+        """
+        definitions = self.storage.find_definitions(symbol)
+        references = self.storage.find_references_by_name(symbol)
+
+        def _enrich(syms: List[Dict]) -> List[Dict]:
+            results = []
+            for sym in syms:
+                chunk = self.storage.get_chunk(sym["chunk_id"])
+                results.append({
+                    "symbol": sym["name"],
+                    "kind": sym["kind"],
+                    "chunk_id": sym["chunk_id"],
+                    "document_path": sym["document_path"],
+                    "line_number": sym.get("line_number"),
+                    "content_preview": (
+                        (chunk.get("content") or "")[:200] if chunk else ""
+                    ),
+                })
+            return results
+
+        return {
+            "symbol": symbol,
+            "definitions": _enrich(definitions),
+            "references": _enrich(references),
+            "total": len(definitions) + len(references),
+        }
+
+    def find_definition(self, symbol: str) -> Dict[str, Any]:
+        """Find the definition(s) of a symbol."""
+        definitions = self.storage.find_definitions(symbol)
+
+        results = []
+        for defn in definitions:
+            chunk = self.storage.get_chunk(defn["chunk_id"])
+            results.append({
+                "symbol": defn["name"],
+                "kind": defn["kind"],
+                "chunk_id": defn["chunk_id"],
+                "document_path": defn["document_path"],
+                "line_number": defn.get("line_number"),
+                "content": chunk.get("content") if chunk else None,
+                "token_count": chunk["token_count"] if chunk else 0,
+            })
+
+        return {
+            "symbol": symbol,
+            "definitions": results,
+            "count": len(results),
+        }
+
+    def impact_radius(
+        self, chunk_id: str, depth: int = 2
+    ) -> Dict[str, Any]:
+        """Find all chunks potentially affected by a change to this chunk.
+
+        BFS over symbol edges: follows incoming edges (dependents) to find
+        chunks that reference this one, transitively up to `depth` hops.
+        """
+        visited: set = set()
+        queue = [(chunk_id, 0)]
+        layers: Dict[int, List[str]] = {}
+
+        while queue:
+            current_id, current_depth = queue.pop(0)
+            if current_id in visited or current_depth > depth:
+                continue
+            visited.add(current_id)
+            layers.setdefault(current_depth, []).append(current_id)
+
+            if current_depth < depth:
+                edges = self.storage.get_incoming_edges(current_id)
+                for edge in edges:
+                    if edge["source_chunk_id"] not in visited:
+                        queue.append((edge["source_chunk_id"], current_depth + 1))
+
+        result_chunks = []
+        for d, chunk_ids in sorted(layers.items()):
+            for cid in chunk_ids:
+                if cid == chunk_id and d == 0:
+                    continue
+                meta = self.storage.get_chunk(cid)
+                if meta:
+                    result_chunks.append({
+                        "chunk_id": cid,
+                        "document_path": meta["document_path"],
+                        "depth": d,
+                        "content": meta.get("content"),
+                        "token_count": meta["token_count"],
+                    })
+
+        return {
+            "origin_chunk_id": chunk_id,
+            "max_depth": depth,
+            "affected_chunks": len(result_chunks),
+            "chunks": result_chunks,
+        }
+
+    def rebuild_symbol_graph(self) -> Dict[str, Any]:
+        """Rebuild the entire symbol graph from stored chunk content.
+
+        Use this after upgrading to a version with symbol support,
+        or to repair the graph.
+        """
+        all_chunks = self.storage.search_chunks()
+
+        self.storage.clear_all_symbols()
+        self.storage.clear_all_edges()
+
+        by_doc: Dict[str, list] = {}
+        for chunk in all_chunks:
+            by_doc.setdefault(chunk["document_path"], []).append(chunk)
+
+        total_symbols = 0
+        for doc_path, chunks in by_doc.items():
+            ext = Path(doc_path).suffix.lstrip(".").lower()
+            doc_symbols = []
+            for chunk in chunks:
+                content = chunk.get("content")
+                if content:
+                    syms = self._symbol_extractor.extract(
+                        content, doc_path, chunk["chunk_id"], ext
+                    )
+                    doc_symbols.extend(syms)
+            if doc_symbols:
+                self.storage.store_symbols(doc_symbols)
+                total_symbols += len(doc_symbols)
+
+        # Resolve edges
+        all_syms_raw = self.storage.get_all_symbols()
+        all_syms = [
+            Symbol(
+                name=s["name"],
+                kind=s["kind"],
+                role=s["role"],
+                chunk_id=s["chunk_id"],
+                document_path=s["document_path"],
+                line_number=s["line_number"],
+            )
+            for s in all_syms_raw
+        ]
+        edges = resolve_symbols(all_syms)
+        self.storage.store_edges(edges)
+
+        return {
+            "documents": len(by_doc),
+            "symbols": total_symbols,
+            "edges": len(edges),
+        }
 
     def get_stats(self) -> Dict[str, Any]:
         """Get ChunkForge statistics."""

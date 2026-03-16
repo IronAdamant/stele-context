@@ -335,6 +335,10 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "get_context": self.chunkforge.get_context,
             "detect_modality": _detect_modality,
             "get_supported_formats": _get_supported_formats,
+            "find_references": self.chunkforge.find_references,
+            "find_definition": self.chunkforge.find_definition,
+            "impact_radius": self.chunkforge.impact_radius,
+            "rebuild_symbol_graph": self.chunkforge.rebuild_symbol_graph,
         }
 
         if tool_name not in tool_map:

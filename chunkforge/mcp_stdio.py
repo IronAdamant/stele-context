@@ -345,6 +345,61 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
                     "properties": {},
                 },
             ),
+            Tool(
+                name="find_references",
+                description="Find all definitions and references of a symbol across the codebase (LSP-style)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Symbol name to search for (function, class, CSS class like '.btn', CSS ID like '#app')",
+                        },
+                    },
+                    "required": ["symbol"],
+                },
+            ),
+            Tool(
+                name="find_definition",
+                description="Find where a symbol is defined, with full chunk content",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Symbol name to find definition for",
+                        },
+                    },
+                    "required": ["symbol"],
+                },
+            ),
+            Tool(
+                name="impact_radius",
+                description="Find all chunks affected by changing a chunk (transitive dependents via symbol graph)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "chunk_id": {
+                            "type": "string",
+                            "description": "Chunk ID to analyze impact for",
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "description": "Max hops through dependency graph (default: 2)",
+                            "default": 2,
+                        },
+                    },
+                    "required": ["chunk_id"],
+                },
+            ),
+            Tool(
+                name="rebuild_symbols",
+                description="Rebuild the entire symbol graph from stored chunks (use after upgrade or to repair)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -420,6 +475,21 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
                 )
             elif name == "stats":
                 result = engine.get_stats()
+            elif name == "find_references":
+                result = engine.find_references(
+                    symbol=arguments["symbol"],
+                )
+            elif name == "find_definition":
+                result = engine.find_definition(
+                    symbol=arguments["symbol"],
+                )
+            elif name == "impact_radius":
+                result = engine.impact_radius(
+                    chunk_id=arguments["chunk_id"],
+                    depth=arguments.get("depth", 2),
+                )
+            elif name == "rebuild_symbols":
+                result = engine.rebuild_symbol_graph()
             else:
                 result = {"error": f"Unknown tool: {name}"}
 

@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from chunkforge.metadata_storage import MetadataStorage
 from chunkforge.session_storage import SessionStorage
+from chunkforge.symbol_storage import SymbolStorage
 
 from chunkforge.chunkers.numpy_compat import sig_to_bytes
 
@@ -59,6 +60,7 @@ class StorageBackend:
         # Initialize storage delegates
         self._session_storage = SessionStorage(self.db_path, self.kv_dir)
         self._metadata_storage = MetadataStorage(self.db_path)
+        self._symbol_storage = SymbolStorage(self.db_path)
 
     def _init_database(self) -> None:
         """Initialize SQLite database with required tables."""
@@ -443,6 +445,64 @@ class StorageBackend:
         """Prune change history entries."""
         return self._metadata_storage.prune_history(max_age_seconds, max_entries)
 
+    # Symbol methods — delegated to SymbolStorage
+
+    def store_symbols(self, symbols: Any) -> None:
+        """Store a batch of Symbol objects."""
+        self._symbol_storage.store_symbols(symbols)
+
+    def store_edges(self, edges: Any) -> None:
+        """Store a batch of symbol edges."""
+        self._symbol_storage.store_edges(edges)
+
+    def clear_document_symbols(self, document_path: str) -> None:
+        """Remove all symbols for a document."""
+        self._symbol_storage.clear_document_symbols(document_path)
+
+    def clear_chunk_edges(self, chunk_ids: List[str]) -> None:
+        """Remove all edges involving the given chunk IDs."""
+        self._symbol_storage.clear_chunk_edges(chunk_ids)
+
+    def clear_chunk_symbols(self, chunk_ids: List[str]) -> None:
+        """Remove all symbols for the given chunk IDs."""
+        self._symbol_storage.clear_chunk_symbols(chunk_ids)
+
+    def clear_all_symbols(self) -> None:
+        """Remove all symbols."""
+        self._symbol_storage.clear_all_symbols()
+
+    def clear_all_edges(self) -> None:
+        """Remove all edges."""
+        self._symbol_storage.clear_all_edges()
+
+    def get_all_symbols(self) -> List[Dict[str, Any]]:
+        """Get all symbols."""
+        return self._symbol_storage.get_all_symbols()
+
+    def find_definitions(self, name: str) -> List[Dict[str, Any]]:
+        """Find all definitions for a symbol name."""
+        return self._symbol_storage.find_definitions(name)
+
+    def find_references_by_name(self, name: str) -> List[Dict[str, Any]]:
+        """Find all references to a symbol name."""
+        return self._symbol_storage.find_references_by_name(name)
+
+    def get_edges_for_chunk(self, chunk_id: str) -> List[Dict[str, Any]]:
+        """Get all edges involving a chunk."""
+        return self._symbol_storage.get_edges_for_chunk(chunk_id)
+
+    def get_incoming_edges(self, chunk_id: str) -> List[Dict[str, Any]]:
+        """Get edges where other chunks reference this chunk."""
+        return self._symbol_storage.get_incoming_edges(chunk_id)
+
+    def get_outgoing_edges(self, chunk_id: str) -> List[Dict[str, Any]]:
+        """Get edges where this chunk references other chunks."""
+        return self._symbol_storage.get_outgoing_edges(chunk_id)
+
+    def get_symbol_stats(self) -> Dict[str, Any]:
+        """Get symbol and edge statistics."""
+        return self._symbol_storage.get_symbol_stats()
+
     def get_all_documents(self) -> List[Dict[str, Any]]:
         """Get all indexed documents."""
         with sqlite3.connect(self.db_path) as conn:
@@ -535,6 +595,7 @@ class StorageBackend:
 
         kv_size = sum(f.stat().st_size for f in self.kv_dir.rglob("*") if f.is_file())
         db_size = self.db_path.stat().st_size
+        symbol_stats = self._symbol_storage.get_symbol_stats()
 
         return {
             "chunk_count": chunk_count,
@@ -547,12 +608,17 @@ class StorageBackend:
             "kv_cache_size_bytes": kv_size,
             "database_size_bytes": db_size,
             "storage_dir": str(self.base_dir),
+            **symbol_stats,
         }
 
     def delete_chunks(self, chunk_ids: List[str]) -> int:
         """Delete chunks and their related data. Returns count deleted."""
         if not chunk_ids:
             return 0
+        # Clean up symbols and edges first
+        self._symbol_storage.clear_chunk_symbols(chunk_ids)
+        self._symbol_storage.clear_chunk_edges(chunk_ids)
+
         placeholders = ",".join("?" * len(chunk_ids))
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -584,6 +650,11 @@ class StorageBackend:
         # Get chunk IDs before deleting
         chunks = self.get_document_chunks(document_path)
         chunk_ids = [c["chunk_id"] for c in chunks]
+
+        # Clean up symbols and edges
+        self._symbol_storage.clear_document_symbols(document_path)
+        if chunk_ids:
+            self._symbol_storage.clear_chunk_edges(chunk_ids)
 
         with sqlite3.connect(self.db_path) as conn:
             # Delete document-level annotations
@@ -632,6 +703,9 @@ class StorageBackend:
 
     def clear_all(self) -> None:
         """Clear all stored data."""
+        self._symbol_storage.clear_all_symbols()
+        self._symbol_storage.clear_all_edges()
+
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("DELETE FROM session_chunks")
             conn.execute("DELETE FROM sessions")
