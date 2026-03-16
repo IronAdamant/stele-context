@@ -220,6 +220,26 @@ class SymbolStorage:
                 ).fetchall()
             ]
 
+    def search_symbol_names(self, tokens: List[str]) -> List[Dict[str, Any]]:
+        """Find definition symbols whose names match any of the given tokens.
+
+        Uses case-insensitive exact match on symbol names.
+        Returns unique (chunk_id, name, kind, document_path) tuples.
+        """
+        if not tokens:
+            return []
+        # Use OR conditions for each token
+        conditions = " OR ".join(["LOWER(name) = ?"] * len(tokens))
+        params = [t.lower() for t in tokens]
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"SELECT DISTINCT chunk_id, name, kind, document_path "
+                f"FROM symbols WHERE role = 'definition' AND ({conditions})",
+                params,
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def get_symbol_stats(self) -> Dict[str, Any]:
         """Get symbol and edge counts."""
         with sqlite3.connect(self.db_path) as conn:

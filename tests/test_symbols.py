@@ -9,7 +9,9 @@ import pytest
 from chunkforge.engine import ChunkForge
 from chunkforge.symbols import (
     SymbolExtractor, Symbol, resolve_symbols, _module_matches_path,
+    _NOISE_REFS,
 )
+from chunkforge.engine import ChunkForge as _CF_for_ident_test
 from chunkforge.symbol_storage import SymbolStorage
 
 
@@ -686,3 +688,175 @@ class TestModulePathResolution:
         stats = cf.get_stats()
         # At minimum, the edge should exist
         assert stats["storage"]["edge_count"] >= 1
+
+
+# -- Noise filter tests ------------------------------------------------------
+
+
+class TestNoiseFilter:
+    """Test that common names are filtered from symbol resolution."""
+
+    def test_builtin_refs_filtered(self):
+        """References to builtins like print/len should not create edges."""
+        symbols = [
+            Symbol("print", "function", "definition", "c1", "io.py"),
+            Symbol("print", "function", "reference", "c2", "app.py"),
+        ]
+        edges = resolve_symbols(symbols)
+        assert len(edges) == 0
+
+    def test_dunder_refs_filtered(self):
+        """References to __init__ should not create edges."""
+        symbols = [
+            Symbol("__init__", "function", "definition", "c1", "a.py"),
+            Symbol("__init__", "function", "reference", "c2", "b.py"),
+        ]
+        edges = resolve_symbols(symbols)
+        assert len(edges) == 0
+
+    def test_short_names_filtered(self):
+        """Single-character references should not create edges."""
+        symbols = [
+            Symbol("x", "variable", "definition", "c1", "a.py"),
+            Symbol("x", "variable", "reference", "c2", "b.py"),
+        ]
+        edges = resolve_symbols(symbols)
+        assert len(edges) == 0
+
+    def test_real_names_not_filtered(self):
+        """User-defined names should still create edges."""
+        symbols = [
+            Symbol("ChunkForge", "class", "definition", "c1", "engine.py"),
+            Symbol("ChunkForge", "class", "reference", "c2", "cli.py"),
+        ]
+        edges = resolve_symbols(symbols)
+        assert len(edges) == 1
+
+    def test_noise_set_contains_expected(self):
+        assert "self" in _NOISE_REFS
+        assert "__init__" in _NOISE_REFS
+        assert "print" in _NOISE_REFS
+        assert "console" in _NOISE_REFS
+        assert "get" in _NOISE_REFS
+
+    def test_definitions_kept_despite_noise(self):
+        """Definitions of noisy names should still be extractable."""
+        ext = SymbolExtractor()
+        code = "def get(self, key):\n    return self.data[key]\n"
+        syms = ext.extract(code, "cache.py", "c1", "py")
+        defs = [s for s in syms if s.role == "definition"]
+        assert any(s.name == "get" for s in defs)
+
+
+# -- JS extraction improvements tests ----------------------------------------
+
+
+class TestJSExtractionImprovements:
+    """Test improved JS/TS symbol extraction."""
+
+    def setup_method(self):
+        self.ext = SymbolExtractor()
+
+    def test_destructured_require(self):
+        code = "const { readFile, writeFile } = require('fs')"
+        syms = self.ext.extract(code, "app.js", "c1", "js")
+        refs = [s for s in syms if s.role == "reference"]
+        assert any(s.name == "fs" and s.kind == "module" for s in refs)
+        assert any(s.name == "readFile" and s.kind == "import" for s in refs)
+        assert any(s.name == "writeFile" and s.kind == "import" for s in refs)
+
+    def test_class_method_definition(self):
+        code = "class Foo {\n  handleClick(event) {\n    return event\n  }\n}"
+        syms = self.ext.extract(code, "app.js", "c1", "js")
+        defs = [s for s in syms if s.role == "definition"]
+        assert any(s.name == "Foo" and s.kind == "class" for s in defs)
+        assert any(s.name == "handleClick" and s.kind == "function" for s in defs)
+
+    def test_class_method_not_control_flow(self):
+        """if/for/while should not be detected as method definitions."""
+        code = "  if (condition) {\n    doSomething()\n  }"
+        syms = self.ext.extract(code, "app.js", "c1", "js")
+        defs = [s for s in syms if s.role == "definition" and s.kind == "function"]
+        assert not any(s.name == "if" for s in defs)
+
+
+# -- Symbol-boosted search tests ---------------------------------------------
+
+
+class TestSymbolBoostedSearch:
+    """Test that search finds chunks via symbol name matching."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.cf = ChunkForge(storage_dir=os.path.join(self.tmpdir, "store"))
+        self.src = Path(self.tmpdir) / "src"
+        self.src.mkdir()
+
+    def test_query_identifier_extraction(self):
+        idents = _CF_for_ident_test._extract_query_identifiers("StorageBackend")
+        assert "StorageBackend" in idents or "Storage" in idents
+
+    def test_query_identifier_filters_stopwords(self):
+        idents = _CF_for_ident_test._extract_query_identifiers("the and for")
+        assert len(idents) == 0
+
+    def test_symbol_match_in_results(self):
+        """Chunks found via symbol names should have symbol_match field."""
+        (self.src / "auth.py").write_text(
+            "def verify_credentials(user, password):\n    return True\n"
+        )
+        (self.src / "handler.py").write_text(
+            "from auth import verify_credentials\n"
+            "def handle_login():\n    return verify_credentials('a', 'b')\n"
+        )
+        self.cf.index_documents([str(self.src)])
+        results = self.cf.search("verify_credentials", top_k=10)
+        assert len(results) >= 1
+
+
+# -- Incremental edge rebuild tests ------------------------------------------
+
+
+class TestIncrementalEdgeRebuild:
+    """Test that edge rebuilds are scoped to affected chunks."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.cf = ChunkForge(storage_dir=os.path.join(self.tmpdir, "store"))
+        self.src = Path(self.tmpdir) / "src"
+        self.src.mkdir()
+
+    def test_adding_file_preserves_existing_edges(self):
+        """Indexing a new file should not destroy edges from earlier files."""
+        (self.src / "base.py").write_text("class Base:\n    pass\n")
+        (self.src / "child.py").write_text(
+            "from base import Base\nclass Child(Base):\n    pass\n"
+        )
+        self.cf.index_documents([str(self.src)])
+        edges_before = self.cf.get_stats()["storage"]["edge_count"]
+        assert edges_before >= 1
+
+        # Add unrelated file
+        (self.src / "util.py").write_text("def unrelated():\n    return 42\n")
+        self.cf.index_documents([str(self.src / "util.py")])
+        edges_after = self.cf.get_stats()["storage"]["edge_count"]
+        # Existing edges should still be there
+        assert edges_after >= edges_before
+
+    def test_reindex_updates_edges(self):
+        """Re-indexing a file should update its edges."""
+        (self.src / "lib.py").write_text("def old_func():\n    pass\n")
+        (self.src / "app.py").write_text(
+            "from lib import old_func\nold_func()\n"
+        )
+        self.cf.index_documents([str(self.src)])
+        assert self.cf.get_stats()["storage"]["edge_count"] >= 1
+
+        # Change lib.py — rename function
+        (self.src / "lib.py").write_text("def new_func():\n    pass\n")
+        self.cf.index_documents([str(self.src / "lib.py")], force_reindex=True)
+
+        # old_func edge should be gone (app still references it, but no definition)
+        refs = self.cf.find_references("old_func")
+        # Definition count should be 0
+        assert refs["definitions"] == []

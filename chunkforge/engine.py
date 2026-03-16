@@ -189,6 +189,22 @@ class ChunkForge:
             return max(0.4, self.search_alpha - 0.15)
         return self.search_alpha
 
+    @staticmethod
+    def _extract_query_identifiers(query: str) -> List[str]:
+        """Extract identifier-like tokens from a search query.
+
+        Splits on whitespace, underscores, and camelCase boundaries.
+        Returns unique tokens >= 3 chars, suitable for symbol name matching.
+        """
+        # Split camelCase and snake_case
+        parts = re.findall(r"[A-Z]?[a-z]{2,}|[A-Z]{2,}(?=[A-Z][a-z]|\b)|[a-z_]\w{2,}", query)
+        # Also keep full multi-word identifiers (snake_case, camelCase)
+        full = re.findall(r"[a-zA-Z_]\w{2,}", query)
+        tokens = set(parts + full)
+        # Remove very common English words that aren't identifiers
+        _STOP = {"the", "and", "for", "with", "from", "that", "this", "have", "are", "was", "not"}
+        return [t for t in tokens if t.lower() not in _STOP]
+
     def _persist_chunks(
         self, chunks: List[Chunk], doc_path: str
     ) -> None:
@@ -387,7 +403,11 @@ class ChunkForge:
         if results["indexed"]:
             self._save_index()
             self._save_bm25()
-            self._rebuild_edges()
+            affected = set()
+            for doc_info in results["indexed"]:
+                for c in self.storage.get_document_chunks(doc_info["path"]):
+                    affected.add(c["chunk_id"])
+            self._rebuild_edges(affected_chunk_ids=affected or None)
 
         return results
 
@@ -732,13 +752,14 @@ class ChunkForge:
         if results["modified"]:
             self._save_index()
             self._save_bm25()
-            self._rebuild_edges()
-            # Propagate staleness to dependents of modified chunks
-            modified_chunk_ids = set()
+            modified_chunk_ids: set = set()
             for doc_info in results["modified"]:
                 if isinstance(doc_info, dict) and "path" in doc_info:
                     for c in self.storage.get_document_chunks(doc_info["path"]):
                         modified_chunk_ids.add(c["chunk_id"])
+            self._rebuild_edges(
+                affected_chunk_ids=modified_chunk_ids or None
+            )
             if modified_chunk_ids:
                 self._propagate_staleness(modified_chunk_ids)
 
@@ -834,6 +855,51 @@ class ChunkForge:
                 }
 
             results.append(entry)
+
+        # Symbol-boosted search: find chunks defining symbols that match
+        # query identifiers but weren't found by HNSW+BM25
+        existing_ids = {r["chunk_id"] for r in results}
+        query_idents = self._extract_query_identifiers(query)
+        if query_idents:
+            sym_matches = self.storage.search_symbol_names(query_idents)
+            min_score = results[-1]["relevance_score"] if results else 0.1
+            for sym in sym_matches:
+                cid = sym["chunk_id"]
+                if cid in existing_ids:
+                    continue
+                chunk_meta = self.storage.get_chunk(cid)
+                if chunk_meta is None:
+                    continue
+                content = self.storage.get_chunk_content(cid)
+                entry = {
+                    "chunk_id": cid,
+                    "content": content,
+                    "document_path": sym["document_path"],
+                    "relevance_score": round(min_score * 0.85, 4),
+                    "token_count": chunk_meta["token_count"],
+                    "start_pos": chunk_meta["start_pos"],
+                    "end_pos": chunk_meta["end_pos"],
+                    "symbol_match": sym["name"],
+                }
+                outgoing = self.storage.get_outgoing_edges(cid)
+                incoming = self.storage.get_incoming_edges(cid)
+                if outgoing or incoming:
+                    entry["edges"] = {
+                        "depends_on": [
+                            {"chunk_id": e["target_chunk_id"], "symbol": e["symbol_name"]}
+                            for e in outgoing
+                        ],
+                        "depended_on_by": [
+                            {"chunk_id": e["source_chunk_id"], "symbol": e["symbol_name"]}
+                            for e in incoming
+                        ],
+                    }
+                results.append(entry)
+                existing_ids.add(cid)
+
+            # Re-sort and truncate
+            results.sort(key=lambda r: r["relevance_score"], reverse=True)
+            results = results[:top_k]
 
         return results
 
@@ -944,11 +1010,19 @@ class ChunkForge:
         if doc_symbols:
             self.storage.store_symbols(doc_symbols)
 
-    def _rebuild_edges(self) -> None:
-        """Rebuild all symbol edges from current symbols."""
+    def _rebuild_edges(
+        self, affected_chunk_ids: Optional[set] = None
+    ) -> None:
+        """Rebuild symbol edges from current symbols.
+
+        If affected_chunk_ids is given, only edges involving those chunks
+        are cleared and re-created (incremental).  Otherwise, all edges
+        are rebuilt from scratch (used by rebuild_symbol_graph).
+        """
         all_syms_raw = self.storage.get_all_symbols()
         if not all_syms_raw:
-            self.storage.clear_all_edges()
+            if affected_chunk_ids is None:
+                self.storage.clear_all_edges()
             return
 
         all_syms = [
@@ -962,9 +1036,20 @@ class ChunkForge:
             )
             for s in all_syms_raw
         ]
-        edges = resolve_symbols(all_syms)
-        self.storage.clear_all_edges()
-        self.storage.store_edges(edges)
+        all_edges = resolve_symbols(all_syms)
+
+        if affected_chunk_ids is None:
+            # Full rebuild
+            self.storage.clear_all_edges()
+            self.storage.store_edges(all_edges)
+        else:
+            # Incremental: only touch edges involving affected chunks
+            self.storage.clear_chunk_edges(list(affected_chunk_ids))
+            scoped = [
+                e for e in all_edges
+                if e[0] in affected_chunk_ids or e[1] in affected_chunk_ids
+            ]
+            self.storage.store_edges(scoped)
 
     def _propagate_staleness(
         self,

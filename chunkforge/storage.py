@@ -504,6 +504,10 @@ class StorageBackend:
         """Get edges where this chunk references other chunks."""
         return self._symbol_storage.get_outgoing_edges(chunk_id)
 
+    def search_symbol_names(self, tokens: List[str]) -> List[Dict[str, Any]]:
+        """Find definition symbols whose names match query tokens."""
+        return self._symbol_storage.search_symbol_names(tokens)
+
     def get_symbol_stats(self) -> Dict[str, Any]:
         """Get symbol and edge statistics."""
         return self._symbol_storage.get_symbol_stats()

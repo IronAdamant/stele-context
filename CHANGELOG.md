@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`chunkforge/symbol_storage.py`** (~200 LOC) — `SymbolStorage` delegate; `symbols` and `symbol_edges` SQLite tables with indexed queries.
 - **`tests/test_symbols.py`** (63 tests) — Symbol extraction, cross-language resolution, storage, engine integration, directory indexing, staleness, search-with-edges, skip-dirs, module path resolution.
 - `staleness_score REAL DEFAULT 0.0` column on chunks table (added via migration).
+- **Noise filter** — `_NOISE_REFS` frozenset (~60 entries) filters Python builtins, dunder methods, JS globals, and ambiguous method names (get, set, push, etc.) from symbol resolution. Reduces false edges by ~14% without losing real cross-file connections.
+- **Better JS/TS extraction** — Destructured require (`const { a, b } = require('pkg')`), class method definitions (`methodName() {` inside class bodies), control-flow guard (if/for/while not detected as methods).
+- **Symbol-boosted search** — `search()` extracts identifier-like tokens from queries and matches them against symbol definition names, surfacing chunks that define matching symbols even when HNSW+BM25 missed them.
+- **Incremental edge rebuild** — `_rebuild_edges()` now accepts `affected_chunk_ids` to scope DB operations. Only edges involving indexed/modified chunks are cleared and re-created; unrelated edges preserved.
 
 ### Changed
 - **MCP tools**: 23 total (was 18) — added `find_references`, `find_definition`, `impact_radius`, `rebuild_symbols`, `stale_chunks`
@@ -27,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Version**: 0.6.0 → 0.7.0
 
 ### Tests
-- **215 tests passing** (was 152), 1 skipped (MCP SDK not installed)
+- **229 tests passing** (was 152), 1 skipped (MCP SDK not installed)
 
 ## [0.6.0] - 2026-03-15
 

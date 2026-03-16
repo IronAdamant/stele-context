@@ -12,6 +12,47 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
 
+# Names too common/ambiguous to create useful cross-file edges.
+# Applied only to references (not definitions) during resolution.
+_NOISE_REFS: frozenset = frozenset({
+    # Python builtins (never user-defined)
+    "print", "len", "range", "enumerate", "zip", "sorted", "reversed",
+    "isinstance", "issubclass", "hasattr", "getattr", "setattr", "delattr",
+    "super", "type", "id", "hash", "repr", "input", "open", "iter", "next",
+    "abs", "min", "max", "sum", "round", "any", "all", "format", "callable",
+    "str", "int", "float", "bool", "list", "dict", "set", "tuple", "bytes",
+    "object", "property", "staticmethod", "classmethod",
+    # Python exceptions
+    "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
+    "AttributeError", "RuntimeError", "NotImplementedError", "StopIteration",
+    "OSError", "FileNotFoundError", "ImportError",
+    # Python dunder methods (every class has them)
+    "__init__", "__new__", "__del__", "__str__", "__repr__", "__eq__",
+    "__ne__", "__lt__", "__le__", "__gt__", "__ge__", "__hash__", "__bool__",
+    "__len__", "__iter__", "__next__", "__contains__", "__call__",
+    "__getitem__", "__setitem__", "__delitem__", "__getattr__", "__setattr__",
+    "__enter__", "__exit__", "__add__", "__sub__", "__mul__",
+    # JS/TS globals
+    "console", "log", "error", "warn", "info", "debug",
+    "setTimeout", "setInterval", "parseInt", "parseFloat", "isNaN",
+    "then", "catch", "resolve", "reject", "finally",
+    "toString", "valueOf", "toJSON",
+    "Array", "Object", "String", "Number", "Boolean", "Map", "Set",
+    "Promise", "Error", "Date", "RegExp", "JSON", "Math",
+    # Ambiguous method names (defined on too many types)
+    "get", "set", "add", "remove", "pop", "push", "append", "extend",
+    "update", "clear", "copy", "keys", "values", "items", "entries",
+    "find", "findIndex", "indexOf", "includes", "contains",
+    "join", "split", "replace", "match", "test", "search", "trim",
+    "forEach", "reduce", "slice", "splice",
+    "close", "read", "write", "flush", "seek",
+    "apply", "call", "bind",
+    "start", "stop", "run", "execute",
+    # Context names
+    "self", "cls", "this",
+})
+
+
 @dataclass
 class Symbol:
     """A symbol extracted from a code chunk."""
@@ -193,11 +234,18 @@ class SymbolExtractor:
                     Symbol(m.group(1), "class", "definition", chunk_id, doc_path, i)
                 )
 
-            # Variable/const definitions
+            # Variable/const definitions (including arrow functions)
             m = re.match(r"(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=", stripped)
             if m:
                 symbols.append(
                     Symbol(m.group(1), "variable", "definition", chunk_id, doc_path, i)
+                )
+
+            # Class method definitions (indented, no function keyword)
+            m = re.match(r"\s+(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{", line)
+            if m and not re.match(r"\s*(if|for|while|switch|catch)\b", line):
+                symbols.append(
+                    Symbol(m.group(1), "function", "definition", chunk_id, doc_path, i)
                 )
 
             # Interface/type definitions (TS)
@@ -215,6 +263,21 @@ class SymbolExtractor:
                 )
                 for name in re.findall(r"\b(\w+)\b", m.group(1)):
                     if name not in ("import", "as", "default", "type", "from"):
+                        symbols.append(
+                            Symbol(name, "import", "reference", chunk_id, doc_path, i)
+                        )
+
+            # Destructured require: const { a, b } = require('pkg')
+            m = re.match(
+                r"(?:const|let|var)\s+\{([^}]+)\}\s*=\s*require\(['\"]([^'\"]+)['\"]\)",
+                stripped,
+            )
+            if m:
+                symbols.append(
+                    Symbol(m.group(2), "module", "reference", chunk_id, doc_path, i)
+                )
+                for name in re.findall(r"\b(\w+)\b", m.group(1)):
+                    if name != "as":
                         symbols.append(
                             Symbol(name, "import", "reference", chunk_id, doc_path, i)
                         )
@@ -634,6 +697,10 @@ def resolve_symbols(symbols: List[Symbol]) -> List[Tuple[str, str, str, str]]:
 
     for sym in symbols:
         if sym.role != "reference":
+            continue
+
+        # Skip noisy references that create false edges
+        if len(sym.name) < 2 or sym.name in _NOISE_REFS:
             continue
 
         defs = definitions.get(sym.name, [])
