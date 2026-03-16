@@ -42,6 +42,19 @@ def _get_version() -> str:
     return __version__
 
 
+def _read_and_hash(path: Path, modality: str) -> tuple:
+    """Read file content and compute SHA-256 hash.
+
+    Returns (content, content_hash) where content is bytes for binary
+    modalities and str for text/code/pdf.
+    """
+    if modality in ("image", "audio", "video"):
+        raw = path.read_bytes()
+        return raw, hashlib.sha256(raw).hexdigest()
+    content = path.read_text(encoding="utf-8", errors="replace")
+    return content, hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
 class ChunkForge:
     """Smart context cache with semantic chunking and vector search."""
 
@@ -318,18 +331,10 @@ class ChunkForge:
                 continue
 
             try:
-                # Read as bytes for binary modalities, text otherwise
+                # Read file and compute hash
                 modality = self.detect_modality(str(path))
-                binary = modality in ("image", "audio", "video")
-                if binary:
-                    raw = path.read_bytes()
-                    content_hash = hashlib.sha256(raw).hexdigest()
-                    content: Any = raw
-                else:
-                    content = path.read_text(encoding="utf-8", errors="replace")
-                    content_hash = hashlib.sha256(
-                        content.encode("utf-8")
-                    ).hexdigest()
+                content: Any
+                content, content_hash = _read_and_hash(path, modality)
 
                 existing_doc = self.storage.get_document(str(path))
                 if existing_doc and not force_reindex:
@@ -637,16 +642,9 @@ class ChunkForge:
                 continue
 
             try:
-                det_modality = self.detect_modality(doc_path)
-                if det_modality in ("image", "audio", "video"):
-                    raw = path.read_bytes()
-                    current_hash = hashlib.sha256(raw).hexdigest()
-                    content: Any = raw
-                else:
-                    content = path.read_text(encoding="utf-8", errors="replace")
-                    current_hash = hashlib.sha256(
-                        content.encode("utf-8")
-                    ).hexdigest()
+                modality = self.detect_modality(doc_path)
+                content: Any
+                content, content_hash = _read_and_hash(path, modality)
             except Exception:
                 results["modified"].append({"path": doc_path, "reason": "Read error"})
                 continue
@@ -656,7 +654,7 @@ class ChunkForge:
                 results["new"].append({"path": doc_path, "reason": "Not indexed"})
                 continue
 
-            if stored_doc["content_hash"] == current_hash:
+            if stored_doc["content_hash"] == content_hash:
                 results["unchanged"].append(doc_path)
                 chunks = self.storage.get_document_chunks(doc_path)
                 if session and session["turn_count"] > 0:
@@ -673,14 +671,13 @@ class ChunkForge:
                     {
                         "path": doc_path,
                         "old_hash": stored_doc["content_hash"][:16],
-                        "new_hash": current_hash[:16],
+                        "new_hash": content_hash[:16],
                     }
                 )
 
-                # Re-chunk through proper chunker (reuse det_modality from above)
-                chunker = self.chunkers.get(det_modality, self.chunkers["text"])
+                chunker = self.chunkers.get(modality, self.chunkers["text"])
                 change_thresh = self.MODALITY_THRESHOLDS.get(
-                    det_modality, {}
+                    modality, {}
                 ).get("change", self.change_threshold)
 
                 old_chunks_meta = self.storage.get_document_chunks(doc_path)
@@ -745,7 +742,7 @@ class ChunkForge:
                 # Update document record
                 self.storage.store_document(
                     document_path=doc_path,
-                    content_hash=current_hash,
+                    content_hash=content_hash,
                     chunk_count=len(new_chunks),
                     last_modified=path.stat().st_mtime,
                 )
@@ -901,14 +898,13 @@ class ChunkForge:
                 continue
 
             try:
-                content = path.read_text(encoding="utf-8", errors="replace")
+                modality = self.detect_modality(doc_path)
+                _, content_hash = _read_and_hash(path, modality)
             except Exception:
                 result["changed"].append({"path": doc_path, "reason": "Read error"})
                 continue
 
-            current_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-
-            if stored_doc["content_hash"] == current_hash:
+            if stored_doc["content_hash"] == content_hash:
                 chunks = self.storage.search_chunks(document_path=doc_path)
                 chunk_data = []
                 for chunk in chunks:
@@ -933,7 +929,7 @@ class ChunkForge:
                     {
                         "path": doc_path,
                         "old_hash": stored_doc["content_hash"][:16],
-                        "new_hash": current_hash[:16],
+                        "new_hash": content_hash[:16],
                     }
                 )
 

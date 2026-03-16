@@ -12,6 +12,7 @@ Provides CLI commands for:
 import argparse
 import json
 import sys
+import time
 from typing import Optional
 
 from chunkforge import __version__ as chunkforge_version
@@ -327,8 +328,6 @@ def cmd_serve(args: argparse.Namespace, chunkforge: ChunkForge) -> int:
             print("Press Ctrl+C to stop")
 
             try:
-                import time
-
                 while True:
                     time.sleep(1)
             except KeyboardInterrupt:

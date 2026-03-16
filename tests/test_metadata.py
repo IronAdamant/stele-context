@@ -5,11 +5,13 @@ import time
 from chunkforge.engine import ChunkForge
 
 
+def _make_engine(tmp_path):
+    """Shared helper to create a ChunkForge engine in a temp directory."""
+    return ChunkForge(storage_dir=str(tmp_path / "storage"))
+
+
 class TestAnnotations:
     """Tests for annotation storage and retrieval."""
-
-    def _make_engine(self, tmp_path):
-        return ChunkForge(storage_dir=str(tmp_path / "storage"))
 
     def _index_file(self, tmp_path, engine, name="test.py", content="def hello(): pass"):
         test_file = tmp_path / name
@@ -19,7 +21,7 @@ class TestAnnotations:
 
     def test_store_and_retrieve_annotation(self, tmp_path):
         """Test basic annotation store and retrieve."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path = self._index_file(tmp_path, engine)
 
         result = engine.annotate(path, "document", "This is the main module")
@@ -32,7 +34,7 @@ class TestAnnotations:
 
     def test_annotate_with_tags(self, tmp_path):
         """Test annotation with tags and tag filtering."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path = self._index_file(tmp_path, engine)
 
         engine.annotate(path, "document", "Architecture note", tags=["architecture"])
@@ -47,19 +49,19 @@ class TestAnnotations:
 
     def test_annotate_invalid_target_type(self, tmp_path):
         """Test annotation with invalid target_type returns error."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         result = engine.annotate("anything", "invalid", "content")
         assert "error" in result
 
     def test_annotate_nonexistent_document(self, tmp_path):
         """Test annotation on nonexistent document returns error."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         result = engine.annotate("/no/such/file.py", "document", "note")
         assert "error" in result
 
     def test_annotate_chunk(self, tmp_path):
         """Test annotation on a chunk."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path = self._index_file(tmp_path, engine)
 
         chunks = engine.storage.search_chunks(document_path=path)
@@ -75,7 +77,7 @@ class TestAnnotations:
 
     def test_get_annotations_filter_by_target(self, tmp_path):
         """Test filtering annotations by target."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path1 = self._index_file(tmp_path, engine, "a.py", "def a(): pass")
         path2 = self._index_file(tmp_path, engine, "b.py", "def b(): pass")
 
@@ -88,7 +90,7 @@ class TestAnnotations:
 
     def test_delete_annotation(self, tmp_path):
         """Test deleting an annotation."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path = self._index_file(tmp_path, engine)
 
         result = engine.annotate(path, "document", "To be deleted")
@@ -107,7 +109,7 @@ class TestAnnotations:
 
     def test_update_annotation_content(self, tmp_path):
         """Test updating annotation content."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path = self._index_file(tmp_path, engine)
 
         result = engine.annotate(path, "document", "Original note")
@@ -121,7 +123,7 @@ class TestAnnotations:
 
     def test_update_annotation_tags(self, tmp_path):
         """Test updating annotation tags only."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path = self._index_file(tmp_path, engine)
 
         result = engine.annotate(path, "document", "Note", tags=["old"])
@@ -135,13 +137,13 @@ class TestAnnotations:
 
     def test_update_nonexistent_annotation(self, tmp_path):
         """Test updating a nonexistent annotation."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         result = engine.update_annotation(99999, content="nope")
         assert result["updated"] is False
 
     def test_search_annotations(self, tmp_path):
         """Test searching annotation content text."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path = self._index_file(tmp_path, engine)
 
         engine.annotate(path, "document", "Handles user authentication")
@@ -156,7 +158,7 @@ class TestAnnotations:
 
     def test_bulk_annotate(self, tmp_path):
         """Test annotating multiple targets at once."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path1 = self._index_file(tmp_path, engine, "a.py", "def a(): pass")
         path2 = self._index_file(tmp_path, engine, "b.py", "def b(): pass")
 
@@ -169,7 +171,7 @@ class TestAnnotations:
 
     def test_bulk_annotate_with_errors(self, tmp_path):
         """Test bulk annotate with mix of valid and invalid targets."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         path = self._index_file(tmp_path, engine)
 
         result = engine.bulk_annotate([
@@ -184,12 +186,9 @@ class TestAnnotations:
 class TestMap:
     """Tests for the map (project overview) tool."""
 
-    def _make_engine(self, tmp_path):
-        return ChunkForge(storage_dir=str(tmp_path / "storage"))
-
     def test_map_empty(self, tmp_path):
         """Test map with no indexed documents."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         result = engine.get_map()
         assert result["total_documents"] == 0
         assert result["total_tokens"] == 0
@@ -197,7 +196,7 @@ class TestMap:
 
     def test_map_with_documents(self, tmp_path):
         """Test map with indexed documents."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
 
         f1 = tmp_path / "a.py"
         f1.write_text("def foo(): pass")
@@ -214,7 +213,7 @@ class TestMap:
 
     def test_map_includes_annotations(self, tmp_path):
         """Test that map includes document annotations."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
 
         f = tmp_path / "main.py"
         f.write_text("def main(): pass")
@@ -232,18 +231,15 @@ class TestMap:
 class TestHistory:
     """Tests for the history tool."""
 
-    def _make_engine(self, tmp_path):
-        return ChunkForge(storage_dir=str(tmp_path / "storage"))
-
     def test_history_empty(self, tmp_path):
         """Test history with no changes recorded."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
         result = engine.get_history()
         assert result == []
 
     def test_history_recorded_on_detect_changes(self, tmp_path):
         """Test that detect_changes_and_update records history."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
 
         f = tmp_path / "test.py"
         f.write_text("def hello(): pass")
@@ -258,7 +254,7 @@ class TestHistory:
 
     def test_history_with_reason(self, tmp_path):
         """Test that reason is stored in history."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
 
         f = tmp_path / "test.py"
         f.write_text("def hello(): pass")
@@ -274,7 +270,7 @@ class TestHistory:
 
     def test_history_filter_by_document(self, tmp_path):
         """Test filtering history by document path."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
 
         f1 = tmp_path / "a.py"
         f1.write_text("def a(): pass")
@@ -301,7 +297,7 @@ class TestHistory:
 
     def test_history_limit(self, tmp_path):
         """Test limiting history results."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
 
         f = tmp_path / "test.py"
         f.write_text("def hello(): pass")
@@ -315,7 +311,7 @@ class TestHistory:
 
     def test_prune_history_by_max_entries(self, tmp_path):
         """Test pruning history to max entries."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
 
         f = tmp_path / "test.py"
         f.write_text("def hello(): pass")
@@ -332,7 +328,7 @@ class TestHistory:
 
     def test_prune_history_by_age(self, tmp_path):
         """Test pruning history by age."""
-        engine = self._make_engine(tmp_path)
+        engine = _make_engine(tmp_path)
 
         # Directly insert an old entry via storage
         engine.storage._metadata_storage.record_change(

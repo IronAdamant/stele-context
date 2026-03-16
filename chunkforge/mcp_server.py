@@ -251,6 +251,77 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                     "required": ["document_paths"],
                 },
             },
+            {
+                "name": "find_references",
+                "description": "Find all definitions and references for a symbol name across indexed documents.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol_name": {
+                            "type": "string",
+                            "description": "Symbol name to search for",
+                        },
+                    },
+                    "required": ["symbol_name"],
+                },
+            },
+            {
+                "name": "find_definition",
+                "description": "Find the definition location of a symbol.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol_name": {
+                            "type": "string",
+                            "description": "Symbol name to find",
+                        },
+                    },
+                    "required": ["symbol_name"],
+                },
+            },
+            {
+                "name": "impact_radius",
+                "description": "Find all chunks potentially affected by a change to a given chunk, via symbol graph edges.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "chunk_id": {
+                            "type": "string",
+                            "description": "Chunk ID to analyze",
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "description": "Maximum hops to traverse (default: 2)",
+                            "default": 2,
+                        },
+                    },
+                    "required": ["chunk_id"],
+                },
+            },
+            {
+                "name": "rebuild_symbol_graph",
+                "description": "Rebuild the symbol graph for all indexed documents. Useful after bulk changes.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+            {
+                "name": "stale_chunks",
+                "description": "Find chunks with staleness scores above a threshold, grouped by document.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "threshold": {
+                            "type": "number",
+                            "description": "Minimum staleness score (default: 0.1)",
+                            "default": 0.1,
+                        },
+                    },
+                    "required": [],
+                },
+            },
         ]
 
         self._send_json_response({"tools": tools})
