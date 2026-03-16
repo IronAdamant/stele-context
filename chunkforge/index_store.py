@@ -1,9 +1,9 @@
 """
-Persistent serialization for the HNSW vector index.
+Persistent serialization for the HNSW and BM25 indexes.
 
-Saves and loads the VectorIndex to compressed JSON files so
-the index doesn't need to be rebuilt from SQLite on every startup.
-Uses a chunk ID hash to detect staleness.
+Saves and loads indexes to compressed JSON files so they don't need
+to be rebuilt from SQLite on every startup.  Uses a chunk ID hash
+to detect staleness.
 """
 
 import hashlib
@@ -24,34 +24,32 @@ FORMAT_VERSION = 1
 def compute_chunk_ids_hash(storage: Any) -> str:
     """Compute a hash of all chunk IDs in the database.
 
-    Used to detect whether the persisted index is stale
-    (chunks added or removed since last save).
+    Uses incremental hashing to avoid loading all IDs into memory.
     """
     import sqlite3
 
+    h = hashlib.sha256()
     with sqlite3.connect(storage.db_path) as conn:
         cursor = conn.execute("SELECT chunk_id FROM chunks ORDER BY chunk_id")
-        chunk_ids = [row[0] for row in cursor.fetchall()]
-    id_string = "|".join(chunk_ids)
-    return hashlib.sha256(id_string.encode("utf-8")).hexdigest()
+        for (chunk_id,) in cursor:
+            h.update(chunk_id.encode("utf-8"))
+            h.update(b"|")
+    return h.hexdigest()
 
 
-def save_index(index: VectorIndex, chunk_ids_hash: str, index_dir: Path) -> None:
-    """Serialize a VectorIndex to a compressed JSON file.
+# -- Shared save/load helpers ------------------------------------------------
 
-    Uses write-to-temp-then-rename for atomic writes.
-    """
-    data = index.to_dict()
-    data["_version"] = FORMAT_VERSION
-    data["_chunk_ids_hash"] = chunk_ids_hash
 
+def _save_compressed_json(
+    data: Dict[str, Any], filename: str, index_dir: Path
+) -> None:
+    """Serialize a dict to a compressed JSON file (atomic write)."""
     json_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
     compressed = zlib.compress(json_bytes)
 
     index_dir.mkdir(parents=True, exist_ok=True)
-    target = index_dir / INDEX_FILENAME
+    target = index_dir / filename
 
-    # Atomic write: temp file then rename
     fd, tmp_path = tempfile.mkstemp(dir=str(index_dir), suffix=".tmp")
     try:
         with open(fd, "wb") as f:
@@ -62,9 +60,11 @@ def save_index(index: VectorIndex, chunk_ids_hash: str, index_dir: Path) -> None
         raise
 
 
-def load_index(index_dir: Path) -> Optional[Dict[str, Any]]:
-    """Load a persisted index file, returning the raw dict or None."""
-    path = index_dir / INDEX_FILENAME
+def _load_compressed_json(
+    filename: str, index_dir: Path
+) -> Optional[Dict[str, Any]]:
+    """Load a compressed JSON file, returning None on any error."""
+    path = index_dir / filename
     if not path.exists():
         return None
 
@@ -79,14 +79,27 @@ def load_index(index_dir: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
+# -- HNSW persistence --------------------------------------------------------
+
+
+def save_index(index: VectorIndex, chunk_ids_hash: str, index_dir: Path) -> None:
+    """Serialize a VectorIndex to a compressed JSON file."""
+    data = index.to_dict()
+    data["_version"] = FORMAT_VERSION
+    data["_chunk_ids_hash"] = chunk_ids_hash
+    _save_compressed_json(data, INDEX_FILENAME, index_dir)
+
+
+def load_index(index_dir: Path) -> Optional[Dict[str, Any]]:
+    """Load a persisted index file, returning the raw dict or None."""
+    return _load_compressed_json(INDEX_FILENAME, index_dir)
+
+
 def load_if_fresh(
     index_dir: Path,
     current_hash: str,
 ) -> Optional[VectorIndex]:
-    """Load persisted index only if it matches the current chunk state.
-
-    Returns a VectorIndex if the persisted index is fresh, None otherwise.
-    """
+    """Load persisted index only if it matches the current chunk state."""
     data = load_index(index_dir)
     if data is None:
         return None
@@ -98,7 +111,7 @@ def load_if_fresh(
         return None
 
 
-# --- BM25 persistence (same pattern as HNSW) ---
+# -- BM25 persistence --------------------------------------------------------
 
 
 def save_bm25(bm25_index: Any, chunk_ids_hash: str, index_dir: Path) -> None:
@@ -106,37 +119,13 @@ def save_bm25(bm25_index: Any, chunk_ids_hash: str, index_dir: Path) -> None:
     data = bm25_index.to_dict()
     data["_version"] = FORMAT_VERSION
     data["_chunk_ids_hash"] = chunk_ids_hash
-
-    json_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
-    compressed = zlib.compress(json_bytes)
-
-    index_dir.mkdir(parents=True, exist_ok=True)
-    target = index_dir / BM25_FILENAME
-
-    fd, tmp_path = tempfile.mkstemp(dir=str(index_dir), suffix=".tmp")
-    try:
-        with open(fd, "wb") as f:
-            f.write(compressed)
-        Path(tmp_path).replace(target)
-    except Exception:
-        Path(tmp_path).unlink(missing_ok=True)
-        raise
+    _save_compressed_json(data, BM25_FILENAME, index_dir)
 
 
 def load_bm25_if_fresh(index_dir: Path, current_hash: str) -> Optional[Any]:
     """Load persisted BM25 index if it matches the current chunk state."""
-    path = index_dir / BM25_FILENAME
-    if not path.exists():
-        return None
-
-    try:
-        compressed = path.read_bytes()
-        json_bytes = zlib.decompress(compressed)
-        data = json.loads(json_bytes)
-    except (zlib.error, json.JSONDecodeError):
-        return None
-
-    if data.get("_version") != FORMAT_VERSION:
+    data = _load_compressed_json(BM25_FILENAME, index_dir)
+    if data is None:
         return None
     if data.get("_chunk_ids_hash") != current_hash:
         return None

@@ -60,10 +60,13 @@ class BM25Index:
 
     def score(self, query: str, doc_id: str) -> float:
         """Compute BM25 score for a query against a single document."""
+        return self._score_terms(self._tokenize(query), doc_id)
+
+    def _score_terms(self, query_terms: List[str], doc_id: str) -> float:
+        """Compute BM25 score from pre-tokenized query terms."""
         if doc_id not in self.term_freqs or self.avg_dl == 0:
             return 0.0
 
-        query_terms = self._tokenize(query)
         total = 0.0
         dl = self.doc_lengths[doc_id]
         tf_map = self.term_freqs[doc_id]
@@ -85,8 +88,9 @@ class BM25Index:
     def score_batch(
         self, query: str, doc_ids: List[str]
     ) -> Dict[str, float]:
-        """Score multiple documents against a query."""
-        return {doc_id: self.score(query, doc_id) for doc_id in doc_ids}
+        """Score multiple documents against a query (tokenizes once)."""
+        terms = self._tokenize(query)
+        return {doc_id: self._score_terms(terms, doc_id) for doc_id in doc_ids}
 
     def _tokenize(self, text: str) -> List[str]:
         """Tokenize text into lowercase word terms (len > 1)."""

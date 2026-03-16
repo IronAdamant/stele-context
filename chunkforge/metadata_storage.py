@@ -95,25 +95,24 @@ class MetadataStorage:
     ) -> bool:
         """Update an annotation's content and/or tags. Returns True if found."""
         now = time.time()
+        sets: List[str] = ["updated_at = ?"]
+        params: List[Any] = [now]
+
+        if content is not None:
+            sets.append("content = ?")
+            params.append(content)
+        if tags is not None:
+            sets.append("tags = ?")
+            params.append(json.dumps(tags))
+
+        params.append(annotation_id)
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "SELECT id FROM annotations WHERE id = ?", (annotation_id,)
+                f"UPDATE annotations SET {', '.join(sets)} WHERE id = ?",
+                params,
             )
-            if cursor.fetchone() is None:
-                return False
-            if content is not None:
-                conn.execute(
-                    "UPDATE annotations SET content = ?, updated_at = ? WHERE id = ?",
-                    (content, now, annotation_id),
-                )
-            if tags is not None:
-                tags_json = json.dumps(tags)
-                conn.execute(
-                    "UPDATE annotations SET tags = ?, updated_at = ? WHERE id = ?",
-                    (tags_json, now, annotation_id),
-                )
             conn.commit()
-        return True
+            return cursor.rowcount > 0
 
     def search_annotations(
         self, query: str, target_type: Optional[str] = None
@@ -163,13 +162,23 @@ class MetadataStorage:
         limit: int = 20,
         document_path: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Retrieve change history entries."""
+        """Retrieve change history entries.
+
+        When document_path is given, the limit is applied after filtering
+        so the caller reliably gets up to `limit` matching results.
+        """
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM change_history ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            )
+            if document_path:
+                # Fetch all, filter in Python, then limit
+                cursor = conn.execute(
+                    "SELECT * FROM change_history ORDER BY timestamp DESC"
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM change_history ORDER BY timestamp DESC LIMIT ?",
+                    (limit,),
+                )
             rows = [dict(row) for row in cursor.fetchall()]
 
         for row in rows:
@@ -181,7 +190,7 @@ class MetadataStorage:
                 r
                 for r in rows
                 if self._summary_mentions_document(r["summary"], document_path)
-            ]
+            ][:limit]
 
         return rows
 

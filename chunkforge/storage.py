@@ -12,7 +12,6 @@ Uses SQLite for metadata and filesystem for KV-cache blobs.
 All storage is local-only with zero network dependencies.
 """
 
-import os
 import sqlite3
 import time
 from pathlib import Path
@@ -41,7 +40,7 @@ class StorageBackend:
             base_dir: Base directory for storage. Defaults to ~/.chunkforge/
         """
         if base_dir is None:
-            base_dir = os.path.expanduser("~/.chunkforge")
+            base_dir = str(Path("~/.chunkforge").expanduser())
 
         self.base_dir = Path(base_dir)
         self.db_path = self.base_dir / "chunkforge.db"
@@ -712,32 +711,12 @@ class StorageBackend:
                 (document_path,),
             )
             annotations_removed = cursor.rowcount
+            conn.commit()
 
-            # Delete chunks and their related data
-            if chunk_ids:
-                placeholders = ",".join("?" * len(chunk_ids))
-                conn.execute(
-                    f"DELETE FROM session_chunks WHERE chunk_id IN ({placeholders})",
-                    chunk_ids,
-                )
-                conn.execute(
-                    f"DELETE FROM chunk_history WHERE chunk_id IN ({placeholders})",
-                    chunk_ids,
-                )
-                conn.execute(
-                    f"DELETE FROM annotations WHERE target IN ({placeholders}) "
-                    "AND target_type = 'chunk'",
-                    chunk_ids,
-                )
-                cursor = conn.execute(
-                    f"DELETE FROM chunks WHERE chunk_id IN ({placeholders})",
-                    chunk_ids,
-                )
-                chunks_removed = cursor.rowcount
-            else:
-                chunks_removed = 0
+        # Delegate chunk deletion (handles session_chunks, history, chunk annotations)
+        chunks_removed = self.delete_chunks(chunk_ids)
 
-            # Delete document record
+        with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 "DELETE FROM documents WHERE document_path = ?", (document_path,)
             )

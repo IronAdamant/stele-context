@@ -1,8 +1,5 @@
 """Tests for BM25 keyword index."""
 
-import tempfile
-from pathlib import Path
-
 from chunkforge.bm25 import BM25Index
 from chunkforge.index_store import save_bm25, load_bm25_if_fresh
 

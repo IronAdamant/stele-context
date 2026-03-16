@@ -4,6 +4,7 @@ ChunkForge engine — smart context cache with semantic chunking and vector sear
 
 import hashlib
 import re
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -189,6 +190,11 @@ class ChunkForge:
             return max(0.4, self.search_alpha - 0.15)
         return self.search_alpha
 
+    _QUERY_STOP_WORDS = frozenset({
+        "the", "and", "for", "with", "from", "that", "this",
+        "have", "are", "was", "not", "all", "but", "how",
+    })
+
     @staticmethod
     def _extract_query_identifiers(query: str) -> List[str]:
         """Extract identifier-like tokens from a search query.
@@ -196,14 +202,10 @@ class ChunkForge:
         Splits on whitespace, underscores, and camelCase boundaries.
         Returns unique tokens >= 3 chars, suitable for symbol name matching.
         """
-        # Split camelCase and snake_case
         parts = re.findall(r"[A-Z]?[a-z]{2,}|[A-Z]{2,}(?=[A-Z][a-z]|\b)|[a-z_]\w{2,}", query)
-        # Also keep full multi-word identifiers (snake_case, camelCase)
         full = re.findall(r"[a-zA-Z_]\w{2,}", query)
         tokens = set(parts + full)
-        # Remove very common English words that aren't identifiers
-        _STOP = {"the", "and", "for", "with", "from", "that", "this", "have", "are", "was", "not"}
-        return [t for t in tokens if t.lower() not in _STOP]
+        return [t for t in tokens if t.lower() not in ChunkForge._QUERY_STOP_WORDS]
 
     def _persist_chunks(
         self, chunks: List[Chunk], doc_path: str
@@ -675,11 +677,10 @@ class ChunkForge:
                     }
                 )
 
-                # Re-chunk through proper chunker
-                modality = self.detect_modality(doc_path)
-                chunker = self.chunkers.get(modality, self.chunkers["text"])
+                # Re-chunk through proper chunker (reuse det_modality from above)
+                chunker = self.chunkers.get(det_modality, self.chunkers["text"])
                 change_thresh = self.MODALITY_THRESHOLDS.get(
-                    modality, {}
+                    det_modality, {}
                 ).get("change", self.change_threshold)
 
                 old_chunks_meta = self.storage.get_document_chunks(doc_path)
@@ -839,21 +840,7 @@ class ChunkForge:
                 "end_pos": chunk_meta["end_pos"],
             }
 
-            # Attach symbol edges for richer context
-            outgoing = self.storage.get_outgoing_edges(chunk_id)
-            incoming = self.storage.get_incoming_edges(chunk_id)
-            if outgoing or incoming:
-                entry["edges"] = {
-                    "depends_on": [
-                        {"chunk_id": e["target_chunk_id"], "symbol": e["symbol_name"]}
-                        for e in outgoing
-                    ],
-                    "depended_on_by": [
-                        {"chunk_id": e["source_chunk_id"], "symbol": e["symbol_name"]}
-                        for e in incoming
-                    ],
-                }
-
+            self._attach_edges(entry, chunk_id)
             results.append(entry)
 
         # Symbol-boosted search: find chunks defining symbols that match
@@ -881,19 +868,7 @@ class ChunkForge:
                     "end_pos": chunk_meta["end_pos"],
                     "symbol_match": sym["name"],
                 }
-                outgoing = self.storage.get_outgoing_edges(cid)
-                incoming = self.storage.get_incoming_edges(cid)
-                if outgoing or incoming:
-                    entry["edges"] = {
-                        "depends_on": [
-                            {"chunk_id": e["target_chunk_id"], "symbol": e["symbol_name"]}
-                            for e in outgoing
-                        ],
-                        "depended_on_by": [
-                            {"chunk_id": e["source_chunk_id"], "symbol": e["symbol_name"]}
-                            for e in incoming
-                        ],
-                    }
+                self._attach_edges(entry, cid)
                 results.append(entry)
                 existing_ids.add(cid)
 
@@ -994,6 +969,37 @@ class ChunkForge:
 
     # -- Symbol graph ---------------------------------------------------------
 
+    @staticmethod
+    def _dicts_to_symbols(raw: List[Dict]) -> List[Symbol]:
+        """Convert raw symbol dicts from storage to Symbol dataclasses."""
+        return [
+            Symbol(
+                name=s["name"],
+                kind=s["kind"],
+                role=s["role"],
+                chunk_id=s["chunk_id"],
+                document_path=s["document_path"],
+                line_number=s["line_number"],
+            )
+            for s in raw
+        ]
+
+    def _attach_edges(self, entry: Dict, chunk_id: str) -> None:
+        """Attach symbol edges to a search result entry (in-place)."""
+        outgoing = self.storage.get_outgoing_edges(chunk_id)
+        incoming = self.storage.get_incoming_edges(chunk_id)
+        if outgoing or incoming:
+            entry["edges"] = {
+                "depends_on": [
+                    {"chunk_id": e["target_chunk_id"], "symbol": e["symbol_name"]}
+                    for e in outgoing
+                ],
+                "depended_on_by": [
+                    {"chunk_id": e["source_chunk_id"], "symbol": e["symbol_name"]}
+                    for e in incoming
+                ],
+            }
+
     def _extract_document_symbols(
         self, doc_path: str, chunks: List[Chunk]
     ) -> None:
@@ -1025,17 +1031,7 @@ class ChunkForge:
                 self.storage.clear_all_edges()
             return
 
-        all_syms = [
-            Symbol(
-                name=s["name"],
-                kind=s["kind"],
-                role=s["role"],
-                chunk_id=s["chunk_id"],
-                document_path=s["document_path"],
-                line_number=s["line_number"],
-            )
-            for s in all_syms_raw
-        ]
+        all_syms = self._dicts_to_symbols(all_syms_raw)
         all_edges = resolve_symbols(all_syms)
 
         if affected_chunk_ids is None:
@@ -1073,10 +1069,10 @@ class ChunkForge:
 
         # BFS from changed chunks outward through dependents
         visited: Dict[str, float] = {}
-        queue = [(cid, 0) for cid in changed_chunk_ids]
+        queue = deque((cid, 0) for cid in changed_chunk_ids)
 
         while queue:
-            current_id, depth = queue.pop(0)
+            current_id, depth = queue.popleft()
             if depth > max_depth:
                 continue
 
@@ -1196,11 +1192,11 @@ class ChunkForge:
         chunks that reference this one, transitively up to `depth` hops.
         """
         visited: set = set()
-        queue = [(chunk_id, 0)]
+        queue = deque([(chunk_id, 0)])
         layers: Dict[int, List[str]] = {}
 
         while queue:
-            current_id, current_depth = queue.pop(0)
+            current_id, current_depth = queue.popleft()
             if current_id in visited or current_depth > depth:
                 continue
             visited.add(current_id)

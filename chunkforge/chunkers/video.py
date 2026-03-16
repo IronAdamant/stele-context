@@ -114,9 +114,13 @@ class VideoChunker(BaseChunker):
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             duration = frame_count / fps if fps > 0 else 0
 
+            # Guard: cannot segment with zero/negative fps
+            if fps <= 0 or frame_count <= 0:
+                return self._empty_video_chunk(document_path, width, height, duration)
+
             # Compute frames per segment
-            frames_per_segment = int(self.segment_duration * fps)
-            keyframe_interval_frames = int(self.keyframe_interval * fps)
+            frames_per_segment = max(1, int(self.segment_duration * fps))
+            keyframe_interval_frames = max(1, int(self.keyframe_interval * fps))
 
             # Create chunks
             chunks: List[Chunk] = []
@@ -187,20 +191,7 @@ class VideoChunker(BaseChunker):
             # Handle empty video
             if not chunks:
                 chunks.append(
-                    Chunk(
-                        content=b"",
-                        modality="video",
-                        start_pos=0,
-                        end_pos=0,
-                        document_path=document_path,
-                        chunk_index=0,
-                        metadata={
-                            "fps": fps,
-                            "width": width,
-                            "height": height,
-                            "duration": duration,
-                        },
-                    )
+                    self._empty_video_chunk(document_path, width, height, duration)
                 )
 
             return chunks
@@ -210,6 +201,21 @@ class VideoChunker(BaseChunker):
                 import os
 
                 os.unlink(cleanup_path)
+
+    @staticmethod
+    def _empty_video_chunk(
+        document_path: str, width: int = 0, height: int = 0, duration: float = 0
+    ) -> Chunk:
+        """Create an empty fallback chunk for unreadable/empty videos."""
+        return Chunk(
+            content=b"",
+            modality="video",
+            start_pos=0,
+            end_pos=0,
+            document_path=document_path,
+            chunk_index=0,
+            metadata={"width": width, "height": height, "duration": duration},
+        )
 
     def _resize_frame(self, frame: Any) -> Any:
         """Resize frame if it exceeds max_dimension."""

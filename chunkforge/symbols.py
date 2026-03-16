@@ -243,7 +243,7 @@ class SymbolExtractor:
 
             # Class method definitions (indented, no function keyword)
             m = re.match(r"\s+(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{", line)
-            if m and not re.match(r"\s*(if|for|while|switch|catch)\b", line):
+            if m and not re.match(r"\s*(if|for|while|switch|catch|function|return)\b", line):
                 symbols.append(
                     Symbol(m.group(1), "function", "definition", chunk_id, doc_path, i)
                 )
@@ -479,7 +479,7 @@ class SymbolExtractor:
                     Symbol(m.group(1), "class", "definition", chunk_id, doc_path, i)
                 )
 
-            m = re.match(r'\s*"([\w./]+)"', stripped)
+            m = re.match(r'"([\w./]+)"', stripped)
             if m:
                 symbols.append(
                     Symbol(m.group(1), "module", "reference", chunk_id, doc_path, i)
@@ -554,7 +554,7 @@ class SymbolExtractor:
                     Symbol(m.group(1), "class", "definition", chunk_id, doc_path, i)
                 )
 
-            m = re.match(r"(?:[\w:*&]+\s+)+(\w+)\s*\([^)]*\)\s*\{?", stripped)
+            m = re.match(r"(?:[\w:*&]+\s+)+(\w+)\s*\([^)]*\)\s*\{", stripped)
             if m and m.group(1) not in _skip:
                 symbols.append(
                     Symbol(m.group(1), "function", "definition", chunk_id, doc_path, i)

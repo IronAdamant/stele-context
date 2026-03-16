@@ -11,7 +11,6 @@ from chunkforge.symbols import (
     SymbolExtractor, Symbol, resolve_symbols, _module_matches_path,
     _NOISE_REFS,
 )
-from chunkforge.engine import ChunkForge as _CF_for_ident_test
 from chunkforge.symbol_storage import SymbolStorage
 
 
@@ -520,7 +519,8 @@ class TestStalenessPropagation:
             scores[name] = max(c["staleness_score"] for c in doc["chunks"])
 
         # mid.py should be more stale than top.py
-        if "mid.py" in scores and "top.py" in scores:
+        assert "mid.py" in scores, "mid.py should be stale"
+        if "top.py" in scores:
             assert scores["mid.py"] > scores["top.py"]
 
     def test_staleness_threshold_filtering(self):
@@ -587,8 +587,8 @@ class TestSearchWithEdges:
         (self.src / "isolated.py").write_text("x = 42\n")
         self.cf.index_documents([str(self.src)])
         results = self.cf.search("x = 42", top_k=1)
-        if results:
-            assert "edges" not in results[0]
+        assert len(results) >= 1, "Search should return at least 1 result"
+        assert "edges" not in results[0]
 
 
 # -- Configurable skip-dirs tests -------------------------------------------
@@ -793,11 +793,11 @@ class TestSymbolBoostedSearch:
         self.src.mkdir()
 
     def test_query_identifier_extraction(self):
-        idents = _CF_for_ident_test._extract_query_identifiers("StorageBackend")
+        idents = ChunkForge._extract_query_identifiers("StorageBackend")
         assert "StorageBackend" in idents or "Storage" in idents
 
     def test_query_identifier_filters_stopwords(self):
-        idents = _CF_for_ident_test._extract_query_identifiers("the and for")
+        idents = ChunkForge._extract_query_identifiers("the and for")
         assert len(idents) == 0
 
     def test_symbol_match_in_results(self):
@@ -812,6 +812,9 @@ class TestSymbolBoostedSearch:
         self.cf.index_documents([str(self.src)])
         results = self.cf.search("verify_credentials", top_k=10)
         assert len(results) >= 1
+        # At least one result should contain the function definition
+        found_content = any("verify_credentials" in (r.get("content") or "") for r in results)
+        assert found_content, "Search should find chunks containing verify_credentials"
 
 
 # -- Incremental edge rebuild tests ------------------------------------------
