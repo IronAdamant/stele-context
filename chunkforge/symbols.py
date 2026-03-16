@@ -579,11 +579,43 @@ class SymbolExtractor:
 # -- Resolution --------------------------------------------------------------
 
 
+def _build_module_hints(symbols: List[Symbol]) -> Dict[str, Set[str]]:
+    """Build chunk_id -> set of module paths referenced in that chunk.
+
+    Used to prefer definitions from imported modules over unrelated
+    files that happen to define a symbol with the same name.
+    """
+    hints: Dict[str, Set[str]] = {}
+    for sym in symbols:
+        if sym.role == "reference" and sym.kind == "module":
+            hints.setdefault(sym.chunk_id, set()).add(sym.name)
+    return hints
+
+
+def _module_matches_path(module_name: str, file_path: str) -> bool:
+    """Check if a dotted module name plausibly maps to a file path.
+
+    Examples:
+      'chunkforge.engine' matches '.../chunkforge/engine.py'
+      'os.path'           matches '.../os/path.py' or '.../os/path/__init__.py'
+      'utils'             matches '.../utils.py' or '.../utils/__init__.py'
+    """
+    # Convert dotted module to path segments
+    parts = module_name.replace(".", "/")
+    norm = file_path.replace("\\", "/")
+    # Match as directory component + filename (with or without extension)
+    return norm.endswith(f"/{parts}.py") or norm.endswith(f"/{parts}/__init__.py")
+
+
 def resolve_symbols(symbols: List[Symbol]) -> List[Tuple[str, str, str, str]]:
     """Resolve references to definitions, producing edges.
 
     Returns list of (source_chunk_id, target_chunk_id, edge_type, symbol_name).
     An edge means: source_chunk references a symbol defined in target_chunk.
+
+    Module path precision: when a chunk imports ``from foo.bar import Baz``,
+    the resolution prefers a ``Baz`` definition in a file matching ``foo/bar.py``
+    over an unrelated ``Baz`` in another file.
     """
     # Build definition index: name -> [(chunk_id, document_path)]
     definitions: Dict[str, List[Tuple[str, str]]] = {}
@@ -592,6 +624,9 @@ def resolve_symbols(symbols: List[Symbol]) -> List[Tuple[str, str, str, str]]:
             definitions.setdefault(sym.name, []).append(
                 (sym.chunk_id, sym.document_path)
             )
+
+    # Build module hints for path-aware resolution
+    module_hints = _build_module_hints(symbols)
 
     # Match references to definitions
     edges: List[Tuple[str, str, str, str]] = []
@@ -602,6 +637,19 @@ def resolve_symbols(symbols: List[Symbol]) -> List[Tuple[str, str, str, str]]:
             continue
 
         defs = definitions.get(sym.name, [])
+        if not defs:
+            continue
+
+        # Filter: prefer definitions from modules imported in this chunk
+        hints = module_hints.get(sym.chunk_id, set())
+        if hints and len(defs) > 1:
+            hinted = [
+                (cid, dp) for cid, dp in defs
+                if any(_module_matches_path(mod, dp) for mod in hints)
+            ]
+            if hinted:
+                defs = hinted
+
         for def_chunk_id, def_doc_path in defs:
             # Skip self-references within the same chunk
             if def_chunk_id == sym.chunk_id:

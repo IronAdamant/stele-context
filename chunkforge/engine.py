@@ -49,6 +49,11 @@ class ChunkForge:
     DEFAULT_MERGE_THRESHOLD = 0.7
     DEFAULT_CHANGE_THRESHOLD = 0.85
     DEFAULT_SEARCH_ALPHA = 0.7
+    DEFAULT_SKIP_DIRS = {
+        ".git", ".hg", ".svn", "__pycache__", "node_modules",
+        ".venv", "venv", ".tox", ".eggs", "dist", "build",
+        ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    }
 
     MODALITY_THRESHOLDS = {
         "text": {"merge": 0.70, "change": 0.85},
@@ -64,6 +69,7 @@ class ChunkForge:
         merge_threshold: float = DEFAULT_MERGE_THRESHOLD,
         change_threshold: float = DEFAULT_CHANGE_THRESHOLD,
         search_alpha: float = DEFAULT_SEARCH_ALPHA,
+        skip_dirs: Optional[set] = None,
     ):
         self.storage = StorageBackend(storage_dir)
         self.chunk_size = chunk_size
@@ -71,6 +77,7 @@ class ChunkForge:
         self.merge_threshold = merge_threshold
         self.change_threshold = change_threshold
         self.search_alpha = search_alpha
+        self.skip_dirs = self.DEFAULT_SKIP_DIRS | (skip_dirs or set())
         self._init_chunkers()
         self.vector_index = self._load_or_rebuild_index()
         self.session_manager = SessionManager(self.storage, self.vector_index)
@@ -237,14 +244,8 @@ class ChunkForge:
 
         Directories are walked recursively; only files with supported
         extensions are included.  Hidden directories (starting with '.')
-        and common non-source directories are skipped.
+        and directories in ``self.skip_dirs`` are skipped.
         """
-        _SKIP_DIRS = {
-            ".git", ".hg", ".svn", "__pycache__", "node_modules",
-            ".venv", "venv", ".tox", ".eggs", "dist", "build",
-            ".mypy_cache", ".pytest_cache", ".ruff_cache",
-        }
-
         supported: set = set()
         for chunker in self.chunkers.values():
             supported.update(chunker.supported_extensions())
@@ -256,7 +257,7 @@ class ChunkForge:
                 expanded.append(str(p))
             elif p.is_dir():
                 for child in sorted(p.rglob("*")):
-                    if any(part in _SKIP_DIRS for part in child.parts):
+                    if any(part in self.skip_dirs for part in child.parts):
                         continue
                     if any(part.startswith(".") for part in child.relative_to(p).parts):
                         continue
@@ -807,17 +808,32 @@ class ChunkForge:
 
             content = self.storage.get_chunk_content(chunk_id)
 
-            results.append(
-                {
-                    "chunk_id": chunk_id,
-                    "content": content,
-                    "document_path": chunk_meta["document_path"],
-                    "relevance_score": float(score),
-                    "token_count": chunk_meta["token_count"],
-                    "start_pos": chunk_meta["start_pos"],
-                    "end_pos": chunk_meta["end_pos"],
+            entry: Dict[str, Any] = {
+                "chunk_id": chunk_id,
+                "content": content,
+                "document_path": chunk_meta["document_path"],
+                "relevance_score": float(score),
+                "token_count": chunk_meta["token_count"],
+                "start_pos": chunk_meta["start_pos"],
+                "end_pos": chunk_meta["end_pos"],
+            }
+
+            # Attach symbol edges for richer context
+            outgoing = self.storage.get_outgoing_edges(chunk_id)
+            incoming = self.storage.get_incoming_edges(chunk_id)
+            if outgoing or incoming:
+                entry["edges"] = {
+                    "depends_on": [
+                        {"chunk_id": e["target_chunk_id"], "symbol": e["symbol_name"]}
+                        for e in outgoing
+                    ],
+                    "depended_on_by": [
+                        {"chunk_id": e["source_chunk_id"], "symbol": e["symbol_name"]}
+                        for e in incoming
+                    ],
                 }
-            )
+
+            results.append(entry)
 
         return results
 

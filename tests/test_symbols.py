@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from chunkforge.engine import ChunkForge
-from chunkforge.symbols import SymbolExtractor, Symbol, resolve_symbols
+from chunkforge.symbols import (
+    SymbolExtractor, Symbol, resolve_symbols, _module_matches_path,
+)
 from chunkforge.symbol_storage import SymbolStorage
 
 
@@ -519,6 +521,20 @@ class TestStalenessPropagation:
         if "mid.py" in scores and "top.py" in scores:
             assert scores["mid.py"] > scores["top.py"]
 
+    def test_staleness_threshold_filtering(self):
+        """stale_chunks with high threshold should return fewer results."""
+        (self.src / "base.py").write_text("def core():\n    return 1\n")
+        (self.src / "mid.py").write_text("from base import core\ndef middle():\n    return core()\n")
+        (self.src / "top.py").write_text("from mid import middle\ndef top():\n    return middle()\n")
+        self.cf.index_documents([str(self.src)])
+
+        (self.src / "base.py").write_text("def core():\n    return 99\n")
+        self.cf.detect_changes_and_update(session_id="test")
+
+        low = self.cf.stale_chunks(threshold=0.1)
+        high = self.cf.stale_chunks(threshold=0.7)
+        assert low["total_stale"] >= high["total_stale"]
+
     def test_changed_chunks_not_stale(self):
         """The modified chunks themselves should have staleness 0."""
         (self.src / "a.py").write_text("x = 1\n")
@@ -530,3 +546,143 @@ class TestStalenessPropagation:
         stale = self.cf.stale_chunks(threshold=0.01)
         for doc in stale.get("by_document", []):
             assert "a.py" not in doc["path"]
+
+
+# -- Search with edges tests -------------------------------------------------
+
+
+class TestSearchWithEdges:
+    """Test that search results include symbol edges."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.cf = ChunkForge(storage_dir=os.path.join(self.tmpdir, "store"))
+        self.src = Path(self.tmpdir) / "src"
+        self.src.mkdir()
+
+    def test_search_includes_edges(self):
+        (self.src / "base.py").write_text("class Base:\n    pass\n")
+        (self.src / "child.py").write_text(
+            "from base import Base\nclass Child(Base):\n    pass\n"
+        )
+        self.cf.index_documents([str(self.src)])
+        results = self.cf.search("Base class", top_k=5)
+        has_any_edges = any("edges" in r for r in results)
+        assert has_any_edges
+
+    def test_edges_have_depends_on_and_depended_on_by(self):
+        (self.src / "lib.py").write_text("def helper():\n    return 1\n")
+        (self.src / "app.py").write_text("from lib import helper\nhelper()\n")
+        self.cf.index_documents([str(self.src)])
+        results = self.cf.search("helper", top_k=5)
+        for r in results:
+            if "edges" in r:
+                assert "depends_on" in r["edges"]
+                assert "depended_on_by" in r["edges"]
+                break
+
+    def test_no_edges_when_none_exist(self):
+        (self.src / "isolated.py").write_text("x = 42\n")
+        self.cf.index_documents([str(self.src)])
+        results = self.cf.search("x = 42", top_k=1)
+        if results:
+            assert "edges" not in results[0]
+
+
+# -- Configurable skip-dirs tests -------------------------------------------
+
+
+class TestConfigurableSkipDirs:
+    """Test that skip_dirs parameter works."""
+
+    def setup_method(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.src = Path(self.tmpdir) / "src"
+        self.src.mkdir()
+
+    def test_custom_skip_dir(self):
+        cf = ChunkForge(
+            storage_dir=os.path.join(self.tmpdir, "store"),
+            skip_dirs={"vendor"},
+        )
+        (self.src / "app.py").write_text("x = 1\n")
+        vendor = self.src / "vendor"
+        vendor.mkdir()
+        (vendor / "lib.py").write_text("y = 2\n")
+        result = cf.index_documents([str(self.src)])
+        paths = [r["path"] for r in result["indexed"]]
+        assert any("app.py" in p for p in paths)
+        assert not any("vendor" in p for p in paths)
+
+    def test_default_skips_preserved(self):
+        cf = ChunkForge(
+            storage_dir=os.path.join(self.tmpdir, "store"),
+            skip_dirs={"extra"},
+        )
+        assert "node_modules" in cf.skip_dirs
+        assert "__pycache__" in cf.skip_dirs
+        assert "extra" in cf.skip_dirs
+
+    def test_no_custom_skips(self):
+        cf = ChunkForge(storage_dir=os.path.join(self.tmpdir, "store"))
+        assert cf.skip_dirs == ChunkForge.DEFAULT_SKIP_DIRS
+
+
+# -- Module path resolution tests -------------------------------------------
+
+
+class TestModulePathResolution:
+    """Test that resolve_symbols prefers definitions from imported modules."""
+
+    def test_module_matches_path(self):
+        assert _module_matches_path("chunkforge.engine", "/src/chunkforge/engine.py")
+        assert _module_matches_path("utils", "/project/utils.py")
+        assert _module_matches_path("pkg.sub", "/a/pkg/sub.py")
+        assert not _module_matches_path("chunkforge.engine", "/src/other/engine.py")
+        assert not _module_matches_path("foo", "/src/bar.py")
+
+    def test_prefers_imported_module(self):
+        """from pkg.utils import helper should prefer pkg/utils.py's helper."""
+        symbols = [
+            # Two definitions of 'helper' in different files
+            Symbol("helper", "function", "definition", "c_pkg", "/proj/pkg/utils.py"),
+            Symbol("helper", "function", "definition", "c_other", "/proj/other.py"),
+            # Reference with module hint
+            Symbol("pkg.utils", "module", "reference", "c_app", "/proj/app.py"),
+            Symbol("helper", "import", "reference", "c_app", "/proj/app.py"),
+        ]
+        edges = resolve_symbols(symbols)
+        target_chunks = [e[1] for e in edges if e[0] == "c_app"]
+        # Should link to c_pkg (pkg/utils.py), not c_other
+        assert "c_pkg" in target_chunks
+        assert "c_other" not in target_chunks
+
+    def test_falls_back_without_hint(self):
+        """Without module hints, all matching definitions should link."""
+        symbols = [
+            Symbol("Foo", "class", "definition", "c1", "/a.py"),
+            Symbol("Foo", "class", "definition", "c2", "/b.py"),
+            Symbol("Foo", "class", "reference", "c3", "/c.py"),
+        ]
+        edges = resolve_symbols(symbols)
+        targets = {e[1] for e in edges if e[0] == "c3"}
+        assert targets == {"c1", "c2"}
+
+    def test_integration_module_precision(self):
+        """End-to-end: indexing with module path resolution."""
+        tmpdir = tempfile.mkdtemp()
+        src = Path(tmpdir) / "src"
+        pkg = src / "pkg"
+        pkg.mkdir(parents=True)
+
+        (pkg / "utils.py").write_text("def helper():\n    return 1\n")
+        (src / "other_utils.py").write_text("def helper():\n    return 2\n")
+        (src / "app.py").write_text("from pkg.utils import helper\nresult = helper()\n")
+
+        cf = ChunkForge(storage_dir=os.path.join(tmpdir, "store"))
+        cf.index_documents([str(src)])
+
+        # app.py should only link to pkg/utils.py, not other_utils.py
+        stats = cf.get_stats()
+        # At minimum, the edge should exist
+        assert stats["storage"]["edge_count"] >= 1

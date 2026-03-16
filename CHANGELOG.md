@@ -5,6 +5,30 @@ All notable changes to ChunkForge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-03-16
+
+### Added
+- **Symbol graph** — Cross-file reference tracking with `find_references`, `find_definition`, `impact_radius`, and `rebuild_symbols` MCP tools. Extracts definitions and references from 12 language families (Python via AST, JS/TS/HTML/CSS/Java/Go/Rust/C/Ruby/PHP via regex). Zero new dependencies.
+- **Cross-language linking** — HTML `class="btn"` → CSS `.btn {}`, JS `querySelector('.btn')` → CSS `.btn {}`, HTML `onclick="fn()"` → JS `function fn()`, JS `getElementById('app')` → HTML `id="app"`.
+- **Directory indexing** — `index_documents()` now accepts directories. Recursively walks with `Path.rglob()`, filters by supported extensions, skips `.git`, `node_modules`, `__pycache__`, `.venv`, hidden dirs.
+- **Configurable skip-dirs** — `ChunkForge(skip_dirs={"vendor", "generated"})` to add project-specific directories to skip during directory indexing. Merges with defaults.
+- **Staleness propagation** — When `detect_changes_and_update()` finds modified files, propagates staleness scores through symbol edges to dependents. Score = `0.8^depth` (direct dep = 0.8, transitive = 0.64). New `stale_chunks(threshold)` MCP tool.
+- **Search with edges** — `search()` results now include `edges.depends_on` and `edges.depended_on_by` for each chunk, showing symbol connections without extra round-trips.
+- **Module path resolution** — `from pkg.utils import helper` now prefers `helper` defined in `pkg/utils.py` over an unrelated `helper` in another file. Reduces false edges in multi-project indexes.
+- **Symbol re-extraction on change** — `detect_changes_and_update()` re-extracts symbols and rebuilds edges for modified documents, keeping the graph in sync.
+- **`chunkforge/symbols.py`** (~530 LOC) — `SymbolExtractor` class, `resolve_symbols()` with module path hints, `_module_matches_path()` helper.
+- **`chunkforge/symbol_storage.py`** (~200 LOC) — `SymbolStorage` delegate; `symbols` and `symbol_edges` SQLite tables with indexed queries.
+- **`tests/test_symbols.py`** (63 tests) — Symbol extraction, cross-language resolution, storage, engine integration, directory indexing, staleness, search-with-edges, skip-dirs, module path resolution.
+- `staleness_score REAL DEFAULT 0.0` column on chunks table (added via migration).
+
+### Changed
+- **MCP tools**: 23 total (was 18) — added `find_references`, `find_definition`, `impact_radius`, `rebuild_symbols`, `stale_chunks`
+- **`storage.py`**: Delegates symbol operations to `SymbolStorage`; cleanup in `delete_chunks`/`remove_document`/`clear_all`; symbol stats in `get_storage_stats()`
+- **Version**: 0.6.0 → 0.7.0
+
+### Tests
+- **215 tests passing** (was 152), 1 skipped (MCP SDK not installed)
+
 ## [0.6.0] - 2026-03-15
 
 ### Added
@@ -332,6 +356,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.7.0 | 2026-03-16 | Symbol graph, cross-file references, directory indexing, staleness detection, search-with-edges |
 | 0.6.0 | 2026-03-15 | Hybrid search, BPE tokens, adaptive HNSW, per-modality thresholds, binary handling |
 | 0.5.4 | 2026-03-13 | Codebase audit: bug fixes, dead code removal, deduplication, dynamic versioning |
 | 0.5.3 | 2026-03-13 | Better signatures (bigrams, positional features), regex tokenizer, HNSW performance (array.array, cached norms) |
