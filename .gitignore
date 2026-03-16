@@ -73,11 +73,6 @@ Thumbs.db
 *.db
 *.kv
 
-# Local wiki and LLM development docs (proprietary LLM mapping method)
-wiki-local/
-LLM_Development.md
-COMPLETE_PROJECT_DOCUMENTATION.md
-
 # mypy
 .mypy_cache/
 
