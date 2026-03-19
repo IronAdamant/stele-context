@@ -15,6 +15,7 @@ Stele (engine.py) -- main orchestrator
   |     |-- MetadataStorage (metadata_storage.py)
   |     \-- SymbolStorage (symbol_storage.py)
   |-- SessionManager (session.py)
+  |-- SymbolGraphManager (symbol_graph.py) -- extraction, edges, staleness
   \-- SymbolExtractor (symbols.py) -- 12 language families
 
 APIs:
@@ -87,6 +88,9 @@ Backward compat: core.py re-exports Stele + Chunk
 - **Lock routing**: `_do_acquire_lock()`, `_do_get_lock_status()`, `_do_release_lock()` route through coordination (shared) when available, otherwise fall back to per-worktree local locks. Transparent to callers.
 - **Stale bytecache detection**: `env_checks.scan_stale_pycache()` finds `__pycache__` dirs with orphaned `.pyc` files (source `.py` missing). `clean_stale_pycache()` removes them. Exposed via `engine.check_environment()` and `engine.clean_bytecache()`.
 - **Editable install detection**: `env_checks.check_editable_installs()` uses `importlib.metadata` to find `pip install -e .` installs pointing outside the project root (worktree hijack). Surfaced via `check_environment()`.
+- **Change notifications**: `change_notifications` table in coordination DB. Written after `index_documents()` and `detect_changes_and_update()`. Agents poll via `get_notifications(since=timestamp, exclude_self=agent_id)`. Enables near-real-time awareness: "what files did other agents change since my last check?"
+- **SymbolGraphManager**: Extracted from `engine.py` into `symbol_graph.py` following the `SessionManager` delegate pattern. Owns: symbol extraction, edge resolution, staleness propagation, find_references, find_definition, impact_radius, rebuild_graph. Engine delegates with locking wrappers.
+- **Cross-worktree chunk sharing**: Not implemented — not architecturally needed. The signature cache (`content_hash → semantic_signature` in `_chunk_and_store`) already prevents recomputation for unchanged content. Each worktree needs its own chunk records because file content may differ between worktrees.
 
 ## SQLite Tables
 

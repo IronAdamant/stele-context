@@ -711,3 +711,128 @@ class TestEnvironmentChecks:
         result = check_editable_installs(tmp_path)
         assert "editable_issues" in result
         assert isinstance(result["count"], int)
+
+
+# ---------------------------------------------------------------------------
+# Change notifications
+# ---------------------------------------------------------------------------
+
+
+class TestChangeNotifications:
+    @pytest.fixture
+    def coordinated_engine(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(repo),
+        )
+        return e, repo
+
+    def test_index_generates_notification(self, coordinated_engine):
+        """Indexing a file sends a change notification."""
+        e, repo = coordinated_engine
+        f = repo / "file.py"
+        f.write_text("x = 1\n")
+        e.index_documents([str(f)], agent_id="agent-a")
+
+        notifs = e.get_notifications()
+        assert notifs["count"] >= 1
+        assert any(
+            n["change_type"] == "indexed" and n["document_path"] == "file.py"
+            for n in notifs["notifications"]
+        )
+
+    def test_notifications_exclude_self(self, coordinated_engine):
+        """exclude_self filters out the requesting agent's notifications."""
+        e, repo = coordinated_engine
+        f = repo / "file.py"
+        f.write_text("x = 1\n")
+        e.index_documents([str(f)], agent_id="agent-a")
+
+        notifs = e.get_notifications(exclude_self="agent-a")
+        assert notifs["count"] == 0
+
+    def test_notifications_since_timestamp(self, coordinated_engine):
+        """since parameter filters by time."""
+        import time
+        e, repo = coordinated_engine
+        f = repo / "file.py"
+        f.write_text("x = 1\n")
+        e.index_documents([str(f)], agent_id="agent-a")
+
+        future = time.time() + 1000
+        notifs = e.get_notifications(since=future)
+        assert notifs["count"] == 0
+
+    def test_detect_changes_generates_notification(self, coordinated_engine):
+        """detect_changes_and_update notifies about modified files."""
+        e, repo = coordinated_engine
+        f = repo / "file.py"
+        f.write_text("x = 1\n")
+        e.index_documents([str(f)], agent_id="agent-a")
+
+        f.write_text("x = 2  # modified\n")
+        e.detect_changes_and_update(
+            session_id="s1", agent_id="agent-a",
+        )
+
+        notifs = e.get_notifications()
+        assert any(
+            n["change_type"] == "modified"
+            for n in notifs["notifications"]
+        )
+
+    def test_no_notifications_without_coordination(self, tmp_path):
+        """Without coordination, get_notifications returns empty."""
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            enable_coordination=False,
+        )
+        notifs = e.get_notifications()
+        assert notifs["count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Symbol graph extraction
+# ---------------------------------------------------------------------------
+
+
+class TestSymbolGraphExtraction:
+    def test_symbol_manager_initialized(self, tmp_path):
+        """Engine creates SymbolGraphManager on init."""
+        from stele.symbol_graph import SymbolGraphManager
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            enable_coordination=False,
+        )
+        assert isinstance(e.symbol_manager, SymbolGraphManager)
+
+    def test_find_references_delegates(self, tmp_path):
+        """find_references works through the extracted manager."""
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            enable_coordination=False,
+        )
+        f = tmp_path / "test.py"
+        f.write_text("def my_func():\n    pass\n\nresult = my_func()\n")
+        e.index_documents([str(f)])
+
+        result = e.find_references("my_func")
+        assert result["total"] >= 1
+
+    def test_rebuild_symbol_graph_delegates(self, tmp_path):
+        """rebuild_symbol_graph works through the extracted manager."""
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            enable_coordination=False,
+        )
+        f = tmp_path / "test.py"
+        f.write_text("class Foo:\n    pass\n")
+        e.index_documents([str(f)])
+
+        result = e.rebuild_symbol_graph()
+        assert "symbols" in result
+        assert "edges" in result

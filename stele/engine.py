@@ -6,12 +6,12 @@ import hashlib
 import os
 import re
 import threading
-from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from stele.coordination import CoordinationBackend, detect_git_common_dir
 from stele.rwlock import RWLock
+from stele.symbol_graph import SymbolGraphManager
 
 from stele.chunkers.numpy_compat import (
     cosine_similarity,
@@ -37,7 +37,6 @@ from stele.index_store import (
 )
 from stele.session import SessionManager
 from stele.storage import StorageBackend
-from stele.symbols import SymbolExtractor, Symbol, resolve_symbols
 
 
 def _get_version() -> str:
@@ -107,9 +106,9 @@ class Stele:
         self._init_chunkers()
         self.vector_index = self._load_or_rebuild_index()
         self.session_manager = SessionManager(self.storage, self.vector_index)
+        self.symbol_manager = SymbolGraphManager(self.storage)
         self.bm25_index = None
         self._bm25_ready = False
-        self._symbol_extractor = SymbolExtractor()
         self._lock = RWLock()
         self._bm25_init_lock = threading.Lock()
         self._coordination = (
@@ -496,7 +495,7 @@ class Stele:
             self._remove_stale_chunks(old_ids, new_ids)
 
         self._persist_chunks(chunks, doc_path)
-        self._extract_document_symbols(doc_path, chunks)
+        self.symbol_manager.extract_document_symbols(doc_path, chunks)
 
         self.storage.store_document(
             document_path=doc_path,
@@ -648,7 +647,14 @@ class Stele:
             for doc_info in results["indexed"]:
                 for c in self.storage.get_document_chunks(doc_info["path"]):
                     affected.add(c["chunk_id"])
-            self._rebuild_edges(affected_chunk_ids=affected or None)
+            self.symbol_manager.rebuild_edges(affected_chunk_ids=affected or None)
+
+        # Notify other agents about changes
+        if self._coordination and results["indexed"]:
+            self._coordination.notify_changes_batch(
+                [(d["path"], "indexed") for d in results["indexed"]],
+                agent_id or "",
+            )
 
         return results
 
@@ -1046,7 +1052,7 @@ class Stele:
 
                 # Persist updated chunks and clean up stale ones
                 self._persist_chunks(new_chunks, doc_path)
-                self._extract_document_symbols(doc_path, new_chunks)
+                self.symbol_manager.extract_document_symbols(doc_path, new_chunks)
                 old_chunk_ids = {m["chunk_id"] for m in old_chunks_meta}
                 new_chunk_ids = {c.chunk_id for c in new_chunks}
                 self._remove_stale_chunks(old_chunk_ids, new_chunk_ids)
@@ -1066,15 +1072,28 @@ class Stele:
             for doc_info in results["modified"]:
                 for c in self.storage.get_document_chunks(doc_info["path"]):
                     modified_chunk_ids.add(c["chunk_id"])
-            self._rebuild_edges(
+            self.symbol_manager.rebuild_edges(
                 affected_chunk_ids=modified_chunk_ids or None
             )
             if modified_chunk_ids:
-                self._propagate_staleness(modified_chunk_ids)
+                self.symbol_manager.propagate_staleness(modified_chunk_ids)
 
         self.storage.record_change(
             summary=results, session_id=session_id, reason=reason
         )
+
+        # Notify other agents about changes
+        if self._coordination:
+            changes = []
+            for d in results.get("modified", []):
+                if isinstance(d, dict):
+                    changes.append((d["path"], "modified"))
+            for path in results.get("removed", []):
+                changes.append((path, "removed"))
+            if changes:
+                self._coordination.notify_changes_batch(
+                    changes, agent_id or "",
+                )
 
         return results
 
@@ -1156,7 +1175,7 @@ class Stele:
                 "end_pos": chunk_meta["end_pos"],
             }
 
-            self._attach_edges(entry, chunk_id)
+            self.symbol_manager.attach_edges(entry, chunk_id)
             results.append(entry)
 
         # Symbol-boosted search: find chunks defining symbols that match
@@ -1184,7 +1203,7 @@ class Stele:
                     "end_pos": chunk_meta["end_pos"],
                     "symbol_match": sym["name"],
                 }
-                self._attach_edges(entry, cid)
+                self.symbol_manager.attach_edges(entry, cid)
                 results.append(entry)
                 existing_ids.add(cid)
 
@@ -1298,332 +1317,32 @@ class Stele:
         with self._lock.write_lock():
             return self.session_manager.prune(session_id, max_tokens)
 
-    # -- Symbol graph ---------------------------------------------------------
-
-    @staticmethod
-    def _dicts_to_symbols(raw: List[Dict]) -> List[Symbol]:
-        """Convert raw symbol dicts from storage to Symbol dataclasses."""
-        return [
-            Symbol(
-                name=s["name"],
-                kind=s["kind"],
-                role=s["role"],
-                chunk_id=s["chunk_id"],
-                document_path=s["document_path"],
-                line_number=s["line_number"],
-            )
-            for s in raw
-        ]
-
-    def _attach_edges(self, entry: Dict, chunk_id: str) -> None:
-        """Attach symbol edges to a search result entry (in-place)."""
-        outgoing = self.storage.get_outgoing_edges(chunk_id)
-        incoming = self.storage.get_incoming_edges(chunk_id)
-        if outgoing or incoming:
-            entry["edges"] = {
-                "depends_on": [
-                    {"chunk_id": e["target_chunk_id"], "symbol": e["symbol_name"]}
-                    for e in outgoing
-                ],
-                "depended_on_by": [
-                    {"chunk_id": e["source_chunk_id"], "symbol": e["symbol_name"]}
-                    for e in incoming
-                ],
-            }
-
-    def _extract_document_symbols(
-        self, doc_path: str, chunks: List[Chunk]
-    ) -> None:
-        """Extract symbols from a document's chunks and store them."""
-        self.storage.clear_document_symbols(doc_path)
-        ext = Path(doc_path).suffix.lstrip(".").lower()
-        doc_symbols = []
-        for chunk in chunks:
-            if isinstance(chunk.content, str):
-                syms = self._symbol_extractor.extract(
-                    chunk.content, doc_path, chunk.chunk_id, ext
-                )
-                doc_symbols.extend(syms)
-        if doc_symbols:
-            self.storage.store_symbols(doc_symbols)
-
-    def _rebuild_edges(
-        self, affected_chunk_ids: Optional[set] = None
-    ) -> None:
-        """Rebuild symbol edges from current symbols.
-
-        If affected_chunk_ids is given, only edges involving those chunks
-        are cleared and re-created (incremental).  Otherwise, all edges
-        are rebuilt from scratch (used by rebuild_symbol_graph).
-        """
-        all_syms_raw = self.storage.get_all_symbols()
-        if not all_syms_raw:
-            if affected_chunk_ids is None:
-                self.storage.clear_all_edges()
-            return
-
-        all_syms = self._dicts_to_symbols(all_syms_raw)
-        all_edges = resolve_symbols(all_syms)
-
-        if affected_chunk_ids is None:
-            # Full rebuild
-            self.storage.clear_all_edges()
-            self.storage.store_edges(all_edges)
-        else:
-            # Incremental: only touch edges involving affected chunks
-            self.storage.clear_chunk_edges(list(affected_chunk_ids))
-            scoped = [
-                e for e in all_edges
-                if e[0] in affected_chunk_ids or e[1] in affected_chunk_ids
-            ]
-            self.storage.store_edges(scoped)
-
-    def _propagate_staleness(
-        self,
-        changed_chunk_ids: set,
-        decay: float = 0.8,
-        max_depth: int = 3,
-    ) -> int:
-        """Propagate staleness scores through the symbol graph.
-
-        When chunks change, their dependents (chunks that reference them)
-        become potentially stale.  Score decays by `decay` per hop:
-        depth 1 = decay, depth 2 = decay^2, etc.
-
-        Changed chunks themselves get score 0 (they are already fresh).
-        Returns the number of chunks marked stale.
-        """
-        # Reset staleness on changed chunks (they're freshly indexed)
-        self.storage.set_staleness_batch(
-            [(0.0, cid) for cid in changed_chunk_ids]
-        )
-
-        # BFS from changed chunks outward through dependents
-        visited: Dict[str, float] = {}
-        queue = deque((cid, 0) for cid in changed_chunk_ids)
-
-        while queue:
-            current_id, depth = queue.popleft()
-            if depth > max_depth:
-                continue
-
-            edges = self.storage.get_incoming_edges(current_id)
-            for edge in edges:
-                dep_id = edge["source_chunk_id"]
-                if dep_id in changed_chunk_ids:
-                    continue
-                new_score = decay ** (depth + 1)
-                # Keep highest staleness if reached via multiple paths
-                if dep_id not in visited or new_score > visited[dep_id]:
-                    visited[dep_id] = new_score
-                    queue.append((dep_id, depth + 1))
-
-        if visited:
-            self.storage.set_staleness_batch(
-                [(score, cid) for cid, score in visited.items()]
-            )
-
-        return len(visited)
+    # -- Symbol graph (delegated to SymbolGraphManager) ----------------------
 
     def stale_chunks(self, threshold: float = 0.3) -> Dict[str, Any]:
-        """Get chunks whose dependencies have changed since last indexing.
-
-        Returns chunks with staleness_score >= threshold, grouped by file.
-        A staleness score of 0.8 means a direct dependency changed;
-        0.64 means a dependency-of-a-dependency changed, etc.
-        """
+        """Get chunks whose dependencies have changed since last indexing."""
         with self._lock.read_lock():
-            return self._stale_chunks_unlocked(threshold)
-
-    def _stale_chunks_unlocked(self, threshold: float = 0.3) -> Dict[str, Any]:
-        stale = self.storage.get_stale_chunks(threshold)
-
-        by_doc: Dict[str, list] = {}
-        for chunk in stale:
-            by_doc.setdefault(chunk["document_path"], []).append({
-                "chunk_id": chunk["chunk_id"],
-                "staleness_score": chunk["staleness_score"],
-                "token_count": chunk["token_count"],
-                "content_preview": (chunk.get("content") or "")[:200],
-            })
-
-        return {
-            "threshold": threshold,
-            "total_stale": len(stale),
-            "files_affected": len(by_doc),
-            "by_document": [
-                {
-                    "path": doc_path,
-                    "chunks": chunks,
-                }
-                for doc_path, chunks in sorted(
-                    by_doc.items(),
-                    key=lambda x: max(c["staleness_score"] for c in x[1]),
-                    reverse=True,
-                )
-            ],
-        }
+            return self.symbol_manager.stale_chunks(threshold)
 
     def find_references(self, symbol: str) -> Dict[str, Any]:
-        """Find all references to a symbol across the codebase.
-
-        Returns definitions and references with chunk content previews.
-        """
+        """Find all references to a symbol across the codebase."""
         with self._lock.read_lock():
-            return self._find_references_unlocked(symbol)
-
-    def _find_references_unlocked(self, symbol: str) -> Dict[str, Any]:
-        definitions = self.storage.find_definitions(symbol)
-        references = self.storage.find_references_by_name(symbol)
-
-        def _enrich(syms: List[Dict]) -> List[Dict]:
-            results = []
-            for sym in syms:
-                chunk = self.storage.get_chunk(sym["chunk_id"])
-                results.append({
-                    "symbol": sym["name"],
-                    "kind": sym["kind"],
-                    "chunk_id": sym["chunk_id"],
-                    "document_path": sym["document_path"],
-                    "line_number": sym.get("line_number"),
-                    "content_preview": (
-                        (chunk.get("content") or "")[:200] if chunk else ""
-                    ),
-                })
-            return results
-
-        return {
-            "symbol": symbol,
-            "definitions": _enrich(definitions),
-            "references": _enrich(references),
-            "total": len(definitions) + len(references),
-        }
+            return self.symbol_manager.find_references(symbol)
 
     def find_definition(self, symbol: str) -> Dict[str, Any]:
         """Find the definition(s) of a symbol."""
         with self._lock.read_lock():
-            return self._find_definition_unlocked(symbol)
+            return self.symbol_manager.find_definition(symbol)
 
-    def _find_definition_unlocked(self, symbol: str) -> Dict[str, Any]:
-        definitions = self.storage.find_definitions(symbol)
-
-        results = []
-        for defn in definitions:
-            chunk = self.storage.get_chunk(defn["chunk_id"])
-            results.append({
-                "symbol": defn["name"],
-                "kind": defn["kind"],
-                "chunk_id": defn["chunk_id"],
-                "document_path": defn["document_path"],
-                "line_number": defn.get("line_number"),
-                "content": chunk.get("content") if chunk else None,
-                "token_count": chunk["token_count"] if chunk else 0,
-            })
-
-        return {
-            "symbol": symbol,
-            "definitions": results,
-            "count": len(results),
-        }
-
-    def impact_radius(
-        self, chunk_id: str, depth: int = 2
-    ) -> Dict[str, Any]:
-        """Find all chunks potentially affected by a change to this chunk.
-
-        BFS over symbol edges: follows incoming edges (dependents) to find
-        chunks that reference this one, transitively up to `depth` hops.
-        """
+    def impact_radius(self, chunk_id: str, depth: int = 2) -> Dict[str, Any]:
+        """Find all chunks potentially affected by a change to this chunk."""
         with self._lock.read_lock():
-            return self._impact_radius_unlocked(chunk_id, depth)
-
-    def _impact_radius_unlocked(
-        self, chunk_id: str, depth: int = 2
-    ) -> Dict[str, Any]:
-        visited: set = set()
-        queue = deque([(chunk_id, 0)])
-        layers: Dict[int, List[str]] = {}
-
-        while queue:
-            current_id, current_depth = queue.popleft()
-            if current_id in visited or current_depth > depth:
-                continue
-            visited.add(current_id)
-            layers.setdefault(current_depth, []).append(current_id)
-
-            if current_depth < depth:
-                edges = self.storage.get_incoming_edges(current_id)
-                for edge in edges:
-                    if edge["source_chunk_id"] not in visited:
-                        queue.append((edge["source_chunk_id"], current_depth + 1))
-
-        result_chunks = []
-        for d, chunk_ids in sorted(layers.items()):
-            for cid in chunk_ids:
-                if cid == chunk_id and d == 0:
-                    continue
-                meta = self.storage.get_chunk(cid)
-                if meta:
-                    result_chunks.append({
-                        "chunk_id": cid,
-                        "document_path": meta["document_path"],
-                        "depth": d,
-                        "content": meta.get("content"),
-                        "token_count": meta["token_count"],
-                    })
-
-        return {
-            "origin_chunk_id": chunk_id,
-            "max_depth": depth,
-            "affected_chunks": len(result_chunks),
-            "chunks": result_chunks,
-        }
+            return self.symbol_manager.impact_radius(chunk_id, depth)
 
     def rebuild_symbol_graph(self) -> Dict[str, Any]:
-        """Rebuild the entire symbol graph from stored chunk content.
-
-        Use this after upgrading to a version with symbol support,
-        or to repair the graph.
-        """
+        """Rebuild the entire symbol graph from stored chunk content."""
         with self._lock.write_lock():
-            return self._rebuild_symbol_graph_unlocked()
-
-    def _rebuild_symbol_graph_unlocked(self) -> Dict[str, Any]:
-        all_chunks = self.storage.search_chunks()
-
-        self.storage.clear_all_symbols()
-        self.storage.clear_all_edges()
-
-        by_doc: Dict[str, list] = {}
-        for chunk in all_chunks:
-            by_doc.setdefault(chunk["document_path"], []).append(chunk)
-
-        total_symbols = 0
-        for doc_path, chunks in by_doc.items():
-            ext = Path(doc_path).suffix.lstrip(".").lower()
-            doc_symbols = []
-            for chunk in chunks:
-                content = chunk.get("content")
-                if content:
-                    syms = self._symbol_extractor.extract(
-                        content, doc_path, chunk["chunk_id"], ext
-                    )
-                    doc_symbols.extend(syms)
-            if doc_symbols:
-                self.storage.store_symbols(doc_symbols)
-                total_symbols += len(doc_symbols)
-
-        # Resolve edges
-        all_syms_raw = self.storage.get_all_symbols()
-        all_syms = self._dicts_to_symbols(all_syms_raw)
-        edges = resolve_symbols(all_syms)
-        self.storage.store_edges(edges)
-
-        return {
-            "documents": len(by_doc),
-            "symbols": total_symbols,
-            "edges": len(edges),
-        }
+            return self.symbol_manager.rebuild_graph()
 
     def get_stats(self) -> Dict[str, Any]:
         """Get Stele statistics."""
@@ -1754,6 +1473,25 @@ class Stele:
         if not self._coordination:
             return []
         return self._coordination.list_agents(active_only=active_only)
+
+    def get_notifications(
+        self,
+        since: Optional[float] = None,
+        exclude_self: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Get change notifications from other agents.
+
+        Args:
+            since: Unix timestamp; only notifications after this time.
+            exclude_self: Agent ID to exclude (skip your own changes).
+            limit: Max notifications to return.
+        """
+        if not self._coordination:
+            return {"notifications": [], "count": 0, "latest_timestamp": 0.0}
+        return self._coordination.get_notifications(
+            since=since, exclude_agent=exclude_self, limit=limit,
+        )
 
     # -- Environment checks ---------------------------------------------------
 

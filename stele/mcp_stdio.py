@@ -596,6 +596,28 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
                     "properties": {},
                 },
             ),
+            Tool(
+                name="get_notifications",
+                description="Get change notifications from other agents (what files changed since last check)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "since": {
+                            "type": "number",
+                            "description": "Unix timestamp; only show notifications after this",
+                        },
+                        "exclude_self": {
+                            "type": "string",
+                            "description": "Agent ID to exclude from results",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max notifications (default: 100)",
+                            "default": 100,
+                        },
+                    },
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -744,6 +766,12 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
                 result = engine.check_environment()
             elif name == "clean_bytecache":
                 result = engine.clean_bytecache()
+            elif name == "get_notifications":
+                result = engine.get_notifications(
+                    since=arguments.get("since"),
+                    exclude_self=arguments.get("exclude_self"),
+                    limit=arguments.get("limit", 100),
+                )
             else:
                 result = {"error": f"Unknown tool: {name}"}
 

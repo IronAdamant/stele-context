@@ -460,6 +460,28 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "required": [],
         },
     },
+    "get_notifications": {
+        "description": "Get change notifications from other agents (what files changed since last check).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "since": {
+                    "type": "number",
+                    "description": "Unix timestamp; only notifications after this time",
+                },
+                "exclude_self": {
+                    "type": "string",
+                    "description": "Agent ID to exclude (skip your own changes)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max notifications to return (default: 100)",
+                    "default": 100,
+                },
+            },
+            "required": [],
+        },
+    },
 }
 
 
@@ -562,6 +584,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "list_agents": self.stele.list_agents,
             "environment_check": self.stele.check_environment,
             "clean_bytecache": self.stele.clean_bytecache,
+            "get_notifications": self.stele.get_notifications,
         }
 
     def _handle_tools_discovery(self) -> None:

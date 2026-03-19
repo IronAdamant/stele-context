@@ -130,6 +130,16 @@ class CoordinationBackend:
                     created_at REAL NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS change_notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_path TEXT NOT NULL,
+                    change_type TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    worktree_root TEXT,
+                    created_at REAL NOT NULL
+                )
+            """)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sc_doc "
                 "ON shared_conflicts(document_path)"
@@ -137,6 +147,10 @@ class CoordinationBackend:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sc_time "
                 "ON shared_conflicts(created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cn_time "
+                "ON change_notifications(created_at)"
             )
             conn.commit()
 
@@ -515,3 +529,100 @@ class CoordinationBackend:
                     d.pop("details_json", None)
                 results.append(d)
             return results
+
+    # -- Change notifications -------------------------------------------------
+
+    def notify_change(
+        self,
+        document_path: str,
+        change_type: str,
+        agent_id: str,
+    ) -> None:
+        """Record a change notification visible to all worktrees.
+
+        Args:
+            document_path: Normalized project-relative path.
+            change_type: One of 'indexed', 'modified', 'removed'.
+            agent_id: The agent that made the change.
+        """
+        now = time.time()
+        with self._connect() as conn:
+            worktree = self._agent_worktree(conn, agent_id)
+            conn.execute(
+                """
+                INSERT INTO change_notifications
+                (document_path, change_type, agent_id, worktree_root, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (document_path, change_type, agent_id, worktree, now),
+            )
+            conn.commit()
+
+    def notify_changes_batch(
+        self,
+        changes: List[tuple],
+        agent_id: str,
+    ) -> int:
+        """Batch-write change notifications.
+
+        Each entry is ``(document_path, change_type)``.
+        """
+        if not changes:
+            return 0
+        now = time.time()
+        with self._connect() as conn:
+            worktree = self._agent_worktree(conn, agent_id)
+            conn.executemany(
+                """
+                INSERT INTO change_notifications
+                (document_path, change_type, agent_id, worktree_root, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (doc_path, change_type, agent_id, worktree, now)
+                    for doc_path, change_type in changes
+                ],
+            )
+            conn.commit()
+        return len(changes)
+
+    def get_notifications(
+        self,
+        since: Optional[float] = None,
+        exclude_agent: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Get change notifications, optionally since a timestamp.
+
+        Use ``exclude_agent`` to skip an agent's own notifications
+        (common pattern: "what changed since my last check, by others?").
+        """
+        with self._connect() as conn:
+            conditions: List[str] = []
+            params: List[Any] = []
+
+            if since is not None:
+                conditions.append("created_at > ?")
+                params.append(since)
+            if exclude_agent is not None:
+                conditions.append("agent_id != ?")
+                params.append(exclude_agent)
+
+            where = "WHERE " + " AND ".join(conditions) if conditions else ""
+            query = (
+                f"SELECT * FROM change_notifications {where} "
+                "ORDER BY created_at DESC LIMIT ?"
+            )
+            params.append(limit)
+            rows = conn.execute(query, params).fetchall()
+
+            notifications = [dict(r) for r in rows]
+            latest = max(
+                (n["created_at"] for n in notifications), default=since or 0.0,
+            )
+
+            return {
+                "notifications": notifications,
+                "count": len(notifications),
+                "latest_timestamp": latest,
+            }
