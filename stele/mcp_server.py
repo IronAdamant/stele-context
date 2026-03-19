@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import threading
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from typing import Any, Callable, Dict, List, Optional
@@ -429,6 +430,36 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "required": [],
         },
     },
+    "list_agents": {
+        "description": "List agents registered across all worktrees with heartbeat status.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "active_only": {
+                    "type": "boolean",
+                    "description": "Only show active agents (default: true)",
+                    "default": True,
+                },
+            },
+            "required": [],
+        },
+    },
+    "environment_check": {
+        "description": "Check for environment issues: stale __pycache__, editable install mismatches.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "clean_bytecache": {
+        "description": "Remove orphaned .pyc files from stale __pycache__ directories.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 }
 
 
@@ -528,6 +559,9 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "release_agent_locks": self.stele.release_agent_locks,
             "get_conflicts": self.stele.get_conflicts,
             "reap_expired_locks": self.stele.reap_expired_locks,
+            "list_agents": self.stele.list_agents,
+            "environment_check": self.stele.check_environment,
+            "clean_bytecache": self.stele.clean_bytecache,
         }
 
     def _handle_tools_discovery(self) -> None:
@@ -652,6 +686,7 @@ class MCPServer:
         self.agent_id = agent_id or f"stele-http-{os.getpid()}"
         self.server: Optional[HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
+        self._heartbeat_thread: Optional[threading.Thread] = None
 
     def start(self, blocking: bool = False) -> None:
         """Start the MCP server."""
@@ -669,6 +704,14 @@ class MCPServer:
         logger.info("  GET  /health  - Health check")
         logger.info("  POST /call    - Execute a tool")
 
+        # Register agent and start heartbeat
+        self.stele.register_agent(self.agent_id)
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop, daemon=True,
+            name="stele-heartbeat",
+        )
+        self._heartbeat_thread.start()
+
         if blocking:
             self.server.serve_forever()
         else:
@@ -680,6 +723,12 @@ class MCPServer:
             self._thread.start()
             logger.info("Server running in background thread")
 
+    def _heartbeat_loop(self) -> None:
+        """Background heartbeat for agent registration."""
+        while self.server is not None:
+            self.stele.heartbeat(self.agent_id)
+            time.sleep(30)
+
     def stop(self) -> None:
         """Stop the MCP server."""
         if self.server:
@@ -690,6 +739,8 @@ class MCPServer:
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
+
+        self.stele.deregister_agent(self.agent_id)
 
     def get_url(self) -> str:
         """Get the server URL."""

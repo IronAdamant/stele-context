@@ -10,6 +10,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from stele.coordination import CoordinationBackend, detect_git_common_dir
 from stele.rwlock import RWLock
 
 from stele.chunkers.numpy_compat import (
@@ -83,6 +84,7 @@ class Stele:
         self,
         storage_dir: Optional[str] = None,
         project_root: Optional[str] = None,
+        enable_coordination: bool = True,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
         merge_threshold: float = DEFAULT_MERGE_THRESHOLD,
@@ -110,6 +112,53 @@ class Stele:
         self._symbol_extractor = SymbolExtractor()
         self._lock = RWLock()
         self._bm25_init_lock = threading.Lock()
+        self._coordination = (
+            self._init_coordination() if enable_coordination else None
+        )
+
+    def _init_coordination(self) -> Optional[CoordinationBackend]:
+        """Initialize cross-worktree coordination if git common dir exists."""
+        git_common = detect_git_common_dir(self._project_root)
+        if git_common is None:
+            return None
+        try:
+            return CoordinationBackend(git_common)
+        except (OSError, Exception):
+            return None
+
+    # -- Lock routing helpers (coordination or local) -------------------------
+
+    def _do_acquire_lock(
+        self, doc_path: str, agent_id: str,
+        ttl: float = 300.0, force: bool = False,
+    ) -> Dict[str, Any]:
+        if self._coordination:
+            return self._coordination.acquire_lock(doc_path, agent_id, ttl, force)
+        return self.storage.acquire_document_lock(doc_path, agent_id, ttl, force)
+
+    def _do_get_lock_status(self, doc_path: str) -> Dict[str, Any]:
+        if self._coordination:
+            return self._coordination.get_lock_status(doc_path)
+        return self.storage.get_document_lock_status(doc_path)
+
+    def _do_release_lock(
+        self, doc_path: str, agent_id: str,
+    ) -> Dict[str, Any]:
+        if self._coordination:
+            return self._coordination.release_lock(doc_path, agent_id)
+        return self.storage.release_document_lock(doc_path, agent_id)
+
+    def _do_record_conflict(
+        self, document_path: str, agent_a: str, agent_b: str,
+        conflict_type: str, **kwargs: Any,
+    ) -> int:
+        if self._coordination:
+            return self._coordination.record_conflict(
+                document_path, agent_a, agent_b, conflict_type, **kwargs,
+            )
+        return self.storage.record_conflict(
+            document_path, agent_a, agent_b, conflict_type, **kwargs,
+        )
 
     @staticmethod
     def _detect_project_root(
@@ -338,20 +387,25 @@ class Stele:
 
         Called from within write-locked methods.  If ``agent_id`` is
         ``None``, ownership checking is skipped (backward compat).
+        Routes through coordination (shared locks) when available,
+        otherwise falls back to local per-worktree locks.
         """
         if agent_id is None:
             return
-        status = self.storage.get_document_lock_status(document_path)
+        status = self._do_get_lock_status(document_path)
         if status.get("locked") and status["locked_by"] != agent_id:
-            self.storage.record_conflict(
+            self._do_record_conflict(
                 document_path=document_path,
                 agent_a=status["locked_by"],
                 agent_b=agent_id,
                 conflict_type="ownership_violation",
             )
+            worktree_info = ""
+            if status.get("worktree"):
+                worktree_info = f" (worktree: {status['worktree']})"
             raise PermissionError(
                 f"Document '{document_path}' is locked by agent "
-                f"'{status['locked_by']}'"
+                f"'{status['locked_by']}'{worktree_info}"
             )
 
     def detect_modality(self, file_path: str) -> str:
@@ -517,11 +571,9 @@ class Stele:
                 # Auto-acquire lock when agent_id is set and doc exists unlocked
                 existing_doc = self.storage.get_document(norm_path)
                 if agent_id and existing_doc:
-                    status = self.storage.get_document_lock_status(norm_path)
+                    status = self._do_get_lock_status(norm_path)
                     if not status.get("locked"):
-                        self.storage.acquire_document_lock(
-                            norm_path, agent_id,
-                        )
+                        self._do_acquire_lock(norm_path, agent_id)
 
                 # Optimistic version check
                 if expected_versions and norm_path in expected_versions:
@@ -566,7 +618,7 @@ class Stele:
 
                 # Auto-acquire lock on newly-created documents
                 if agent_id and not existing_doc:
-                    self.storage.acquire_document_lock(norm_path, agent_id)
+                    self._do_acquire_lock(norm_path, agent_id)
 
                 # Increment version (if not already done by optimistic check)
                 if not (expected_versions and norm_path in expected_versions):
@@ -1611,9 +1663,7 @@ class Stele:
         """Acquire exclusive write ownership of a document."""
         with self._lock.write_lock():
             document_path = self._normalize_path(document_path)
-            return self.storage.acquire_document_lock(
-                document_path, agent_id, ttl, force
-            )
+            return self._do_acquire_lock(document_path, agent_id, ttl, force)
 
     def refresh_document_lock(
         self,
@@ -1624,8 +1674,12 @@ class Stele:
         """Refresh lock TTL without releasing."""
         with self._lock.write_lock():
             document_path = self._normalize_path(document_path)
+            if self._coordination:
+                return self._coordination.refresh_lock(
+                    document_path, agent_id, ttl,
+                )
             return self.storage.refresh_document_lock(
-                document_path, agent_id, ttl
+                document_path, agent_id, ttl,
             )
 
     def release_document_lock(
@@ -1634,22 +1688,26 @@ class Stele:
         """Release ownership of a document."""
         with self._lock.write_lock():
             document_path = self._normalize_path(document_path)
-            return self.storage.release_document_lock(document_path, agent_id)
+            return self._do_release_lock(document_path, agent_id)
 
     def get_document_lock_status(self, document_path: str) -> Dict[str, Any]:
         """Check lock status of a document."""
         with self._lock.read_lock():
             document_path = self._normalize_path(document_path)
-            return self.storage.get_document_lock_status(document_path)
+            return self._do_get_lock_status(document_path)
 
     def release_agent_locks(self, agent_id: str) -> Dict[str, Any]:
         """Release all locks held by an agent."""
         with self._lock.write_lock():
+            if self._coordination:
+                return self._coordination.release_agent_locks(agent_id)
             return self.storage.release_agent_locks(agent_id)
 
     def reap_expired_locks(self) -> Dict[str, Any]:
         """Clear all expired document locks."""
         with self._lock.write_lock():
+            if self._coordination:
+                return self._coordination.reap_expired_locks()
             return self.storage.reap_expired_locks()
 
     def get_conflicts(
@@ -1662,4 +1720,74 @@ class Stele:
         with self._lock.read_lock():
             if document_path is not None:
                 document_path = self._normalize_path(document_path)
+            if self._coordination:
+                return self._coordination.get_conflicts(
+                    document_path, agent_id, limit,
+                )
             return self.storage.get_conflicts(document_path, agent_id, limit)
+
+    # -- Agent coordination ---------------------------------------------------
+
+    def register_agent(self, agent_id: str) -> Dict[str, Any]:
+        """Register an agent with the cross-worktree coordination DB."""
+        if not self._coordination:
+            return {"registered": False, "reason": "no_coordination"}
+        root = str(self._project_root) if self._project_root else ""
+        return self._coordination.register_agent(agent_id, root)
+
+    def deregister_agent(self, agent_id: str) -> Dict[str, Any]:
+        """Deregister an agent and release all its shared locks."""
+        if not self._coordination:
+            return {"deregistered": False, "reason": "no_coordination"}
+        return self._coordination.deregister_agent(agent_id)
+
+    def heartbeat(self, agent_id: str) -> Dict[str, Any]:
+        """Update heartbeat for a registered agent."""
+        if not self._coordination:
+            return {"updated": False}
+        return self._coordination.heartbeat(agent_id)
+
+    def list_agents(
+        self, active_only: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """List agents registered across all worktrees."""
+        if not self._coordination:
+            return []
+        return self._coordination.list_agents(active_only=active_only)
+
+    # -- Environment checks ---------------------------------------------------
+
+    def check_environment(self) -> Dict[str, Any]:
+        """Run environment checks: stale bytecache + editable installs."""
+        from stele.env_checks import scan_stale_pycache, check_editable_installs
+
+        result: Dict[str, Any] = {"issues": []}
+
+        if self._project_root:
+            bytecache = scan_stale_pycache(
+                self._project_root, self.skip_dirs - {"__pycache__"},
+            )
+            if bytecache["total_stale_files"] > 0:
+                result["issues"].append({
+                    "type": "stale_bytecache",
+                    **bytecache,
+                })
+
+            editable = check_editable_installs(self._project_root)
+            if editable["count"] > 0:
+                result["issues"].append({
+                    "type": "editable_install_mismatch",
+                    **editable,
+                })
+
+        result["total_issues"] = len(result["issues"])
+        return result
+
+    def clean_bytecache(self) -> Dict[str, Any]:
+        """Remove stale __pycache__ files from the project."""
+        if not self._project_root:
+            return {"cleaned": 0}
+        from stele.env_checks import clean_stale_pycache
+        return clean_stale_pycache(
+            self._project_root, self.skip_dirs - {"__pycache__"},
+        )

@@ -20,7 +20,7 @@ from stele.engine import Stele
 @pytest.fixture
 def engine(tmp_path):
     """Create a Stele engine with one indexed document."""
-    e = Stele(storage_dir=str(tmp_path / "stele_data"))
+    e = Stele(storage_dir=str(tmp_path / "stele_data"), enable_coordination=False)
     f = tmp_path / "doc.py"
     f.write_text("def hello():\n    return 'world'\n")
     e.index_documents([str(f)])

@@ -67,7 +67,7 @@ class TestHTTPServer:
             assert "detect_modality" in tool_names
             assert "get_supported_formats" in tool_names
             assert "list_sessions" in tool_names
-            assert len(tool_names) == 23
+            assert len(tool_names) == 26
         finally:
             server.stop()
 

@@ -28,13 +28,20 @@ Concurrency:
   \-- fcntl file locking (index_store.py) -- cross-process index safety
 
 Conflict prevention:
-  |-- DocumentLockStorage (document_lock_storage.py) -- ownership + versioning
+  |-- DocumentLockStorage (document_lock_storage.py) -- per-worktree locks
+  |-- CoordinationBackend (coordination.py) -- cross-worktree shared locks
   |-- Per-document locks (acquire/release/force-steal with TTL expiry)
   |-- Optimistic locking (doc_version compare-and-swap)
-  |-- Conflict log (document_conflicts table, audit trail)
+  |-- Conflict log (per-worktree + shared coordination)
   |-- Project-root detection + path normalization (worktree safety)
   |-- Auto-lock acquisition when agent_id is set
-  \-- MCP server auto agent_id injection
+  |-- MCP server auto agent_id injection + heartbeat
+  \-- Agent registry (cross-worktree visibility)
+
+Environment safety:
+  |-- env_checks.py -- stale bytecache detection/cleanup
+  |-- Editable install (pip -e) hijack detection
+  \-- MCP tools: environment_check, clean_bytecache
 
 Backward compat: core.py re-exports Stele + Chunk
 ```
@@ -75,6 +82,11 @@ Backward compat: core.py re-exports Stele + Chunk
 - **Per-worktree storage isolation**: Default storage is `<project_root>/.stele/` (not `~/.stele/`). Each git worktree gets its own `.stele/` directory since worktrees have separate directory trees. Priority: explicit `storage_dir` > `STELE_STORAGE_DIR` env var > `<project_root>/.stele/` > `~/.stele/`.
 - **Auto-lock acquisition**: When `agent_id` is passed to `index_documents()`, locks are auto-acquired on all documents being indexed. New docs get locked after creation; existing unlocked docs get locked before write. Locks persist after indexing (agent must explicitly release).
 - **MCP server auto agent_id**: Both HTTP (`mcp_server.py`) and stdio (`mcp_stdio.py`) servers generate a unique agent_id (`stele-http-{pid}` / `stele-mcp-{pid}`) and inject it into write operations when the caller doesn't provide one. Ensures all MCP-driven writes are attributed and locked.
+- **Cross-worktree coordination**: `coordination.py` provides a shared SQLite DB in `<git-common-dir>/stele/coordination.db`. Agents from all worktrees share it for locks, registry, and conflict log. `detect_git_common_dir()` parses `.git` file + `commondir` for worktrees. Falls back gracefully when no git repo or read-only `.git/`. Controlled via `enable_coordination` constructor param.
+- **Agent registry + heartbeat**: `register_agent()`, `deregister_agent()`, `heartbeat()`, `list_agents()`. MCP servers auto-register on start, heartbeat every 30s, deregister on stop. `reap_stale_agents(timeout=600)` cleans up dead agents and releases their locks.
+- **Lock routing**: `_do_acquire_lock()`, `_do_get_lock_status()`, `_do_release_lock()` route through coordination (shared) when available, otherwise fall back to per-worktree local locks. Transparent to callers.
+- **Stale bytecache detection**: `env_checks.scan_stale_pycache()` finds `__pycache__` dirs with orphaned `.pyc` files (source `.py` missing). `clean_stale_pycache()` removes them. Exposed via `engine.check_environment()` and `engine.clean_bytecache()`.
+- **Editable install detection**: `env_checks.check_editable_installs()` uses `importlib.metadata` to find `pip install -e .` installs pointing outside the project root (worktree hijack). Surfaced via `check_environment()`.
 
 ## SQLite Tables
 
@@ -85,12 +97,18 @@ Backward compat: core.py re-exports Stele + Chunk
 `document_conflicts` -- conflict audit log (DocumentLockStorage)
 `documents` columns: `locked_by`, `locked_at`, `lock_ttl`, `doc_version`
 
+Coordination DB (`<git-common-dir>/stele/coordination.db`):
+`agents` -- agent registry with heartbeats
+`shared_locks` -- cross-worktree document locks
+`shared_conflicts` -- cross-worktree conflict log
+
 ## Module Boundaries
 
 - `engine.py` is the only file that wires everything together. All other modules are standalone.
 - `index.py` and `bm25.py` have zero internal dependencies.
 - `numpy_compat.py` is the single source for `sig_to_bytes()`, `sig_from_bytes()`, `cosine_similarity()`.
 - Chunker modules only import from `chunkers/base.py`.
+- `coordination.py` and `env_checks.py` are standalone with zero internal deps.
 - No circular imports exist in the dependency graph.
 
 ## Development

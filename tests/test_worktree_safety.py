@@ -420,3 +420,294 @@ class TestWorktreeConflictScenario:
         result = e.index_documents([str(src)])
         paths = {item["path"] for item in result["indexed"]}
         assert paths == {os.path.join("src", "a.py"), os.path.join("src", "b.py")}
+
+
+# ---------------------------------------------------------------------------
+# Cross-worktree coordination
+# ---------------------------------------------------------------------------
+
+
+class TestGitCommonDirDetection:
+    def test_normal_repo(self, tmp_path):
+        """Normal .git directory is its own common dir."""
+        from stele.coordination import detect_git_common_dir
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+
+        result = detect_git_common_dir(repo)
+        assert result == repo / ".git"
+
+    def test_worktree_with_commondir(self, tmp_path):
+        """Worktree .git file with commondir resolves to shared .git."""
+        from stele.coordination import detect_git_common_dir
+
+        # Simulate main repo
+        main = tmp_path / "main"
+        main.mkdir()
+        git_dir = main / ".git"
+        git_dir.mkdir()
+        (git_dir / "HEAD").write_text("ref: refs/heads/main\n")
+        (git_dir / "worktrees").mkdir()
+        wt_gitdir = git_dir / "worktrees" / "feature"
+        wt_gitdir.mkdir()
+        (wt_gitdir / "commondir").write_text("../..\n")
+        (wt_gitdir / "HEAD").write_text("ref: refs/heads/feature\n")
+
+        # Simulate worktree
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        (worktree / ".git").write_text(f"gitdir: {wt_gitdir}\n")
+
+        result = detect_git_common_dir(worktree)
+        assert result == git_dir.resolve()
+
+    def test_no_git(self, tmp_path):
+        """No .git → returns None."""
+        from stele.coordination import detect_git_common_dir
+
+        result = detect_git_common_dir(tmp_path)
+        assert result is None
+
+    def test_none_project_root(self):
+        """None project_root → returns None."""
+        from stele.coordination import detect_git_common_dir
+
+        assert detect_git_common_dir(None) is None
+
+
+class TestCoordinationBackend:
+    @pytest.fixture
+    def coord(self, tmp_path):
+        from stele.coordination import CoordinationBackend
+
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        return CoordinationBackend(git_dir)
+
+    def test_register_and_list(self, coord):
+        coord.register_agent("a1", "/path/main")
+        agents = coord.list_agents()
+        assert len(agents) == 1
+        assert agents[0]["agent_id"] == "a1"
+        assert agents[0]["stale"] is False
+
+    def test_heartbeat(self, coord):
+        coord.register_agent("a1", "/path/main")
+        result = coord.heartbeat("a1")
+        assert result["updated"] is True
+
+    def test_deregister_releases_locks(self, coord):
+        coord.register_agent("a1", "/path/main")
+        coord.acquire_lock("file.py", "a1")
+        result = coord.deregister_agent("a1")
+        assert result["locks_released"] == 1
+
+        status = coord.get_lock_status("file.py")
+        assert status["locked"] is False
+
+    def test_shared_lock_blocks_other_agent(self, coord):
+        coord.register_agent("a1", "/path/main")
+        coord.register_agent("a2", "/path/worktree")
+        coord.acquire_lock("file.py", "a1")
+
+        result = coord.acquire_lock("file.py", "a2")
+        assert result["acquired"] is False
+        assert result["locked_by"] == "a1"
+
+    def test_shared_lock_allows_same_agent(self, coord):
+        coord.register_agent("a1", "/path/main")
+        coord.acquire_lock("file.py", "a1")
+        result = coord.acquire_lock("file.py", "a1")
+        assert result["acquired"] is True
+
+    def test_reap_stale_agents(self, coord):
+        coord.register_agent("a1", "/path/main")
+        coord.acquire_lock("file.py", "a1")
+
+        # Force stale heartbeat
+        import sqlite3
+        with sqlite3.connect(coord.db_path) as conn:
+            conn.execute(
+                "UPDATE agents SET last_heartbeat = 0 WHERE agent_id = 'a1'"
+            )
+            conn.commit()
+
+        result = coord.reap_stale_agents(timeout=1)
+        assert result["reaped_count"] == 1
+        assert coord.get_lock_status("file.py")["locked"] is False
+
+    def test_shared_conflict_log(self, coord):
+        coord.register_agent("a1", "/path/main")
+        coord.register_agent("a2", "/path/wt")
+        coord.acquire_lock("file.py", "a1")
+        coord.acquire_lock("file.py", "a2", force=True)
+
+        conflicts = coord.get_conflicts()
+        assert len(conflicts) == 1
+        assert conflicts[0]["conflict_type"] == "lock_stolen"
+
+
+class TestCoordinationIntegration:
+    def test_engine_with_coordination(self, tmp_path):
+        """Engine uses coordination DB when git common dir exists."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(repo),
+        )
+        assert e._coordination is not None
+
+    def test_engine_without_coordination(self, tmp_path):
+        """Engine skips coordination when no git common dir."""
+        no_git = tmp_path / "plain"
+        no_git.mkdir()
+
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(no_git),
+        )
+        assert e._coordination is None
+
+    def test_enable_coordination_false(self, tmp_path):
+        """enable_coordination=False disables even with git present."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(repo),
+            enable_coordination=False,
+        )
+        assert e._coordination is None
+
+    def test_cross_worktree_lock_visibility(self, tmp_path):
+        """Two engines sharing coordination DB see each other's locks."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+
+        f = repo / "shared.py"
+        f.write_text("x = 1\n")
+
+        e1 = Stele(
+            storage_dir=str(tmp_path / "s1"),
+            project_root=str(repo),
+        )
+        e2 = Stele(
+            storage_dir=str(tmp_path / "s2"),
+            project_root=str(repo),
+        )
+
+        e1.index_documents([str(f)], agent_id="agent-1")
+
+        # Agent-1's lock should be visible to engine-2
+        status = e2.get_document_lock_status(str(f))
+        assert status["locked"] is True
+        assert status["locked_by"] == "agent-1"
+
+    def test_agent_registry_lifecycle(self, tmp_path):
+        """Register → list → deregister lifecycle."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(repo),
+        )
+        e.register_agent("test-agent")
+        agents = e.list_agents()
+        assert any(a["agent_id"] == "test-agent" for a in agents)
+
+        e.deregister_agent("test-agent")
+        agents = e.list_agents()
+        assert not any(a["agent_id"] == "test-agent" for a in agents)
+
+
+# ---------------------------------------------------------------------------
+# Environment checks
+# ---------------------------------------------------------------------------
+
+
+class TestEnvironmentChecks:
+    def test_scan_stale_pycache(self, tmp_path):
+        """Detects .pyc files with missing .py source."""
+        from stele.env_checks import scan_stale_pycache
+
+        cache = tmp_path / "pkg" / "__pycache__"
+        cache.mkdir(parents=True)
+        (cache / "orphan.cpython-312.pyc").write_bytes(b"\x00")
+        # No orphan.py exists
+
+        result = scan_stale_pycache(tmp_path)
+        assert result["total_stale_files"] == 1
+
+    def test_scan_non_stale_pycache(self, tmp_path):
+        """Non-stale .pyc (source exists) is not flagged."""
+        from stele.env_checks import scan_stale_pycache
+
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "module.py").write_text("x = 1\n")
+        cache = pkg / "__pycache__"
+        cache.mkdir()
+        (cache / "module.cpython-312.pyc").write_bytes(b"\x00")
+
+        result = scan_stale_pycache(tmp_path)
+        assert result["total_stale_files"] == 0
+
+    def test_clean_stale_pycache(self, tmp_path):
+        """Removes orphaned .pyc files."""
+        from stele.env_checks import clean_stale_pycache
+
+        cache = tmp_path / "pkg" / "__pycache__"
+        cache.mkdir(parents=True)
+        (cache / "gone.cpython-312.pyc").write_bytes(b"\x00")
+
+        result = clean_stale_pycache(tmp_path)
+        assert result["cleaned"] == 1
+        assert not (cache / "gone.cpython-312.pyc").exists()
+
+    def test_engine_check_environment(self, tmp_path):
+        """Engine's check_environment returns structured results."""
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(tmp_path),
+            enable_coordination=False,
+        )
+        result = e.check_environment()
+        assert "issues" in result
+        assert "total_issues" in result
+
+    def test_engine_clean_bytecache(self, tmp_path):
+        """Engine's clean_bytecache delegates to env_checks."""
+        cache = tmp_path / "__pycache__"
+        cache.mkdir()
+        (cache / "stale.cpython-312.pyc").write_bytes(b"\x00")
+
+        e = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(tmp_path),
+            enable_coordination=False,
+        )
+        result = e.clean_bytecache()
+        assert result["cleaned"] == 1
+
+    def test_check_editable_installs(self, tmp_path):
+        """check_editable_installs runs without error."""
+        from stele.env_checks import check_editable_installs
+
+        result = check_editable_installs(tmp_path)
+        assert "editable_issues" in result
+        assert isinstance(result["count"], int)

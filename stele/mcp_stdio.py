@@ -65,6 +65,10 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
     server = Server("stele")
     server_agent_id = f"stele-mcp-{os.getpid()}"
 
+    # Store engine and agent_id for lifecycle management
+    server._stele_engine = engine  # type: ignore[attr-defined]
+    server._stele_agent_id = server_agent_id  # type: ignore[attr-defined]
+
     # Write tools that should receive a default agent_id
     _WRITE_TOOLS = frozenset({"index", "detect_changes", "remove"})
 
@@ -562,6 +566,36 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
                     "properties": {},
                 },
             ),
+            Tool(
+                name="list_agents",
+                description="List agents registered across all worktrees with heartbeat status",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "active_only": {
+                            "type": "boolean",
+                            "description": "Only show active agents (default: true)",
+                            "default": True,
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="environment_check",
+                description="Check for stale __pycache__, editable install mismatches, and other issues",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
+            Tool(
+                name="clean_bytecache",
+                description="Remove orphaned .pyc files from stale __pycache__ directories",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -702,6 +736,14 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
                 )
             elif name == "reap_expired_locks":
                 result = engine.reap_expired_locks()
+            elif name == "list_agents":
+                result = engine.list_agents(
+                    active_only=arguments.get("active_only", True),
+                )
+            elif name == "environment_check":
+                result = engine.check_environment()
+            elif name == "clean_bytecache":
+                result = engine.clean_bytecache()
             else:
                 result = {"error": f"Unknown tool: {name}"}
 
@@ -775,6 +817,22 @@ async def _run_server(storage_dir: Optional[str] = None) -> None:
     from stele import __version__
 
     server = create_server(storage_dir)
+    engine = server._stele_engine  # type: ignore[attr-defined]
+    agent_id = server._stele_agent_id  # type: ignore[attr-defined]
+
+    # Register agent for cross-worktree visibility
+    engine.register_agent(agent_id)
+
+    async def _heartbeat_loop() -> None:
+        while True:
+            try:
+                engine.heartbeat(agent_id)
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                break
+
+    heartbeat_task = asyncio.create_task(_heartbeat_loop())
+
     init_options = InitializationOptions(
         server_name="stele",
         server_version=__version__,
@@ -784,8 +842,12 @@ async def _run_server(storage_dir: Optional[str] = None) -> None:
         ),
     )
 
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, init_options)
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, init_options)
+    finally:
+        heartbeat_task.cancel()
+        engine.deregister_agent(agent_id)
 
 
 def main(storage_dir: Optional[str] = None) -> None:
