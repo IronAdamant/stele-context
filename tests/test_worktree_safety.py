@@ -101,8 +101,13 @@ class TestPathNormalization:
 
     def test_resolve_absolute_passthrough(self, engine):
         """Absolute path passes through _resolve_path unchanged."""
-        resolved = engine._resolve_path("/etc/config.txt")
-        assert str(resolved) == "/etc/config.txt"
+        if os.name == "nt":
+            # On Windows, use a native absolute path
+            resolved = engine._resolve_path("C:\\etc\\config.txt")
+            assert str(resolved) == "C:\\etc\\config.txt"
+        else:
+            resolved = engine._resolve_path("/etc/config.txt")
+            assert str(resolved) == "/etc/config.txt"
 
     def test_normalize_then_resolve_roundtrip(self, engine, tmp_path):
         """normalize → resolve is a roundtrip for in-project paths."""

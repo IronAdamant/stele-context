@@ -73,6 +73,9 @@ Thumbs.db
 *.db
 *.kv
 
+# GitHub Action logs
+GitHub Logs/
+
 # mypy
 .mypy_cache/
 

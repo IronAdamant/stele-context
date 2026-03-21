@@ -12,9 +12,10 @@ Chronological record of development activity on Stele Context, maintained for LL
 - Added `_heartbeat_thread.join()` in `MCPServer.stop()` for clean shutdown
 - Fixed `row_factory` state leakage in all four `lock_ops.py` functions (save/restore pattern)
 - Reset `row_factory` in non-pooled connection path in `storage_schema.py`
+- Fixed `test_resolve_absolute_passthrough` for Windows — use `C:\` path on `nt`
+- Kept `Optional[str]` in `change_notifications.py` `Callable` type alias — PEP 604 `str | None` in runtime type aliases (outside function annotations) is not supported on Python 3.9
 
 ### Code quality
-- Replaced legacy `Optional` import with `str | None` in `change_notifications.py`
 - Completed generic type annotations in `symbol_graph.py`
 - Moved `os`/`tempfile` imports to module level in `audio.py` and `video.py`
 - Extracted `get_modality_flags()` helper in `tool_registry.py`, used by both MCP servers

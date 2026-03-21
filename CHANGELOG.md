@@ -15,9 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **mcp_server.py**: Join `_heartbeat_thread` in `stop()` for clean daemon shutdown
 - **lock_ops.py**: Save/restore `row_factory` in all four functions to prevent state leakage through connection pool
 - **storage_schema.py**: Reset `row_factory = None` in fallback (non-pooled) connection path for consistency
+- **test_worktree_safety.py**: Fix `test_resolve_absolute_passthrough` for Windows — use native `C:\` path on `os.name == "nt"`
+- **change_notifications.py**: Keep `Optional[str]` in `Callable` type alias (PEP 604 `str | None` in runtime type aliases fails on Python 3.9)
 
 ### Changed
-- **change_notifications.py**: Replace legacy `Optional[str]` with modern `str | None` union syntax, remove unused `Optional` import
 - **symbol_graph.py**: Complete generic type annotations (`set[str]`, `dict[str, list[dict[str, Any]]]`)
 - **audio.py / video.py**: Move `os` and `tempfile` imports to module level (were re-imported inside methods)
 - **tool_registry.py**: Extract `get_modality_flags()` helper to deduplicate modality flag construction from both MCP servers
