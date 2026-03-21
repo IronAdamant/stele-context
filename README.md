@@ -10,6 +10,8 @@
 
 Stele Context helps LLM agents avoid re-reading unchanged files by caching chunk data with semantic search. Documents are routed through modality-specific chunkers, chunk content is stored in SQLite, and an HNSW vector index enables fast O(log n) retrieval. Only modified chunks trigger reprocessing.
 
+![Semantic search demo](docs/semantic-search-demo.png)
+
 ## Key Features
 
 - **100% Offline & Local-Only**: No internet access, no external API calls, no cloud components
