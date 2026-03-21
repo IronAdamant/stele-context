@@ -1,0 +1,9 @@
+include LICENSE
+include README.md
+include CHANGELOG.md
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md
+include stele/py.typed
+recursive-include stele *.py
+recursive-exclude tests *
+recursive-exclude benchmarks *

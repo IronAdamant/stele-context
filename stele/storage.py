@@ -20,17 +20,20 @@ from typing import Any, Dict, List, Optional
 from stele.document_lock_storage import DocumentLockStorage
 from stele.metadata_storage import MetadataStorage
 from stele.session_storage import SessionStorage
+from stele.storage_delegates import StorageDelegatesMixin
+from stele.storage_schema import init_database, migrate_database
 from stele.symbol_storage import SymbolStorage
 
 from stele.chunkers.numpy_compat import sig_to_bytes, sig_from_bytes
 
 
-class StorageBackend:
+class StorageBackend(StorageDelegatesMixin):
     """
     Persistent storage backend for Stele.
 
     Manages SQLite database for metadata and filesystem for KV-cache blobs.
-    Delegates session operations to SessionStorage.
+    Delegates session, metadata, symbol, and lock operations via
+    StorageDelegatesMixin.
     """
 
     def __init__(self, base_dir: Optional[str] = None):
@@ -65,192 +68,13 @@ class StorageBackend:
 
     def _init_database(self) -> None:
         """Initialize SQLite database with required tables."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS chunks (
-                    chunk_id TEXT PRIMARY KEY,
-                    document_path TEXT NOT NULL,
-                    content_hash TEXT NOT NULL,
-                    semantic_signature BLOB NOT NULL,
-                    start_pos INTEGER NOT NULL,
-                    end_pos INTEGER NOT NULL,
-                    token_count INTEGER NOT NULL,
-                    created_at REAL NOT NULL,
-                    last_accessed REAL NOT NULL,
-                    access_count INTEGER DEFAULT 0,
-                    version INTEGER DEFAULT 1
-                )
-            """)
-
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS chunk_history (
-                    chunk_id TEXT NOT NULL,
-                    version INTEGER NOT NULL,
-                    content_hash TEXT NOT NULL,
-                    semantic_signature BLOB NOT NULL,
-                    created_at REAL NOT NULL,
-                    PRIMARY KEY (chunk_id, version),
-                    FOREIGN KEY (chunk_id) REFERENCES chunks(chunk_id)
-                )
-            """)
-
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS documents (
-                    document_path TEXT PRIMARY KEY,
-                    content_hash TEXT NOT NULL,
-                    chunk_count INTEGER NOT NULL,
-                    indexed_at REAL NOT NULL,
-                    last_modified REAL NOT NULL
-                )
-            """)
-
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_id TEXT PRIMARY KEY,
-                    created_at REAL NOT NULL,
-                    last_updated REAL NOT NULL,
-                    turn_count INTEGER DEFAULT 0,
-                    total_tokens INTEGER DEFAULT 0
-                )
-            """)
-
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS session_chunks (
-                    session_id TEXT NOT NULL,
-                    chunk_id TEXT NOT NULL,
-                    turn_number INTEGER NOT NULL,
-                    kv_path TEXT,
-                    relevance_score REAL DEFAULT 1.0,
-                    PRIMARY KEY (session_id, chunk_id, turn_number),
-                    FOREIGN KEY (session_id) REFERENCES sessions(session_id),
-                    FOREIGN KEY (chunk_id) REFERENCES chunks(chunk_id)
-                )
-            """)
-
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS annotations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    target TEXT NOT NULL,
-                    target_type TEXT NOT NULL CHECK(target_type IN ('document', 'chunk')),
-                    content TEXT NOT NULL,
-                    tags TEXT,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
-                )
-            """)
-
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS change_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp REAL NOT NULL,
-                    session_id TEXT,
-                    summary_json TEXT NOT NULL,
-                    reason TEXT
-                )
-            """)
-
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_annotations_target "
-                "ON annotations(target, target_type)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_change_history_ts "
-                "ON change_history(timestamp)"
-            )
-
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_chunks_hash ON chunks(content_hash)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_path)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_session_chunks_session ON session_chunks(session_id)"
-            )
-
-            conn.commit()
+        init_database(self.db_path)
 
     def _migrate_database(self) -> None:
         """Run database migrations for schema changes."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("PRAGMA table_info(chunks)")
-            columns = {row[1] for row in cursor.fetchall()}
+        migrate_database(self.db_path)
 
-            changed = False
-            if "content" not in columns:
-                conn.execute("ALTER TABLE chunks ADD COLUMN content TEXT")
-                changed = True
-            if "version" not in columns:
-                conn.execute("ALTER TABLE chunks ADD COLUMN version INTEGER DEFAULT 1")
-                changed = True
-            if "staleness_score" not in columns:
-                conn.execute(
-                    "ALTER TABLE chunks ADD COLUMN staleness_score REAL DEFAULT 0.0"
-                )
-                changed = True
-            if "semantic_summary" not in columns:
-                conn.execute("ALTER TABLE chunks ADD COLUMN semantic_summary TEXT")
-                changed = True
-            if "agent_signature" not in columns:
-                conn.execute("ALTER TABLE chunks ADD COLUMN agent_signature BLOB")
-                changed = True
-
-            # Migrate sessions table for agent_id
-            cursor = conn.execute("PRAGMA table_info(sessions)")
-            session_columns = {row[1] for row in cursor.fetchall()}
-            if "agent_id" not in session_columns:
-                conn.execute("ALTER TABLE sessions ADD COLUMN agent_id TEXT")
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_sessions_agent "
-                    "ON sessions(agent_id)"
-                )
-                changed = True
-
-            # Migrate documents table for ownership + optimistic locking
-            cursor = conn.execute("PRAGMA table_info(documents)")
-            doc_columns = {row[1] for row in cursor.fetchall()}
-            if "locked_by" not in doc_columns:
-                conn.execute("ALTER TABLE documents ADD COLUMN locked_by TEXT")
-                conn.execute("ALTER TABLE documents ADD COLUMN locked_at REAL")
-                conn.execute(
-                    "ALTER TABLE documents ADD COLUMN lock_ttl REAL DEFAULT 300.0"
-                )
-                changed = True
-            if "doc_version" not in doc_columns:
-                conn.execute(
-                    "ALTER TABLE documents ADD COLUMN doc_version INTEGER DEFAULT 1"
-                )
-                changed = True
-
-            # Conflict log table
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS document_conflicts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    document_path TEXT NOT NULL,
-                    agent_a TEXT NOT NULL,
-                    agent_b TEXT NOT NULL,
-                    conflict_type TEXT NOT NULL,
-                    expected_version INTEGER,
-                    actual_version INTEGER,
-                    resolution TEXT,
-                    details_json TEXT,
-                    created_at REAL NOT NULL
-                )
-            """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_conflicts_doc "
-                "ON document_conflicts(document_path)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_conflicts_time "
-                "ON document_conflicts(created_at)"
-            )
-
-            if changed:
-                conn.commit()
+    # -- Core chunk operations ------------------------------------------------
 
     def store_chunk(
         self,
@@ -263,19 +87,7 @@ class StorageBackend:
         token_count: int,
         content: Optional[str] = None,
     ) -> None:
-        """
-        Store chunk metadata (and optionally content) in database.
-
-        Args:
-            chunk_id: Unique identifier for the chunk
-            document_path: Path to source document
-            content_hash: SHA-256 hash of chunk content
-            semantic_signature: Numpy array or list of semantic features
-            start_pos: Start character position in document
-            end_pos: End character position in document
-            token_count: Estimated token count
-            content: Optional text content to store for retrieval
-        """
+        """Store chunk metadata (and optionally content) in database."""
         now = time.time()
 
         sig_bytes = sig_to_bytes(semantic_signature)
@@ -384,15 +196,7 @@ class StorageBackend:
         self,
         document_path: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Search chunks, returning metadata and content.
-
-        Args:
-            document_path: Optional filter by document path
-
-        Returns:
-            List of chunk dictionaries with metadata and content
-        """
+        """Search chunks, returning metadata and content."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
@@ -411,6 +215,8 @@ class StorageBackend:
     def get_document_chunks(self, document_path: str) -> List[Dict[str, Any]]:
         """Get all chunks for a document."""
         return self.search_chunks(document_path=document_path)
+
+    # -- Document operations --------------------------------------------------
 
     def store_document(
         self,
@@ -451,136 +257,14 @@ class StorageBackend:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    # Metadata methods — delegated to MetadataStorage
+    def get_all_documents(self) -> List[Dict[str, Any]]:
+        """Get all indexed documents."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM documents ORDER BY document_path")
+            return [dict(row) for row in cursor.fetchall()]
 
-    def store_annotation(
-        self,
-        target: str,
-        target_type: str,
-        content: str,
-        tags: Optional[List[str]] = None,
-    ) -> int:
-        """Store an annotation on a document or chunk."""
-        return self._metadata_storage.store_annotation(
-            target, target_type, content, tags
-        )
-
-    def get_annotations(
-        self,
-        target: Optional[str] = None,
-        target_type: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Retrieve annotations with optional filters."""
-        return self._metadata_storage.get_annotations(target, target_type, tags)
-
-    def delete_annotation(self, annotation_id: int) -> bool:
-        """Delete an annotation by ID."""
-        return self._metadata_storage.delete_annotation(annotation_id)
-
-    def record_change(
-        self,
-        summary: Dict[str, Any],
-        session_id: Optional[str] = None,
-        reason: Optional[str] = None,
-    ) -> int:
-        """Record a change history entry."""
-        return self._metadata_storage.record_change(summary, session_id, reason)
-
-    def get_change_history(
-        self,
-        limit: int = 20,
-        document_path: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """Retrieve change history entries."""
-        return self._metadata_storage.get_change_history(limit, document_path)
-
-    def update_annotation(
-        self,
-        annotation_id: int,
-        content: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> bool:
-        """Update an annotation's content and/or tags."""
-        return self._metadata_storage.update_annotation(annotation_id, content, tags)
-
-    def search_annotations(
-        self, query: str, target_type: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """Search annotations by content text."""
-        return self._metadata_storage.search_annotations(query, target_type)
-
-    def prune_history(
-        self,
-        max_age_seconds: Optional[float] = None,
-        max_entries: Optional[int] = None,
-    ) -> int:
-        """Prune change history entries."""
-        return self._metadata_storage.prune_history(max_age_seconds, max_entries)
-
-    # Symbol methods — delegated to SymbolStorage
-
-    def store_symbols(self, symbols: Any) -> None:
-        """Store a batch of Symbol objects."""
-        self._symbol_storage.store_symbols(symbols)
-
-    def store_edges(self, edges: Any) -> None:
-        """Store a batch of symbol edges."""
-        self._symbol_storage.store_edges(edges)
-
-    def clear_document_symbols(self, document_path: str) -> None:
-        """Remove all symbols for a document."""
-        self._symbol_storage.clear_document_symbols(document_path)
-
-    def clear_chunk_edges(self, chunk_ids: List[str]) -> None:
-        """Remove all edges involving the given chunk IDs."""
-        self._symbol_storage.clear_chunk_edges(chunk_ids)
-
-    def clear_chunk_symbols(self, chunk_ids: List[str]) -> None:
-        """Remove all symbols for the given chunk IDs."""
-        self._symbol_storage.clear_chunk_symbols(chunk_ids)
-
-    def clear_all_symbols(self) -> None:
-        """Remove all symbols."""
-        self._symbol_storage.clear_all_symbols()
-
-    def clear_all_edges(self) -> None:
-        """Remove all edges."""
-        self._symbol_storage.clear_all_edges()
-
-    def get_all_symbols(self) -> List[Dict[str, Any]]:
-        """Get all symbols."""
-        return self._symbol_storage.get_all_symbols()
-
-    def find_definitions(self, name: str) -> List[Dict[str, Any]]:
-        """Find all definitions for a symbol name."""
-        return self._symbol_storage.find_definitions(name)
-
-    def find_references_by_name(self, name: str) -> List[Dict[str, Any]]:
-        """Find all references to a symbol name."""
-        return self._symbol_storage.find_references_by_name(name)
-
-    def get_edges_for_chunk(self, chunk_id: str) -> List[Dict[str, Any]]:
-        """Get all edges involving a chunk."""
-        return self._symbol_storage.get_edges_for_chunk(chunk_id)
-
-    def get_incoming_edges(self, chunk_id: str) -> List[Dict[str, Any]]:
-        """Get edges where other chunks reference this chunk."""
-        return self._symbol_storage.get_incoming_edges(chunk_id)
-
-    def get_outgoing_edges(self, chunk_id: str) -> List[Dict[str, Any]]:
-        """Get edges where this chunk references other chunks."""
-        return self._symbol_storage.get_outgoing_edges(chunk_id)
-
-    def search_symbol_names(self, tokens: List[str]) -> List[Dict[str, Any]]:
-        """Find definition symbols whose names match query tokens."""
-        return self._symbol_storage.search_symbol_names(tokens)
-
-    def get_symbol_stats(self) -> Dict[str, Any]:
-        """Get symbol and edge statistics."""
-        return self._symbol_storage.get_symbol_stats()
-
-    # Agent-supplied semantic embedding methods
+    # -- Agent-supplied semantic embedding methods ----------------------------
 
     def store_semantic_summary(
         self,
@@ -588,16 +272,7 @@ class StorageBackend:
         summary: str,
         agent_signature: Any,
     ) -> bool:
-        """Store an agent-supplied semantic summary and its computed signature.
-
-        Args:
-            chunk_id: Chunk to annotate with semantic summary
-            summary: Agent's semantic description of the chunk
-            agent_signature: 128-dim signature computed from the summary
-
-        Returns:
-            True if chunk was found and updated, False otherwise.
-        """
+        """Store an agent-supplied semantic summary and its computed signature."""
         sig_bytes = sig_to_bytes(agent_signature)
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -613,15 +288,7 @@ class StorageBackend:
         chunk_id: str,
         agent_signature: Any,
     ) -> bool:
-        """Store a raw agent-supplied embedding vector.
-
-        Args:
-            chunk_id: Chunk to update
-            agent_signature: 128-dim vector from agent
-
-        Returns:
-            True if chunk was found and updated, False otherwise.
-        """
+        """Store a raw agent-supplied embedding vector."""
         sig_bytes = sig_to_bytes(agent_signature)
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -643,7 +310,7 @@ class StorageBackend:
                 return None
             return sig_from_bytes(row[0])
 
-    # Chunk history methods
+    # -- Chunk history --------------------------------------------------------
 
     def get_chunk_history(
         self,
@@ -651,63 +318,35 @@ class StorageBackend:
         document_path: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """Query chunk version history.
-
-        Args:
-            chunk_id: Filter by specific chunk ID
-            document_path: Filter by document path (joins via chunks table)
-            limit: Max entries to return
-
-        Returns:
-            List of history entries with chunk_id, version, content_hash,
-            created_at, and document_path.
-        """
+        """Query chunk version history."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
-            if chunk_id and document_path:
-                cursor = conn.execute(
-                    "SELECT h.chunk_id, h.version, h.content_hash, "
-                    "h.created_at, c.document_path "
-                    "FROM chunk_history h "
-                    "JOIN chunks c ON h.chunk_id = c.chunk_id "
-                    "WHERE h.chunk_id = ? AND c.document_path = ? "
-                    "ORDER BY h.created_at DESC LIMIT ?",
-                    (chunk_id, document_path, limit),
-                )
-            elif chunk_id:
-                cursor = conn.execute(
-                    "SELECT h.chunk_id, h.version, h.content_hash, "
-                    "h.created_at, c.document_path "
-                    "FROM chunk_history h "
-                    "JOIN chunks c ON h.chunk_id = c.chunk_id "
-                    "WHERE h.chunk_id = ? "
-                    "ORDER BY h.created_at DESC LIMIT ?",
-                    (chunk_id, limit),
-                )
-            elif document_path:
-                cursor = conn.execute(
-                    "SELECT h.chunk_id, h.version, h.content_hash, "
-                    "h.created_at, c.document_path "
-                    "FROM chunk_history h "
-                    "JOIN chunks c ON h.chunk_id = c.chunk_id "
-                    "WHERE c.document_path = ? "
-                    "ORDER BY h.created_at DESC LIMIT ?",
-                    (document_path, limit),
-                )
-            else:
-                cursor = conn.execute(
-                    "SELECT h.chunk_id, h.version, h.content_hash, "
-                    "h.created_at, c.document_path "
-                    "FROM chunk_history h "
-                    "JOIN chunks c ON h.chunk_id = c.chunk_id "
-                    "ORDER BY h.created_at DESC LIMIT ?",
-                    (limit,),
-                )
+            conditions: List[str] = []
+            params: List[Any] = []
 
+            if chunk_id:
+                conditions.append("h.chunk_id = ?")
+                params.append(chunk_id)
+            if document_path:
+                conditions.append("c.document_path = ?")
+                params.append(document_path)
+
+            where = "WHERE " + " AND ".join(conditions) if conditions else ""
+            query = (
+                "SELECT h.chunk_id, h.version, h.content_hash, "
+                "h.created_at, c.document_path "
+                "FROM chunk_history h "
+                "JOIN chunks c ON h.chunk_id = c.chunk_id "
+                f"{where} "
+                "ORDER BY h.created_at DESC LIMIT ?"
+            )
+            params.append(limit)
+
+            cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
-    # Staleness methods
+    # -- Staleness methods ----------------------------------------------------
 
     def set_staleness(self, chunk_id: str, score: float) -> None:
         """Set staleness score for a chunk."""
@@ -747,73 +386,7 @@ class StorageBackend:
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_all_documents(self) -> List[Dict[str, Any]]:
-        """Get all indexed documents."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute("SELECT * FROM documents ORDER BY document_path")
-            return [dict(row) for row in cursor.fetchall()]
-
-    # Session methods — delegated to SessionStorage
-
-    def create_session(self, session_id: str, agent_id: Optional[str] = None) -> None:
-        """Create a new KV-cache session."""
-        self._session_storage.create_session(session_id, agent_id=agent_id)
-
-    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get session information."""
-        return self._session_storage.get_session(session_id)
-
-    def list_sessions(self, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """List sessions, optionally filtered by agent_id."""
-        return self._session_storage.list_sessions(agent_id=agent_id)
-
-    def update_session(
-        self,
-        session_id: str,
-        turn_count: Optional[int] = None,
-        total_tokens: Optional[int] = None,
-    ) -> None:
-        """Update session metadata."""
-        self._session_storage.update_session(session_id, turn_count, total_tokens)
-
-    def store_kv_state(
-        self,
-        session_id: str,
-        chunk_id: str,
-        turn_number: int,
-        kv_data: Any,
-        relevance_score: float = 1.0,
-    ) -> str:
-        """Store KV-cache state for a chunk in a session."""
-        return self._session_storage.store_kv_state(
-            session_id, chunk_id, turn_number, kv_data, relevance_score
-        )
-
-    def load_kv_state(
-        self,
-        session_id: str,
-        chunk_id: str,
-        turn_number: int,
-    ) -> Optional[Any]:
-        """Load KV-cache state for a chunk in a session."""
-        return self._session_storage.load_kv_state(session_id, chunk_id, turn_number)
-
-    def get_session_chunks(
-        self,
-        session_id: str,
-        turn_number: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
-        """Get all chunks associated with a session."""
-        return self._session_storage.get_session_chunks(session_id, turn_number)
-
-    def rollback_session(self, session_id: str, target_turn: int) -> int:
-        """Rollback session to a previous turn."""
-        return self._session_storage.rollback_session(session_id, target_turn)
-
-    def prune_chunks(self, session_id: str, max_tokens: int) -> int:
-        """Prune low-relevance chunks to stay under token limit."""
-        return self._session_storage.prune_chunks(session_id, max_tokens)
+    # -- Aggregate stats ------------------------------------------------------
 
     def get_storage_stats(self) -> Dict[str, Any]:
         """Get storage statistics."""
@@ -858,6 +431,8 @@ class StorageBackend:
             **symbol_stats,
             **lock_stats,
         }
+
+    # -- Deletion / cleanup ---------------------------------------------------
 
     def delete_chunks(self, chunk_ids: List[str]) -> int:
         """Delete chunks and their related data. Returns count deleted."""
@@ -947,94 +522,3 @@ class StorageBackend:
 
         for kv_file in self.kv_dir.rglob("*.kv"):
             kv_file.unlink()
-
-    # Document lock methods — delegated to DocumentLockStorage
-
-    def acquire_document_lock(
-        self,
-        document_path: str,
-        agent_id: str,
-        ttl: float = 300.0,
-        force: bool = False,
-    ) -> Dict[str, Any]:
-        """Acquire exclusive ownership of a document."""
-        return self._document_lock_storage.acquire_lock(
-            document_path, agent_id, ttl, force
-        )
-
-    def refresh_document_lock(
-        self,
-        document_path: str,
-        agent_id: str,
-        ttl: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """Refresh lock TTL without releasing."""
-        return self._document_lock_storage.refresh_lock(document_path, agent_id, ttl)
-
-    def release_document_lock(
-        self, document_path: str, agent_id: str
-    ) -> Dict[str, Any]:
-        """Release ownership of a document."""
-        return self._document_lock_storage.release_lock(document_path, agent_id)
-
-    def get_document_lock_status(self, document_path: str) -> Dict[str, Any]:
-        """Check lock status of a document."""
-        return self._document_lock_storage.get_lock_status(document_path)
-
-    def release_agent_locks(self, agent_id: str) -> Dict[str, Any]:
-        """Release all locks held by an agent."""
-        return self._document_lock_storage.release_agent_locks(agent_id)
-
-    def check_and_increment_doc_version(
-        self, document_path: str, expected_version: int
-    ) -> Dict[str, Any]:
-        """Atomic compare-and-swap on doc_version."""
-        return self._document_lock_storage.check_and_increment_version(
-            document_path, expected_version
-        )
-
-    def increment_doc_version(self, document_path: str) -> int:
-        """Increment document version after write."""
-        return self._document_lock_storage.increment_version(document_path)
-
-    def get_document_version(self, document_path: str) -> Optional[int]:
-        """Get current document version."""
-        return self._document_lock_storage.get_version(document_path)
-
-    def record_conflict(
-        self,
-        document_path: str,
-        agent_a: str,
-        agent_b: str,
-        conflict_type: str,
-        **kwargs: Any,
-    ) -> Optional[int]:
-        """Log a conflict event."""
-        return self._document_lock_storage.record_conflict(
-            document_path, agent_a, agent_b, conflict_type, **kwargs
-        )
-
-    def get_conflicts(
-        self,
-        document_path: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        limit: int = 20,
-    ) -> List[Dict[str, Any]]:
-        """Retrieve conflict history."""
-        return self._document_lock_storage.get_conflicts(document_path, agent_id, limit)
-
-    def prune_conflicts(
-        self,
-        max_age_seconds: Optional[float] = None,
-        max_entries: Optional[int] = None,
-    ) -> int:
-        """Prune old conflict entries."""
-        return self._document_lock_storage.prune_conflicts(max_age_seconds, max_entries)
-
-    def reap_expired_locks(self) -> Dict[str, Any]:
-        """Clear all expired document locks."""
-        return self._document_lock_storage.reap_expired_locks()
-
-    def get_lock_stats(self) -> Dict[str, Any]:
-        """Get aggregate lock and conflict statistics."""
-        return self._document_lock_storage.get_lock_stats()

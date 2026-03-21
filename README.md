@@ -122,9 +122,9 @@ pip install -e ".[dev]"
 | `all` | All of the above | Everything |
 
 ```bash
-pip install stele[tree-sitter]   # AST-aware code chunking
-pip install stele[image,pdf]     # Multi-modal
-pip install stele[all]           # Everything
+pip install stele-context[tree-sitter]   # AST-aware code chunking
+pip install stele-context[image,pdf]     # Multi-modal
+pip install stele-context[all]           # Everything
 ```
 
 ## Quick Start
@@ -146,7 +146,7 @@ stele search "error handling" --json
 ### 3. MCP Server (for Claude Code / Claude Desktop)
 
 ```bash
-pip install stele[mcp]
+pip install stele-context[mcp]
 stele serve-mcp
 ```
 
@@ -330,7 +330,7 @@ For each chunk:
 | Shell, Swift, SQL, config files | regex patterns | line-based |
 
 Tree-sitter provides proper AST boundary detection for function/class definitions.
-Install with `pip install stele[tree-sitter]`.
+Install with `pip install stele-context[tree-sitter]`.
 
 ### Storage Layout
 
@@ -386,7 +386,7 @@ Representative results (quick mode):
 
 ```bash
 # Maximum security: install with zero dependencies
-pip install stele --no-deps
+pip install stele-context --no-deps
 ```
 
 ## Supported Formats
@@ -439,7 +439,7 @@ No. Stele is 100% offline. No API calls, no model downloads, no telemetry. All o
 Stele is not RAG — it's a context cache. RAG retrieves chunks at query time from an external store. Stele caches chunk KV-states so the LLM skips re-reading unchanged content. It can be used alongside RAG, but its primary value is token savings through change detection.
 
 **Q: What happens if tree-sitter isn't installed?**
-Code chunking falls back to regex patterns for non-Python languages. Python always uses stdlib `ast`. Install tree-sitter for better accuracy on JS/TS, Java, C/C++, Go, Rust, Ruby, PHP: `pip install stele[tree-sitter]`.
+Code chunking falls back to regex patterns for non-Python languages. Python always uses stdlib `ast`. Install tree-sitter for better accuracy on JS/TS, Java, C/C++, Go, Rust, Ruby, PHP: `pip install stele-context[tree-sitter]`.
 
 **Q: Can multiple agents use Stele simultaneously?**
 Yes. Stele provides per-document locking, optimistic versioning, and a cross-worktree coordination DB. Both HTTP and MCP servers auto-register agents and inject agent IDs into write operations.

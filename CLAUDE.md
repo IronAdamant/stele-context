@@ -5,25 +5,33 @@ Local context cache for LLM agents. 100% offline, zero required dependencies.
 ## Architecture
 
 ```
-Stele (engine.py) -- main orchestrator
+Stele (engine.py) -- thin facade orchestrator
+  |-- indexing.py -- document indexing, chunk merging, expand paths
+  |-- search_engine.py -- hybrid HNSW+BM25 search, context, stats
+  |-- change_detection.py -- detect file changes, re-index modified
+  |-- engine_utils.py -- path normalization, lock routing, env checks
   |-- Config (config.py) -- .stele.toml loader with minimal TOML parser
   |-- Chunkers (text, code, image, pdf, audio, video)
   |     |-- BaseChunker ABC + Chunk dataclass (chunkers/base.py)
-  |     \-- CodeChunker: Python AST, tree-sitter (optional), regex fallback
+  |     |-- CodeChunker: Python AST, tree-sitter (optional), regex fallback
+  |     \-- code_patterns.py -- tree-sitter node types, regex patterns
   |-- VectorIndex (HNSW, index.py) + BM25Index (bm25.py)
   |-- IndexStore (index_store.py) -- persistent index serialization
   |-- StorageBackend (storage.py, SQLite + filesystem)
+  |     |-- storage_schema.py -- database init + migrations
+  |     |-- storage_delegates.py -- forwarding mixin
   |     |-- SessionStorage (session_storage.py)
   |     |-- MetadataStorage (metadata_storage.py)
   |     \-- SymbolStorage (symbol_storage.py)
   |-- SessionManager (session.py)
   |-- SymbolGraphManager (symbol_graph.py) -- extraction, edges, staleness
-  \-- SymbolExtractor (symbols.py) -- 12 language families
+  |-- SymbolExtractor (symbols.py) -- dispatcher + Python AST
+  \-- symbol_patterns.py -- Symbol dataclass + 10 language regex extractors
 
 APIs:
   |-- CLI (cli.py + cli_metadata.py)
-  |-- HTTP REST (mcp_server.py, 30 tools, threaded, dynamic discovery)
-  \-- MCP stdio (mcp_stdio.py, 32 tools, JSON-RPC for Claude Desktop)
+  |-- HTTP REST (mcp_server.py + mcp_handlers.py + mcp_schemas.py)
+  \-- MCP stdio (mcp_stdio.py + mcp_tool_defs.py + mcp_tool_defs_ext.py)
 
 Concurrency:
   |-- RWLock (rwlock.py) -- read-write lock for engine thread safety
@@ -32,7 +40,7 @@ Concurrency:
 
 Conflict prevention:
   |-- DocumentLockStorage (document_lock_storage.py) -- per-worktree locks
-  |-- CoordinationBackend (coordination.py) -- cross-worktree shared locks
+  |-- CoordinationBackend (coordination.py) + agent_registry.py
   |-- Per-document locks (acquire/release/force-steal with TTL expiry)
   |-- Optimistic locking (doc_version compare-and-swap)
   |-- Conflict log (per-worktree + shared coordination)

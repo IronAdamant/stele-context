@@ -342,34 +342,32 @@ class TestMCPAgentId:
 
     def test_http_write_tool_injects_agent_id(self, tmp_path):
         """HTTP server injects agent_id for write operations."""
-        from stele.mcp_server import MCPRequestHandler
+        from stele.mcp_handlers import build_tool_map, execute_tool
 
         e = Stele(storage_dir=str(tmp_path / "storage"))
         f = tmp_path / "test.txt"
         f.write_text("hello")
         e.index_documents([str(f)])
 
-        handler = MCPRequestHandler.__new__(MCPRequestHandler)
-        handler.stele = e
-        handler._server_agent_id = "test-agent"
+        tool_map = build_tool_map(e, {})
 
         # Call a write tool without agent_id
-        result = handler._execute_tool(
+        result = execute_tool(
             "index_documents",
             {"paths": [str(f)], "force_reindex": True},
+            tool_map,
+            "test-agent",
         )
         assert result.get("success") is True
 
     def test_http_read_tool_no_injection(self, tmp_path):
         """HTTP server does not inject agent_id for read operations."""
-        from stele.mcp_server import MCPRequestHandler
+        from stele.mcp_handlers import build_tool_map, execute_tool
 
         e = Stele(storage_dir=str(tmp_path / "storage"))
-        handler = MCPRequestHandler.__new__(MCPRequestHandler)
-        handler.stele = e
-        handler._server_agent_id = "test-agent"
+        tool_map = build_tool_map(e, {})
 
-        result = handler._execute_tool("search", {"query": "hello"})
+        result = execute_tool("search", {"query": "hello"}, tool_map, "test-agent")
         assert result.get("success") is True
 
 

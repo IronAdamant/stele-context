@@ -1,20 +1,17 @@
-"""
-Cross-worktree coordination for multi-agent Stele.
+"""Cross-worktree coordination for multi-agent Stele.
 
-Uses a shared SQLite database in the git common directory to coordinate
-document locks and agent registration across worktrees.
-
-Transparent fallback: when no git common directory is available (not in a
-git repo, or no worktrees), coordination is disabled and the engine uses
-per-worktree local locks only.
+Shared SQLite database in the git common directory for document locks,
+agent registration, and conflict logging across worktrees.  Falls back
+transparently when no git common directory is available.
 """
 
 import json
-import os
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from stele import agent_registry
 
 
 def detect_git_common_dir(project_root: Optional[Path]) -> Optional[Path]:
@@ -73,14 +70,9 @@ def detect_git_common_dir(project_root: Optional[Path]) -> Optional[Path]:
 
 
 class CoordinationBackend:
-    """Cross-worktree coordination via shared SQLite database.
+    """Cross-worktree coordination via shared SQLite in ``<git-common-dir>/stele/``.
 
-    Lives in ``<git-common-dir>/stele/`` to be visible across all
-    worktrees of a repository.  Manages:
-
-    - Agent registry (who's active, which worktree, heartbeats)
-    - Shared document locks (cross-worktree visibility)
-    - Shared conflict log
+    Manages agent registry, shared document locks, and conflict log.
     """
 
     def __init__(self, git_common_dir: Path):
@@ -98,17 +90,8 @@ class CoordinationBackend:
         return conn
 
     def _init_database(self) -> None:
+        agent_registry.init_agents_table(self._connect)
         with self._connect() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS agents (
-                    agent_id TEXT PRIMARY KEY,
-                    worktree_root TEXT NOT NULL,
-                    started_at REAL NOT NULL,
-                    last_heartbeat REAL NOT NULL,
-                    pid INTEGER,
-                    status TEXT DEFAULT 'active'
-                )
-            """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS shared_locks (
                     document_path TEXT PRIMARY KEY,
@@ -153,123 +136,39 @@ class CoordinationBackend:
             )
             conn.commit()
 
-    # -- Agent registry -------------------------------------------------------
+    # -- Agent registry (delegated to stele.agent_registry) --------------------
 
     def register_agent(
-        self,
-        agent_id: str,
-        worktree_root: str,
-        pid: Optional[int] = None,
+        self, agent_id: str, worktree_root: str, pid: Optional[int] = None
     ) -> Dict[str, Any]:
         """Register an agent with heartbeat."""
-        now = time.time()
-        if pid is None:
-            pid = os.getpid()
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO agents
-                (agent_id, worktree_root, started_at, last_heartbeat, pid, status)
-                VALUES (?, ?, ?, ?, ?, 'active')
-                ON CONFLICT(agent_id) DO UPDATE SET
-                    worktree_root = excluded.worktree_root,
-                    last_heartbeat = excluded.last_heartbeat,
-                    pid = excluded.pid,
-                    status = 'active'
-                """,
-                (agent_id, worktree_root, now, now, pid),
-            )
-            conn.commit()
-        return {"registered": True, "agent_id": agent_id}
+        return agent_registry.register_agent(
+            self._connect, agent_id, worktree_root, pid
+        )
 
     def heartbeat(self, agent_id: str) -> Dict[str, Any]:
         """Update heartbeat timestamp for a registered agent."""
-        now = time.time()
-        with self._connect() as conn:
-            cursor = conn.execute(
-                "UPDATE agents SET last_heartbeat = ? "
-                "WHERE agent_id = ? AND status = 'active'",
-                (now, agent_id),
-            )
-            conn.commit()
-            return {"updated": cursor.rowcount > 0}
+        return agent_registry.heartbeat(self._connect, agent_id)
 
     def deregister_agent(self, agent_id: str) -> Dict[str, Any]:
         """Mark agent as stopped and release all its shared locks."""
-        with self._connect() as conn:
-            conn.execute(
-                "UPDATE agents SET status = 'stopped' WHERE agent_id = ?",
-                (agent_id,),
-            )
-            cursor = conn.execute(
-                "DELETE FROM shared_locks WHERE locked_by = ?",
-                (agent_id,),
-            )
-            conn.commit()
-            return {"deregistered": True, "locks_released": cursor.rowcount}
+        return agent_registry.deregister_agent(self._connect, agent_id)
 
     def list_agents(
-        self,
-        active_only: bool = True,
-        stale_timeout: float = 600.0,
+        self, active_only: bool = True, stale_timeout: float = 600.0
     ) -> List[Dict[str, Any]]:
         """List registered agents with staleness detection."""
-        now = time.time()
-        with self._connect() as conn:
-            if active_only:
-                rows = conn.execute(
-                    "SELECT * FROM agents WHERE status = 'active' "
-                    "ORDER BY last_heartbeat DESC"
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM agents ORDER BY last_heartbeat DESC"
-                ).fetchall()
-
-            agents = []
-            for row in rows:
-                d = dict(row)
-                d["stale"] = (now - d["last_heartbeat"]) > stale_timeout
-                agents.append(d)
-            return agents
+        return agent_registry.list_agents(self._connect, active_only, stale_timeout)
 
     def reap_stale_agents(self, timeout: float = 600.0) -> Dict[str, Any]:
         """Mark agents with no heartbeat as stopped and release locks."""
-        cutoff = time.time() - timeout
-        with self._connect() as conn:
-            stale = conn.execute(
-                "SELECT agent_id FROM agents "
-                "WHERE status = 'active' AND last_heartbeat < ?",
-                (cutoff,),
-            ).fetchall()
-            stale_ids = [r["agent_id"] for r in stale]
-
-            if stale_ids:
-                ph = ",".join("?" * len(stale_ids))
-                conn.execute(
-                    f"DELETE FROM shared_locks WHERE locked_by IN ({ph})",
-                    stale_ids,
-                )
-                conn.execute(
-                    f"UPDATE agents SET status = 'stopped' WHERE agent_id IN ({ph})",
-                    stale_ids,
-                )
-                conn.commit()
-
-            return {"reaped_count": len(stale_ids), "agents": stale_ids}
+        return agent_registry.reap_stale_agents(self._connect, timeout)
 
     # -- Shared document locks ------------------------------------------------
 
-    def _agent_worktree(
-        self,
-        conn: sqlite3.Connection,
-        agent_id: str,
-    ) -> Optional[str]:
-        row = conn.execute(
-            "SELECT worktree_root FROM agents WHERE agent_id = ?",
-            (agent_id,),
-        ).fetchone()
-        return row["worktree_root"] if row else None
+    @staticmethod
+    def _agent_worktree(conn: sqlite3.Connection, agent_id: str) -> Optional[str]:
+        return agent_registry.agent_worktree(conn, agent_id)
 
     def acquire_lock(
         self,
@@ -349,11 +248,7 @@ class CoordinationBackend:
             conn.commit()
             return {"acquired": True}
 
-    def release_lock(
-        self,
-        document_path: str,
-        agent_id: str,
-    ) -> Dict[str, Any]:
+    def release_lock(self, document_path: str, agent_id: str) -> Dict[str, Any]:
         """Release a shared document lock. Only the holder can release."""
         with self._connect() as conn:
             row = conn.execute(
@@ -401,10 +296,7 @@ class CoordinationBackend:
             }
 
     def refresh_lock(
-        self,
-        document_path: str,
-        agent_id: str,
-        ttl: Optional[float] = None,
+        self, document_path: str, agent_id: str, ttl: Optional[float] = None
     ) -> Dict[str, Any]:
         """Refresh lock TTL without releasing."""
         now = time.time()
@@ -472,7 +364,7 @@ class CoordinationBackend:
 
     def _record_conflict(
         self,
-        conn: sqlite3.Connection,
+        conn_or_none: Optional[sqlite3.Connection],
         document_path: str,
         agent_a: str,
         agent_b: str,
@@ -482,25 +374,28 @@ class CoordinationBackend:
     ) -> Optional[int]:
         now = time.time()
         details_json = json.dumps(details) if details else None
-        cursor = conn.execute(
-            """
-            INSERT INTO shared_conflicts
-            (document_path, agent_a, agent_b, conflict_type,
-             resolution, details_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                document_path,
-                agent_a,
-                agent_b,
-                conflict_type,
-                resolution,
-                details_json,
-                now,
-            ),
-        )
-        conn.commit()
-        return cursor.lastrowid
+        conn = conn_or_none if conn_or_none is not None else self._connect()
+        try:
+            cursor = conn.execute(
+                "INSERT INTO shared_conflicts"
+                " (document_path, agent_a, agent_b, conflict_type,"
+                " resolution, details_json, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    document_path,
+                    agent_a,
+                    agent_b,
+                    conflict_type,
+                    resolution,
+                    details_json,
+                    now,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            if conn_or_none is None:
+                conn.close()
 
     def record_conflict(
         self,
@@ -512,16 +407,15 @@ class CoordinationBackend:
         details: Optional[Dict[str, Any]] = None,
     ) -> Optional[int]:
         """Log a conflict event to the shared conflict table."""
-        with self._connect() as conn:
-            return self._record_conflict(
-                conn,
-                document_path,
-                agent_a,
-                agent_b,
-                conflict_type,
-                resolution,
-                details,
-            )
+        return self._record_conflict(
+            None,
+            document_path,
+            agent_a,
+            agent_b,
+            conflict_type,
+            resolution,
+            details,
+        )
 
     def get_conflicts(
         self,
@@ -567,50 +461,33 @@ class CoordinationBackend:
         change_type: str,
         agent_id: str,
     ) -> None:
-        """Record a change notification visible to all worktrees.
-
-        Args:
-            document_path: Normalized project-relative path.
-            change_type: One of 'indexed', 'modified', 'removed'.
-            agent_id: The agent that made the change.
-        """
+        """Record a change notification visible to all worktrees."""
         now = time.time()
+        _sql = (
+            "INSERT INTO change_notifications"
+            " (document_path, change_type, agent_id, worktree_root, created_at)"
+            " VALUES (?, ?, ?, ?, ?)"
+        )
         with self._connect() as conn:
             worktree = self._agent_worktree(conn, agent_id)
-            conn.execute(
-                """
-                INSERT INTO change_notifications
-                (document_path, change_type, agent_id, worktree_root, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (document_path, change_type, agent_id, worktree, now),
-            )
+            conn.execute(_sql, (document_path, change_type, agent_id, worktree, now))
             conn.commit()
 
-    def notify_changes_batch(
-        self,
-        changes: List[tuple],
-        agent_id: str,
-    ) -> int:
-        """Batch-write change notifications.
-
-        Each entry is ``(document_path, change_type)``.
-        """
+    def notify_changes_batch(self, changes: List[tuple], agent_id: str) -> int:
+        """Batch-write change notifications (each: ``(path, type)``)."""
         if not changes:
             return 0
         now = time.time()
+        _sql = (
+            "INSERT INTO change_notifications"
+            " (document_path, change_type, agent_id, worktree_root, created_at)"
+            " VALUES (?, ?, ?, ?, ?)"
+        )
         with self._connect() as conn:
             worktree = self._agent_worktree(conn, agent_id)
             conn.executemany(
-                """
-                INSERT INTO change_notifications
-                (document_path, change_type, agent_id, worktree_root, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                [
-                    (doc_path, change_type, agent_id, worktree, now)
-                    for doc_path, change_type in changes
-                ],
+                _sql,
+                [(p, ct, agent_id, worktree, now) for p, ct in changes],
             )
             conn.commit()
         return len(changes)
@@ -623,11 +500,8 @@ class CoordinationBackend:
     ) -> Dict[str, Any]:
         """Get change notifications, optionally since a timestamp.
 
-        Use ``exclude_agent`` to skip an agent's own notifications
-        (common pattern: "what changed since my last check, by others?").
-
-        Auto-prunes notifications older than 24 hours to prevent
-        unbounded growth.
+        Auto-prunes entries older than 24 h.  Use ``exclude_agent``
+        to skip the caller's own notifications.
         """
         with self._connect() as conn:
             # Lazy prune: remove notifications older than 24 hours
