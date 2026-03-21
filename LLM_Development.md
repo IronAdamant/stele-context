@@ -29,7 +29,7 @@ Chronological record of development activity on Stele Context, maintained for LL
 ### Status
 - Classifier: "Development Status :: 5 - Production/Stable"
 - 49 source files, ~13,000 LOC implementation
-- 739 tests across 31 test files
+- 739 tests across 28 test files
 - CI: Python 3.9-3.13, Linux/macOS/Windows
 - Zero required dependencies
 

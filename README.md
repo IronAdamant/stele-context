@@ -386,7 +386,7 @@ Representative results (quick mode):
 - **No model downloads** — semantic signatures use statistical features, not ML models
 - **No API calls** — everything runs locally, no data leaves your machine
 - **No pickle** — session data serialized with JSON+zlib
-- **Minimal codebase** — ~10,000 lines of Python, easy to audit
+- **Minimal codebase** — ~13,000 lines of Python, easy to audit
 
 ```bash
 # Maximum security: install with zero dependencies
@@ -478,7 +478,7 @@ Run `stele-context` with the `environment_check` MCP tool, or call `engine.check
 
 ```bash
 pip install -e ".[dev]"
-pytest                              # 573 tests
+pytest                              # 739 tests
 pytest --cov=stele_context           # With coverage
 python benchmarks/run_all.py        # Performance benchmarks
 mypy stele_context/                 # Type checking

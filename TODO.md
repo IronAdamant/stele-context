@@ -3,7 +3,7 @@
 ## Completed (v0.9.0)
 
 - ~~Tree-sitter for non-Python code chunking~~ — JS/TS, Java, C/C++, Go, Rust, Ruby, PHP
-- ~~`.stele.toml` configuration system~~ — with minimal TOML parser fallback
+- ~~`.stele-context.toml` configuration system~~ — with minimal TOML parser fallback
 - ~~Chunk history query tools~~ — `get_chunk_history()` exposed via MCP
 - ~~Performance benchmarks~~ — `benchmarks/` with chunking, storage, search
 - ~~CODE_OF_CONDUCT.md~~ — Contributor Covenant v2.0

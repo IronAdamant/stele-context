@@ -49,7 +49,7 @@
 | `stele_context/cli_metadata.py` | CLI metadata/annotation subcommands | engine | (manual testing) |
 | `stele_context/mcp_server.py` | HTTP REST server (42 tools, threaded) + tool dispatch | tool_registry | test_mcp_server.py |
 | `stele_context/mcp_handlers.py` | Backward-compat shim (re-exports from mcp_server) | mcp_server, tool_registry | test_mcp_server.py |
-| `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas | mcp_tool_defs | (via test_mcp_server.py, test_mcp_stdio.py) |
+| `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas, modality flags | mcp_tool_defs | (via test_mcp_server.py, test_mcp_stdio.py) |
 | `stele_context/mcp_stdio.py` | MCP stdio server (JSON-RPC for Claude Desktop) | mcp_tool_defs, tool_registry | test_mcp_stdio.py |
 | `stele_context/mcp_tool_defs.py` | MCP stdio tool definitions (core, 15 tools) | mcp_tool_defs_ext | (via test_mcp_stdio.py) |
 | `stele_context/mcp_tool_defs_ext.py` | MCP stdio tool definitions (extended, 20 tools) | None | (via test_mcp_stdio.py) |

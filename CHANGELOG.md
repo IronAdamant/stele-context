@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Summary
 Local context cache for LLM agents. 100% offline, zero required dependencies.
-49 source files, ~13,000 LOC. 739 tests across 31 files. CI green on Python
+49 source files, ~13,000 LOC. 739 tests across 28 test files. CI green on Python
 3.9-3.13 across Linux, macOS, and Windows. 42 MCP tools exposed via HTTP and
 stdio servers. Pure-Python HNSW + BM25 hybrid search. Multi-agent coordination
 with document locks, optimistic versioning, and cross-worktree shared state.

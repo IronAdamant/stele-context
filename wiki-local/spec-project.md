@@ -9,8 +9,8 @@ Stele Context is a local context cache for LLM agents. It indexes documents thro
 ```
 API Layer
   CLI (cli.py)              -- stele-context index / search / serve
-  HTTP REST (mcp_server.py) -- 30 tools, threaded
-  MCP stdio (mcp_stdio.py)  -- 32 tools, JSON-RPC
+  HTTP REST (mcp_server.py) -- 42 tools, threaded
+  MCP stdio (mcp_stdio.py)  -- 42 tools, JSON-RPC
 
 Engine Layer (engine.py - thin facade)
   indexing.py       -- document indexing, chunk merging
@@ -41,15 +41,27 @@ Chunker Layer
   chunkers/audio.py   -- AudioChunker (librosa)
   chunkers/video.py   -- VideoChunker (OpenCV)
 
+API Layer
+  tool_registry.py    -- unified tool dispatch, WRITE_TOOLS, schemas, modality flags
+  mcp_tool_defs.py    -- MCP tool definitions (core)
+  mcp_tool_defs_ext.py -- MCP tool definitions (extended)
+  mcp_handlers.py     -- backward-compat shim
+
 Cross-cutting
-  config.py        -- .stele-context.toml loader
-  rwlock.py        -- read-write lock
-  coordination.py  -- cross-worktree coordination
-  agent_registry.py -- agent registration/heartbeat
-  symbols.py       -- SymbolExtractor (12 languages)
-  symbol_patterns.py -- Symbol dataclass + regex extractors
-  symbol_graph.py  -- SymbolGraphManager
-  env_checks.py    -- stale bytecache, editable install detection
+  config.py            -- .stele-context.toml loader
+  rwlock.py            -- read-write lock
+  coordination.py      -- cross-worktree coordination
+  agent_registry.py    -- agent registration/heartbeat
+  change_notifications.py -- change notification storage
+  lock_ops.py          -- shared lock primitives
+  symbols.py           -- SymbolExtractor (12 languages)
+  symbol_patterns.py   -- Symbol dataclass + regex extractors
+  symbol_graph.py      -- SymbolGraphManager
+  stemmer.py           -- Porter stemmer, identifier splitting
+  env_checks.py        -- stale bytecache, editable install detection
+  protocols.py         -- typing protocols for delegation boundaries
+  connection_pool.py   -- thread-local SQLite connection reuse
+  core.py              -- backward-compat re-exports (Stele, Chunk)
 ```
 
 ## Key Constraints
