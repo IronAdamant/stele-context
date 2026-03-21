@@ -30,8 +30,10 @@ Stele (engine.py) -- thin facade orchestrator
 
 APIs:
   |-- CLI (cli.py + cli_metadata.py)
-  |-- HTTP REST (mcp_server.py + mcp_handlers.py + mcp_schemas.py)
-  \-- MCP stdio (mcp_stdio.py + mcp_tool_defs.py + mcp_tool_defs_ext.py)
+  |-- HTTP REST (mcp_server.py + mcp_handlers.py)
+  |-- MCP stdio (mcp_stdio.py)
+  |-- Tool registry (tool_registry.py) -- shared dispatch + schemas
+  \-- Tool definitions (mcp_tool_defs.py + mcp_tool_defs_ext.py)
 
 Concurrency:
   |-- RWLock (rwlock.py) -- read-write lock for engine thread safety
@@ -40,7 +42,7 @@ Concurrency:
 
 Conflict prevention:
   |-- DocumentLockStorage (document_lock_storage.py) -- per-worktree locks
-  |-- CoordinationBackend (coordination.py) + agent_registry.py
+  |-- CoordinationBackend (coordination.py) + agent_registry.py + change_notifications.py
   |-- Per-document locks (acquire/release/force-steal with TTL expiry)
   |-- Optimistic locking (doc_version compare-and-swap)
   |-- Conflict log (per-worktree + shared coordination)
@@ -129,16 +131,36 @@ Coordination DB (`<git-common-dir>/stele/coordination.db`):
 - `numpy_compat.py` is the single source for `sig_to_bytes()`, `sig_from_bytes()`, `cosine_similarity()`.
 - Chunker modules only import from `chunkers/base.py`.
 - `config.py` imports nothing from stele internals — standalone TOML loader.
-- `coordination.py` and `env_checks.py` are standalone with zero internal deps.
+- `coordination.py` delegates notifications to `change_notifications.py` (same pattern as `agent_registry.py`).
+- `env_checks.py` is standalone with zero internal deps.
 - No circular imports exist in the dependency graph.
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 412 tests (411 pass, 1 skipped without mcp SDK)
+pytest                    # 569 tests (568 pass, 1 skipped without mcp SDK)
 mypy stele/
 ruff check stele/
 ```
 
 Entry points: `stele` (CLI), `stele-mcp` (MCP stdio server)
+
+## Agent Workflow with Stele
+
+When using Stele's MCP tools during refactoring:
+
+### Before bulk edits
+- `stele search "<symbol>"` to find all chunks that reference a name before removing/renaming it
+- `stele find_references "<symbol>"` for definition/reference graph lookups
+- `stele get_context` to read current file content from the index
+
+### After edits
+- `stele index --force-reindex` the changed files to update the cache
+- `stele detect_changes` to verify what changed
+
+### Multi-agent coordination rules
+- **Atomic transformations**: Never split "remove X" and "replace X with Y" across parallel agents. Both steps must happen atomically per file.
+- **No overlapping files**: Parallel agents must work on disjoint file sets.
+- **Lint between batches**: Run `ruff check stele/` after each agent completes, not just at the end.
+- **Reindex after passes**: After a batch of changes, reindex before the next agent reads.
