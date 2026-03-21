@@ -216,5 +216,4 @@ class MyClass {
         assert len(chunks) == 1
         assert chunks[0].content == ""
 
-
     # TestChunk tests live in test_core.py (backward-compat import path)

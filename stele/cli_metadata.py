@@ -27,7 +27,9 @@ def cmd_annotate(args: argparse.Namespace, stele: Stele) -> int:
     if getattr(args, "output_json", False):
         print(json.dumps(result, indent=2))
     else:
-        print(f"Created annotation #{result['id']} on {result['target_type']} '{result['target']}'")
+        print(
+            f"Created annotation #{result['id']} on {result['target_type']} '{result['target']}'"
+        )
     return 0
 
 
@@ -93,13 +95,17 @@ def cmd_map(args: argparse.Namespace, stele: Stele) -> int:
     if not result["documents"]:
         print("No indexed documents.")
         return 0
-    print(f"Project Map ({result['total_documents']} documents, "
-          f"{result['total_tokens']:,} tokens)\n")
+    print(
+        f"Project Map ({result['total_documents']} documents, "
+        f"{result['total_tokens']:,} tokens)\n"
+    )
     for doc in result["documents"]:
         ann_count = len(doc["annotations"])
         ann_str = f", {ann_count} annotation(s)" if ann_count else ""
         print(f"  {doc['path']}")
-        print(f"    {doc['chunk_count']} chunks, {doc['total_tokens']:,} tokens{ann_str}")
+        print(
+            f"    {doc['chunk_count']} chunks, {doc['total_tokens']:,} tokens{ann_str}"
+        )
         for ann in doc["annotations"]:
             tags_str = f" [{', '.join(ann['tags'])}]" if ann["tags"] else ""
             print(f"    > {ann['content']}{tags_str}")

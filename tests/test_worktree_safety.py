@@ -10,7 +10,6 @@ Covers:
 """
 
 import os
-import time
 
 import pytest
 
@@ -85,7 +84,9 @@ class TestPathNormalization:
 
     def test_absolute_within_project(self, engine, tmp_path):
         """Absolute path within project root → relative."""
-        assert engine._normalize_path(str(tmp_path / "src" / "main.py")) == os.path.join("src", "main.py")
+        assert engine._normalize_path(
+            str(tmp_path / "src" / "main.py")
+        ) == os.path.join("src", "main.py")
 
     def test_absolute_outside_project(self, engine):
         """Absolute path outside project root → stays absolute."""
@@ -529,10 +530,9 @@ class TestCoordinationBackend:
 
         # Force stale heartbeat
         import sqlite3
+
         with sqlite3.connect(coord.db_path) as conn:
-            conn.execute(
-                "UPDATE agents SET last_heartbeat = 0 WHERE agent_id = 'a1'"
-            )
+            conn.execute("UPDATE agents SET last_heartbeat = 0 WHERE agent_id = 'a1'")
             conn.commit()
 
         result = coord.reap_stale_agents(timeout=1)
@@ -758,6 +758,7 @@ class TestChangeNotifications:
     def test_notifications_since_timestamp(self, coordinated_engine):
         """since parameter filters by time."""
         import time
+
         e, repo = coordinated_engine
         f = repo / "file.py"
         f.write_text("x = 1\n")
@@ -776,14 +777,12 @@ class TestChangeNotifications:
 
         f.write_text("x = 2  # modified\n")
         e.detect_changes_and_update(
-            session_id="s1", agent_id="agent-a",
+            session_id="s1",
+            agent_id="agent-a",
         )
 
         notifs = e.get_notifications()
-        assert any(
-            n["change_type"] == "modified"
-            for n in notifs["notifications"]
-        )
+        assert any(n["change_type"] == "modified" for n in notifs["notifications"])
 
     def test_no_notifications_without_coordination(self, tmp_path):
         """Without coordination, get_notifications returns empty."""
@@ -804,6 +803,7 @@ class TestSymbolGraphExtraction:
     def test_symbol_manager_initialized(self, tmp_path):
         """Engine creates SymbolGraphManager on init."""
         from stele.symbol_graph import SymbolGraphManager
+
         e = Stele(
             storage_dir=str(tmp_path / "storage"),
             enable_coordination=False,

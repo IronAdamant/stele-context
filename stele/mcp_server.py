@@ -543,18 +543,21 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
 
 
 # Write tools that should receive a default agent_id when callers omit it.
-_WRITE_TOOLS = frozenset({
-    "index_documents",
-    "detect_changes_and_update",
-    "save_kv_state",
-})
+_WRITE_TOOLS = frozenset(
+    {
+        "index_documents",
+        "detect_changes_and_update",
+        "save_kv_state",
+    }
+)
 
 
 class MCPRequestHandler(BaseHTTPRequestHandler):
     """HTTP request handler for MCP server."""
 
     def __init__(
-        self, *args: Any,
+        self,
+        *args: Any,
         stele: Stele,
         server_agent_id: str = "",
         **kwargs: Any,
@@ -594,6 +597,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         Uses the same keys as _TOOL_SCHEMAS so discovery and execution
         always stay in sync.
         """
+
         def _get_supported_formats(**_: Any) -> Dict[str, Any]:
             formats = {
                 "text": self.stele.chunkers["text"].supported_extensions(),
@@ -657,10 +661,13 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         tool_map = self._get_tool_map()
         tools: List[Dict[str, Any]] = []
         for name in tool_map:
-            schema = _TOOL_SCHEMAS.get(name, {
-                "description": name,
-                "parameters": {"type": "object", "properties": {}, "required": []},
-            })
+            schema = _TOOL_SCHEMAS.get(
+                name,
+                {
+                    "description": name,
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
+            )
             tools.append({"name": name, **schema})
         self._send_json_response({"tools": tools})
 
@@ -745,6 +752,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """HTTP server that handles each request in a new thread."""
+
     daemon_threads = True
 
 
@@ -773,10 +781,13 @@ class MCPServer:
 
     def start(self, blocking: bool = False) -> None:
         """Start the MCP server."""
+
         def handler_factory(*args: Any, **kwargs: Any) -> MCPRequestHandler:
             return MCPRequestHandler(
-                *args, stele=self.stele,
-                server_agent_id=self.agent_id, **kwargs,
+                *args,
+                stele=self.stele,
+                server_agent_id=self.agent_id,
+                **kwargs,
             )
 
         self.server = ThreadedHTTPServer((self.host, self.port), handler_factory)
@@ -790,7 +801,8 @@ class MCPServer:
         # Register agent and start heartbeat
         self.stele.register_agent(self.agent_id)
         self._heartbeat_thread = threading.Thread(
-            target=self._heartbeat_loop, daemon=True,
+            target=self._heartbeat_loop,
+            daemon=True,
             name="stele-heartbeat",
         )
         self._heartbeat_thread.start()

@@ -145,8 +145,7 @@ class CoordinationBackend:
                 "ON shared_conflicts(document_path)"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_sc_time "
-                "ON shared_conflicts(created_at)"
+                "CREATE INDEX IF NOT EXISTS idx_sc_time ON shared_conflicts(created_at)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cn_time "
@@ -252,8 +251,7 @@ class CoordinationBackend:
                     stale_ids,
                 )
                 conn.execute(
-                    f"UPDATE agents SET status = 'stopped' "
-                    f"WHERE agent_id IN ({ph})",
+                    f"UPDATE agents SET status = 'stopped' WHERE agent_id IN ({ph})",
                     stale_ids,
                 )
                 conn.commit()
@@ -263,7 +261,9 @@ class CoordinationBackend:
     # -- Shared document locks ------------------------------------------------
 
     def _agent_worktree(
-        self, conn: sqlite3.Connection, agent_id: str,
+        self,
+        conn: sqlite3.Connection,
+        agent_id: str,
     ) -> Optional[str]:
         row = conn.execute(
             "SELECT worktree_root FROM agents WHERE agent_id = ?",
@@ -313,30 +313,46 @@ class CoordinationBackend:
 
                 if force and not expired:
                     self._record_conflict(
-                        conn, document_path, owner, agent_id,
-                        "lock_stolen", resolution="force_overwritten",
+                        conn,
+                        document_path,
+                        owner,
+                        agent_id,
+                        "lock_stolen",
+                        resolution="force_overwritten",
                     )
 
                 conn.execute(
                     "UPDATE shared_locks SET locked_by = ?, locked_at = ?, "
                     "lock_ttl = ?, worktree_root = ? WHERE document_path = ?",
-                    (agent_id, now, ttl,
-                     self._agent_worktree(conn, agent_id), document_path),
+                    (
+                        agent_id,
+                        now,
+                        ttl,
+                        self._agent_worktree(conn, agent_id),
+                        document_path,
+                    ),
                 )
             else:
                 conn.execute(
                     "INSERT INTO shared_locks "
                     "(document_path, locked_by, locked_at, lock_ttl, worktree_root) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    (document_path, agent_id, now, ttl,
-                     self._agent_worktree(conn, agent_id)),
+                    (
+                        document_path,
+                        agent_id,
+                        now,
+                        ttl,
+                        self._agent_worktree(conn, agent_id),
+                    ),
                 )
 
             conn.commit()
             return {"acquired": True}
 
     def release_lock(
-        self, document_path: str, agent_id: str,
+        self,
+        document_path: str,
+        agent_id: str,
     ) -> Dict[str, Any]:
         """Release a shared document lock. Only the holder can release."""
         with self._connect() as conn:
@@ -394,8 +410,7 @@ class CoordinationBackend:
         now = time.time()
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT locked_by, lock_ttl FROM shared_locks "
-                "WHERE document_path = ?",
+                "SELECT locked_by, lock_ttl FROM shared_locks WHERE document_path = ?",
                 (document_path,),
             ).fetchone()
             if row is None:
@@ -445,8 +460,10 @@ class CoordinationBackend:
             return {
                 "reaped_count": len(rows),
                 "documents": [
-                    {"document_path": r["document_path"],
-                     "was_locked_by": r["locked_by"]}
+                    {
+                        "document_path": r["document_path"],
+                        "was_locked_by": r["locked_by"],
+                    }
                     for r in rows
                 ],
             }
@@ -462,7 +479,7 @@ class CoordinationBackend:
         conflict_type: str,
         resolution: str = "rejected",
         details: Optional[Dict[str, Any]] = None,
-    ) -> int:
+    ) -> Optional[int]:
         now = time.time()
         details_json = json.dumps(details) if details else None
         cursor = conn.execute(
@@ -472,8 +489,15 @@ class CoordinationBackend:
              resolution, details_json, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (document_path, agent_a, agent_b, conflict_type,
-             resolution, details_json, now),
+            (
+                document_path,
+                agent_a,
+                agent_b,
+                conflict_type,
+                resolution,
+                details_json,
+                now,
+            ),
         )
         conn.commit()
         return cursor.lastrowid
@@ -486,12 +510,17 @@ class CoordinationBackend:
         conflict_type: str,
         resolution: str = "rejected",
         details: Optional[Dict[str, Any]] = None,
-    ) -> int:
+    ) -> Optional[int]:
         """Log a conflict event to the shared conflict table."""
         with self._connect() as conn:
             return self._record_conflict(
-                conn, document_path, agent_a, agent_b,
-                conflict_type, resolution, details,
+                conn,
+                document_path,
+                agent_a,
+                agent_b,
+                conflict_type,
+                resolution,
+                details,
             )
 
     def get_conflicts(
@@ -627,7 +656,8 @@ class CoordinationBackend:
 
             notifications = [dict(r) for r in rows]
             latest = max(
-                (n["created_at"] for n in notifications), default=since or 0.0,
+                (n["created_at"] for n in notifications),
+                default=since or 0.0,
             )
 
             return {

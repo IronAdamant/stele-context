@@ -1,7 +1,5 @@
 """Tests for agent-supplied semantic embeddings."""
 
-import pytest
-
 from stele.engine import Stele
 from stele.storage import StorageBackend
 
@@ -45,7 +43,7 @@ class TestStorageAgentEmbeddings:
         assert result is None
 
         # Store and retrieve
-        agent_sig = [1.0 / (128 ** 0.5)] * 128
+        agent_sig = [1.0 / (128**0.5)] * 128
         storage.store_agent_signature("c1", agent_sig)
         result = storage.get_agent_signature("c1")
         assert result is not None
@@ -173,9 +171,7 @@ class TestIndexRebuildWithAgentSignatures:
         chunk_id = chunks[0]["chunk_id"]
 
         # Store a semantic summary
-        engine.store_semantic_summary(
-            chunk_id, "Data processing pipeline entry point"
-        )
+        engine.store_semantic_summary(chunk_id, "Data processing pipeline entry point")
 
         # Force index rebuild
         engine.vector_index = engine._load_or_rebuild_index()

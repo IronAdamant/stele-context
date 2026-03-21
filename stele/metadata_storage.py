@@ -219,9 +219,7 @@ class MetadataStorage:
         return deleted
 
     @staticmethod
-    def _summary_mentions_document(
-        summary: Dict[str, Any], document_path: str
-    ) -> bool:
+    def _summary_mentions_document(summary: Dict[str, Any], document_path: str) -> bool:
         """Check if a change summary mentions a specific document."""
         for key in ("unchanged", "removed"):
             if document_path in summary.get(key, []):

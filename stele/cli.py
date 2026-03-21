@@ -357,8 +357,10 @@ def cmd_remove(args: argparse.Namespace, stele: Stele) -> int:
     if getattr(args, "output_json", False):
         print(json.dumps(result, indent=2))
     elif result.get("removed"):
-        print(f"Removed {args.path}: {result['chunks_removed']} chunks, "
-              f"{result['annotations_removed']} annotations deleted")
+        print(
+            f"Removed {args.path}: {result['chunks_removed']} chunks, "
+            f"{result['annotations_removed']} annotations deleted"
+        )
     else:
         print(f"Document not found: {args.path}", file=sys.stderr)
         return 1

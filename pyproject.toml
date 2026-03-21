@@ -97,6 +97,17 @@ Homepage = "https://github.com/IronAdamant/Stele"
 Repository = "https://github.com/IronAdamant/Stele"
 Documentation = "https://github.com/IronAdamant/Stele#readme"
 
+[tool.coverage.run]
+omit = [
+    "stele/cli.py",
+    "stele/cli_metadata.py",
+    "stele/mcp_stdio.py",
+    "stele/chunkers/audio.py",
+    "stele/chunkers/image.py",
+    "stele/chunkers/pdf.py",
+    "stele/chunkers/video.py",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["stele*"]

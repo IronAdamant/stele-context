@@ -94,8 +94,7 @@ class DocumentLockStorage:
         now = time.time()
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
-                "SELECT locked_by, lock_ttl FROM documents "
-                "WHERE document_path = ?",
+                "SELECT locked_by, lock_ttl FROM documents WHERE document_path = ?",
                 (document_path,),
             ).fetchone()
             if row is None:
@@ -230,9 +229,7 @@ class DocumentLockStorage:
             ).fetchone()
             expired_locks = row[0]
 
-            row = conn.execute(
-                "SELECT COUNT(*) FROM document_conflicts"
-            ).fetchone()
+            row = conn.execute("SELECT COUNT(*) FROM document_conflicts").fetchone()
             total_conflicts = row[0]
 
             row = conn.execute(
@@ -325,7 +322,7 @@ class DocumentLockStorage:
         actual_version: Optional[int] = None,
         resolution: str = "rejected",
         details: Optional[Dict[str, Any]] = None,
-    ) -> int:
+    ) -> Optional[int]:
         """Log a conflict event.  Returns conflict ID."""
         with sqlite3.connect(self.db_path) as conn:
             return self._record_conflict(
@@ -351,7 +348,7 @@ class DocumentLockStorage:
         actual_version: Optional[int] = None,
         resolution: str = "rejected",
         details: Optional[Dict[str, Any]] = None,
-    ) -> int:
+    ) -> Optional[int]:
         """Internal: log conflict within an existing connection."""
         now = time.time()
         details_json = json.dumps(details) if details else None

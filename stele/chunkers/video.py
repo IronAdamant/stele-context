@@ -190,7 +190,7 @@ class VideoChunker(BaseChunker):
 
             # Handle empty video
             if not chunks:
-                chunks.append(
+                chunks.extend(
                     self._empty_video_chunk(document_path, width, height, duration)
                 )
 
@@ -205,17 +205,19 @@ class VideoChunker(BaseChunker):
     @staticmethod
     def _empty_video_chunk(
         document_path: str, width: int = 0, height: int = 0, duration: float = 0
-    ) -> Chunk:
+    ) -> List[Chunk]:
         """Create an empty fallback chunk for unreadable/empty videos."""
-        return Chunk(
-            content=b"",
-            modality="video",
-            start_pos=0,
-            end_pos=0,
-            document_path=document_path,
-            chunk_index=0,
-            metadata={"width": width, "height": height, "duration": duration},
-        )
+        return [
+            Chunk(
+                content=b"",
+                modality="video",
+                start_pos=0,
+                end_pos=0,
+                document_path=document_path,
+                chunk_index=0,
+                metadata={"width": width, "height": height, "duration": duration},
+            )
+        ]
 
     def _resize_frame(self, frame: Any) -> Any:
         """Resize frame if it exceeds max_dimension."""

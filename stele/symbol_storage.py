@@ -44,9 +44,7 @@ class SymbolStorage:
                     FOREIGN KEY (target_chunk_id) REFERENCES chunks(chunk_id)
                 )
             """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name)")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_symbols_chunk ON symbols(chunk_id)"
             )
@@ -156,9 +154,7 @@ class SymbolStorage:
         """Get all symbols (for resolution)."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            return [
-                dict(r) for r in conn.execute("SELECT * FROM symbols").fetchall()
-            ]
+            return [dict(r) for r in conn.execute("SELECT * FROM symbols").fetchall()]
 
     def find_definitions(self, name: str) -> List[Dict[str, Any]]:
         """Find all definitions for a symbol name."""
@@ -245,9 +241,7 @@ class SymbolStorage:
         """Get symbol and edge counts."""
         with sqlite3.connect(self.db_path) as conn:
             sym_count = conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
-            edge_count = conn.execute(
-                "SELECT COUNT(*) FROM symbol_edges"
-            ).fetchone()[0]
+            edge_count = conn.execute("SELECT COUNT(*) FROM symbol_edges").fetchone()[0]
             def_count = conn.execute(
                 "SELECT COUNT(*) FROM symbols WHERE role = 'definition'"
             ).fetchone()[0]

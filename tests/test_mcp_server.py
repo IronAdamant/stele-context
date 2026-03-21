@@ -38,7 +38,8 @@ class TestHTTPServer:
         """POST JSON request, return (status, parsed JSON)."""
         body = json.dumps(data).encode("utf-8")
         req = urllib.request.Request(
-            url, data=body,
+            url,
+            data=body,
             headers={"Content-Type": "application/json"},
         )
         try:
@@ -121,19 +122,25 @@ class TestHTTPServer:
             test_file.write_text("def greet(name):\n    return f'Hello {name}'\n")
 
             # Index it
-            status, data = self._post(f"{url}/call", {
-                "tool": "index_documents",
-                "parameters": {"paths": [str(test_file)]},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "index_documents",
+                    "parameters": {"paths": [str(test_file)]},
+                },
+            )
             assert status == 200
             assert data["success"] is True
             assert data["result"]["total_chunks"] >= 1
 
             # Search for it
-            status, data = self._post(f"{url}/call", {
-                "tool": "search",
-                "parameters": {"query": "greet", "top_k": 5},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "search",
+                    "parameters": {"query": "greet", "top_k": 5},
+                },
+            )
             assert status == 200
             assert data["success"] is True
             assert len(data["result"]) >= 1
@@ -151,10 +158,13 @@ class TestHTTPServer:
             # Index via engine directly (already tested HTTP index above)
             cf.index_documents([str(test_file)])
 
-            status, data = self._post(f"{url}/call", {
-                "tool": "get_context",
-                "parameters": {"document_paths": [str(test_file)]},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "get_context",
+                    "parameters": {"document_paths": [str(test_file)]},
+                },
+            )
             assert status == 200
             assert data["success"] is True
             assert len(data["result"]["unchanged"]) == 1
@@ -169,10 +179,13 @@ class TestHTTPServer:
             test_file.write_text("a = 1\n")
             cf.index_documents([str(test_file)])
 
-            status, data = self._post(f"{url}/call", {
-                "tool": "detect_changes_and_update",
-                "parameters": {"session_id": "test-session"},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "detect_changes_and_update",
+                    "parameters": {"session_id": "test-session"},
+                },
+            )
             assert status == 200
             assert data["success"] is True
             assert len(data["result"]["unchanged"]) == 1
@@ -183,10 +196,13 @@ class TestHTTPServer:
         """detect_modality tool via HTTP."""
         server, url, _ = self._start_server(tmp_path)
         try:
-            status, data = self._post(f"{url}/call", {
-                "tool": "detect_modality",
-                "parameters": {"path": "test.py"},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "detect_modality",
+                    "parameters": {"path": "test.py"},
+                },
+            )
             assert status == 200
             assert data["success"] is True
             assert data["result"]["modality"] == "code"
@@ -197,10 +213,13 @@ class TestHTTPServer:
         """get_supported_formats tool via HTTP."""
         server, url, _ = self._start_server(tmp_path)
         try:
-            status, data = self._post(f"{url}/call", {
-                "tool": "get_supported_formats",
-                "parameters": {},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "get_supported_formats",
+                    "parameters": {},
+                },
+            )
             assert status == 200
             assert data["success"] is True
             assert "text" in data["result"]["formats"]
@@ -216,17 +235,23 @@ class TestHTTPServer:
             test_file.write_text("def helper():\n    pass\n\nhelper()\n")
             cf.index_documents([str(test_file)])
 
-            status, data = self._post(f"{url}/call", {
-                "tool": "find_references",
-                "parameters": {"symbol": "helper"},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "find_references",
+                    "parameters": {"symbol": "helper"},
+                },
+            )
             assert status == 200
             assert data["success"] is True
 
-            status, data = self._post(f"{url}/call", {
-                "tool": "find_definition",
-                "parameters": {"symbol": "helper"},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "find_definition",
+                    "parameters": {"symbol": "helper"},
+                },
+            )
             assert status == 200
             assert data["success"] is True
         finally:
@@ -236,10 +261,13 @@ class TestHTTPServer:
         """stale_chunks tool via HTTP."""
         server, url, _ = self._start_server(tmp_path)
         try:
-            status, data = self._post(f"{url}/call", {
-                "tool": "stale_chunks",
-                "parameters": {"threshold": 0.1},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "stale_chunks",
+                    "parameters": {"threshold": 0.1},
+                },
+            )
             assert status == 200
             assert data["success"] is True
         finally:
@@ -249,10 +277,13 @@ class TestHTTPServer:
         """rebuild_symbol_graph tool via HTTP."""
         server, url, _ = self._start_server(tmp_path)
         try:
-            status, data = self._post(f"{url}/call", {
-                "tool": "rebuild_symbol_graph",
-                "parameters": {},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "rebuild_symbol_graph",
+                    "parameters": {},
+                },
+            )
             assert status == 200
             assert data["success"] is True
         finally:
@@ -264,10 +295,13 @@ class TestHTTPServer:
         """Calling an unknown tool returns an error with available tools list."""
         server, url, _ = self._start_server(tmp_path)
         try:
-            status, data = self._post(f"{url}/call", {
-                "tool": "nonexistent_tool",
-                "parameters": {},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "nonexistent_tool",
+                    "parameters": {},
+                },
+            )
             assert status == 200  # HTTP 200, error in body
             assert "error" in data
             assert "available_tools" in data
@@ -290,7 +324,8 @@ class TestHTTPServer:
         try:
             body = b"not json"
             req = urllib.request.Request(
-                f"{url}/call", data=body,
+                f"{url}/call",
+                data=body,
                 headers={"Content-Type": "application/json"},
             )
             try:
@@ -309,10 +344,13 @@ class TestHTTPServer:
         """Calling a tool with wrong parameters returns error."""
         server, url, _ = self._start_server(tmp_path)
         try:
-            status, data = self._post(f"{url}/call", {
-                "tool": "search",
-                "parameters": {"wrong_param": "value"},
-            })
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "search",
+                    "parameters": {"wrong_param": "value"},
+                },
+            )
             assert status == 200
             assert "error" in data
         finally:

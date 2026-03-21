@@ -43,9 +43,7 @@ class SessionStorage:
         self.kv_dir = kv_dir
         self.kv_dir.mkdir(parents=True, exist_ok=True)
 
-    def create_session(
-        self, session_id: str, agent_id: Optional[str] = None
-    ) -> None:
+    def create_session(self, session_id: str, agent_id: Optional[str] = None) -> None:
         """Create a new session (no-op if exists).
 
         If agent_id is provided and the session already exists, the
@@ -78,9 +76,7 @@ class SessionStorage:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def list_sessions(
-        self, agent_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    def list_sessions(self, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """List sessions, optionally filtered by agent_id."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row

@@ -34,8 +34,11 @@ def scan_stale_pycache(
     for cache_dir in root.rglob("__pycache__"):
         if any(part in skip_dirs for part in cache_dir.parts):
             continue
-        if any(part.startswith(".") for part in cache_dir.relative_to(root).parts
-               if part != "__pycache__"):
+        if any(
+            part.startswith(".")
+            for part in cache_dir.relative_to(root).parts
+            if part != "__pycache__"
+        ):
             continue
 
         stale_files = []
@@ -52,11 +55,13 @@ def scan_stale_pycache(
                 rel = str(cache_dir.relative_to(root))
             except ValueError:
                 rel = str(cache_dir)
-            stale_dirs.append({
-                "path": rel,
-                "stale_files": stale_files,
-                "count": len(stale_files),
-            })
+            stale_dirs.append(
+                {
+                    "path": rel,
+                    "stale_files": stale_files,
+                    "count": len(stale_files),
+                }
+            )
             total_stale += len(stale_files)
 
     return {"stale_dirs": stale_dirs, "total_stale_files": total_stale}
@@ -129,17 +134,19 @@ def check_editable_installs(
 
             # Flag if install path differs from project root
             if project_root is not None and install_path != project_root.resolve():
-                issues.append({
-                    "package": dist.metadata["Name"],
-                    "install_path": str(install_path),
-                    "project_root": str(project_root),
-                    "warning": (
-                        f"Editable install of '{dist.metadata['Name']}' "
-                        f"points to '{install_path}' but project root is "
-                        f"'{project_root}'. This may cause stale imports "
-                        f"if the install path is a worktree."
-                    ),
-                })
+                issues.append(
+                    {
+                        "package": dist.metadata["Name"],
+                        "install_path": str(install_path),
+                        "project_root": str(project_root),
+                        "warning": (
+                            f"Editable install of '{dist.metadata['Name']}' "
+                            f"points to '{install_path}' but project root is "
+                            f"'{project_root}'. This may cause stale imports "
+                            f"if the install path is a worktree."
+                        ),
+                    }
+                )
     except Exception:
         pass
 

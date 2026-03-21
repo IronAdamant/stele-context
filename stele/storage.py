@@ -184,9 +184,7 @@ class StorageBackend:
                 conn.execute("ALTER TABLE chunks ADD COLUMN content TEXT")
                 changed = True
             if "version" not in columns:
-                conn.execute(
-                    "ALTER TABLE chunks ADD COLUMN version INTEGER DEFAULT 1"
-                )
+                conn.execute("ALTER TABLE chunks ADD COLUMN version INTEGER DEFAULT 1")
                 changed = True
             if "staleness_score" not in columns:
                 conn.execute(
@@ -194,14 +192,10 @@ class StorageBackend:
                 )
                 changed = True
             if "semantic_summary" not in columns:
-                conn.execute(
-                    "ALTER TABLE chunks ADD COLUMN semantic_summary TEXT"
-                )
+                conn.execute("ALTER TABLE chunks ADD COLUMN semantic_summary TEXT")
                 changed = True
             if "agent_signature" not in columns:
-                conn.execute(
-                    "ALTER TABLE chunks ADD COLUMN agent_signature BLOB"
-                )
+                conn.execute("ALTER TABLE chunks ADD COLUMN agent_signature BLOB")
                 changed = True
 
             # Migrate sessions table for agent_id
@@ -219,12 +213,8 @@ class StorageBackend:
             cursor = conn.execute("PRAGMA table_info(documents)")
             doc_columns = {row[1] for row in cursor.fetchall()}
             if "locked_by" not in doc_columns:
-                conn.execute(
-                    "ALTER TABLE documents ADD COLUMN locked_by TEXT"
-                )
-                conn.execute(
-                    "ALTER TABLE documents ADD COLUMN locked_at REAL"
-                )
+                conn.execute("ALTER TABLE documents ADD COLUMN locked_by TEXT")
+                conn.execute("ALTER TABLE documents ADD COLUMN locked_at REAL")
                 conn.execute(
                     "ALTER TABLE documents ADD COLUMN lock_ttl REAL DEFAULT 300.0"
                 )
@@ -471,7 +461,9 @@ class StorageBackend:
         tags: Optional[List[str]] = None,
     ) -> int:
         """Store an annotation on a document or chunk."""
-        return self._metadata_storage.store_annotation(target, target_type, content, tags)
+        return self._metadata_storage.store_annotation(
+            target, target_type, content, tags
+        )
 
     def get_annotations(
         self,
@@ -759,16 +751,12 @@ class StorageBackend:
         """Get all indexed documents."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM documents ORDER BY document_path"
-            )
+            cursor = conn.execute("SELECT * FROM documents ORDER BY document_path")
             return [dict(row) for row in cursor.fetchall()]
 
     # Session methods — delegated to SessionStorage
 
-    def create_session(
-        self, session_id: str, agent_id: Optional[str] = None
-    ) -> None:
+    def create_session(self, session_id: str, agent_id: Optional[str] = None) -> None:
         """Create a new KV-cache session."""
         self._session_storage.create_session(session_id, agent_id=agent_id)
 
@@ -776,9 +764,7 @@ class StorageBackend:
         """Get session information."""
         return self._session_storage.get_session(session_id)
 
-    def list_sessions(
-        self, agent_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    def list_sessions(self, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """List sessions, optionally filtered by agent_id."""
         return self._session_storage.list_sessions(agent_id=agent_id)
 
@@ -983,9 +969,7 @@ class StorageBackend:
         ttl: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Refresh lock TTL without releasing."""
-        return self._document_lock_storage.refresh_lock(
-            document_path, agent_id, ttl
-        )
+        return self._document_lock_storage.refresh_lock(document_path, agent_id, ttl)
 
     def release_document_lock(
         self, document_path: str, agent_id: str
@@ -1024,7 +1008,7 @@ class StorageBackend:
         agent_b: str,
         conflict_type: str,
         **kwargs: Any,
-    ) -> int:
+    ) -> Optional[int]:
         """Log a conflict event."""
         return self._document_lock_storage.record_conflict(
             document_path, agent_a, agent_b, conflict_type, **kwargs
@@ -1037,9 +1021,7 @@ class StorageBackend:
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
         """Retrieve conflict history."""
-        return self._document_lock_storage.get_conflicts(
-            document_path, agent_id, limit
-        )
+        return self._document_lock_storage.get_conflicts(document_path, agent_id, limit)
 
     def prune_conflicts(
         self,
@@ -1047,9 +1029,7 @@ class StorageBackend:
         max_entries: Optional[int] = None,
     ) -> int:
         """Prune old conflict entries."""
-        return self._document_lock_storage.prune_conflicts(
-            max_age_seconds, max_entries
-        )
+        return self._document_lock_storage.prune_conflicts(max_age_seconds, max_entries)
 
     def reap_expired_locks(self) -> Dict[str, Any]:
         """Clear all expired document locks."""
@@ -1058,4 +1038,3 @@ class StorageBackend:
     def get_lock_stats(self) -> Dict[str, Any]:
         """Get aggregate lock and conflict statistics."""
         return self._document_lock_storage.get_lock_stats()
-

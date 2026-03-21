@@ -69,9 +69,20 @@ class Stele:
     DEFAULT_CHANGE_THRESHOLD = 0.85
     DEFAULT_SEARCH_ALPHA = 0.7
     DEFAULT_SKIP_DIRS = {
-        ".git", ".hg", ".svn", "__pycache__", "node_modules",
-        ".venv", "venv", ".tox", ".eggs", "dist", "build",
-        ".mypy_cache", ".pytest_cache", ".ruff_cache",
+        ".git",
+        ".hg",
+        ".svn",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        ".tox",
+        ".eggs",
+        "dist",
+        "build",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
     }
 
     MODALITY_THRESHOLDS = {
@@ -116,20 +127,20 @@ class Stele:
         self.chunk_size = cfg.get("chunk_size", self.DEFAULT_CHUNK_SIZE)
         self.max_chunk_size = cfg.get("max_chunk_size", self.DEFAULT_MAX_CHUNK_SIZE)
         self.merge_threshold = cfg.get("merge_threshold", self.DEFAULT_MERGE_THRESHOLD)
-        self.change_threshold = cfg.get("change_threshold", self.DEFAULT_CHANGE_THRESHOLD)
+        self.change_threshold = cfg.get(
+            "change_threshold", self.DEFAULT_CHANGE_THRESHOLD
+        )
         self.search_alpha = cfg.get("search_alpha", self.DEFAULT_SEARCH_ALPHA)
         self.skip_dirs = self.DEFAULT_SKIP_DIRS | cfg.get("skip_dirs", set())
         self._init_chunkers()
         self.vector_index = self._load_or_rebuild_index()
         self.session_manager = SessionManager(self.storage, self.vector_index)
         self.symbol_manager = SymbolGraphManager(self.storage)
-        self.bm25_index = None
+        self.bm25_index: Optional[Any] = None
         self._bm25_ready = False
         self._lock = RWLock()
         self._bm25_init_lock = threading.Lock()
-        self._coordination = (
-            self._init_coordination() if enable_coordination else None
-        )
+        self._coordination = self._init_coordination() if enable_coordination else None
 
     def _init_coordination(self) -> Optional[CoordinationBackend]:
         """Initialize cross-worktree coordination if git common dir exists."""
@@ -144,8 +155,11 @@ class Stele:
     # -- Lock routing helpers (coordination or local) -------------------------
 
     def _do_acquire_lock(
-        self, doc_path: str, agent_id: str,
-        ttl: float = 300.0, force: bool = False,
+        self,
+        doc_path: str,
+        agent_id: str,
+        ttl: float = 300.0,
+        force: bool = False,
     ) -> Dict[str, Any]:
         if self._coordination:
             return self._coordination.acquire_lock(doc_path, agent_id, ttl, force)
@@ -157,22 +171,36 @@ class Stele:
         return self.storage.get_document_lock_status(doc_path)
 
     def _do_release_lock(
-        self, doc_path: str, agent_id: str,
+        self,
+        doc_path: str,
+        agent_id: str,
     ) -> Dict[str, Any]:
         if self._coordination:
             return self._coordination.release_lock(doc_path, agent_id)
         return self.storage.release_document_lock(doc_path, agent_id)
 
     def _do_record_conflict(
-        self, document_path: str, agent_a: str, agent_b: str,
-        conflict_type: str, **kwargs: Any,
-    ) -> int:
+        self,
+        document_path: str,
+        agent_a: str,
+        agent_b: str,
+        conflict_type: str,
+        **kwargs: Any,
+    ) -> Optional[int]:
         if self._coordination:
             return self._coordination.record_conflict(
-                document_path, agent_a, agent_b, conflict_type, **kwargs,
+                document_path,
+                agent_a,
+                agent_b,
+                conflict_type,
+                **kwargs,
             )
         return self.storage.record_conflict(
-            document_path, agent_a, agent_b, conflict_type, **kwargs,
+            document_path,
+            agent_a,
+            agent_b,
+            conflict_type,
+            **kwargs,
         )
 
     @staticmethod
@@ -326,25 +354,43 @@ class Stele:
         Code-like queries (identifiers, brackets, keywords) get lower
         alpha to weight keyword matching more heavily.
         """
-        signals = sum([
-            "_" in query,
-            bool(re.search(r"[A-Z][a-z]+[A-Z]", query)),
-            any(c in query for c in "{}[]();"),
-            bool(re.search(
-                r"\b(def|class|function|import|const|let|var|fn|pub)\b", query
-            )),
-            "." in query and not query.endswith("."),
-        ])
+        signals = sum(
+            [
+                "_" in query,
+                bool(re.search(r"[A-Z][a-z]+[A-Z]", query)),
+                any(c in query for c in "{}[]();"),
+                bool(
+                    re.search(
+                        r"\b(def|class|function|import|const|let|var|fn|pub)\b", query
+                    )
+                ),
+                "." in query and not query.endswith("."),
+            ]
+        )
         if signals >= 3:
             return max(0.3, self.search_alpha - 0.3)
         if signals >= 1:
             return max(0.4, self.search_alpha - 0.15)
         return self.search_alpha
 
-    _QUERY_STOP_WORDS = frozenset({
-        "the", "and", "for", "with", "from", "that", "this",
-        "have", "are", "was", "not", "all", "but", "how",
-    })
+    _QUERY_STOP_WORDS = frozenset(
+        {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "that",
+            "this",
+            "have",
+            "are",
+            "was",
+            "not",
+            "all",
+            "but",
+            "how",
+        }
+    )
 
     @staticmethod
     def _extract_query_identifiers(query: str) -> List[str]:
@@ -353,19 +399,17 @@ class Stele:
         Splits on whitespace, underscores, and camelCase boundaries.
         Returns unique tokens >= 3 chars, suitable for symbol name matching.
         """
-        parts = re.findall(r"[A-Z]?[a-z]{2,}|[A-Z]{2,}(?=[A-Z][a-z]|\b)|[a-z_]\w{2,}", query)
+        parts = re.findall(
+            r"[A-Z]?[a-z]{2,}|[A-Z]{2,}(?=[A-Z][a-z]|\b)|[a-z_]\w{2,}", query
+        )
         full = re.findall(r"[a-zA-Z_]\w{2,}", query)
         tokens = set(parts + full)
         return [t for t in tokens if t.lower() not in Stele._QUERY_STOP_WORDS]
 
-    def _persist_chunks(
-        self, chunks: List[Chunk], doc_path: str
-    ) -> None:
+    def _persist_chunks(self, chunks: List[Chunk], doc_path: str) -> None:
         """Store chunks and add them to the vector and keyword indexes."""
         for chunk in chunks:
-            chunk_content = (
-                chunk.content if isinstance(chunk.content, str) else None
-            )
+            chunk_content = chunk.content if isinstance(chunk.content, str) else None
             self.storage.store_chunk(
                 chunk_id=chunk.chunk_id,
                 document_path=doc_path,
@@ -380,18 +424,16 @@ class Stele:
                 chunk.chunk_id,
                 sig_to_list(chunk.semantic_signature),
             )
-            if self._bm25_ready and chunk_content:
+            if self._bm25_ready and self.bm25_index is not None and chunk_content:
                 self.bm25_index.add_document(chunk.chunk_id, chunk_content)
 
-    def _remove_stale_chunks(
-        self, old_ids: set, new_ids: set
-    ) -> None:
+    def _remove_stale_chunks(self, old_ids: set, new_ids: set) -> None:
         """Remove chunks that no longer exist after re-indexing."""
         stale_ids = old_ids - new_ids
         if stale_ids:
             for cid in stale_ids:
                 self.vector_index.remove_chunk(cid)
-                if self._bm25_ready:
+                if self._bm25_ready and self.bm25_index is not None:
                     self.bm25_index.remove_document(cid)
             self.storage.delete_chunks(list(stale_ids))
 
@@ -475,8 +517,12 @@ class Stele:
         return expanded
 
     def _chunk_and_store(
-        self, abs_path: Path, doc_path: str,
-        content: Any, content_hash: str, modality: str,
+        self,
+        abs_path: Path,
+        doc_path: str,
+        content: Any,
+        content_hash: str,
+        modality: str,
     ) -> list:
         """Chunk a single file, persist chunks, extract symbols, return Chunk list.
 
@@ -558,8 +604,7 @@ class Stele:
 
         if expected_versions:
             expected_versions = {
-                self._normalize_path(k): v
-                for k, v in expected_versions.items()
+                self._normalize_path(k): v for k, v in expected_versions.items()
             }
 
         results: Dict[str, Any] = {
@@ -607,11 +652,13 @@ class Stele:
                                 expected_version=ver_result.get("expected"),
                                 actual_version=ver_result.get("actual"),
                             )
-                        results["conflicts"].append({
-                            "path": norm_path,
-                            "reason": "version_conflict",
-                            **ver_result,
-                        })
+                        results["conflicts"].append(
+                            {
+                                "path": norm_path,
+                                "reason": "version_conflict",
+                                **ver_result,
+                            }
+                        )
                         continue
 
                 modality = self.detect_modality(str(abs_path))
@@ -630,7 +677,11 @@ class Stele:
                         continue
 
                 chunks = self._chunk_and_store(
-                    abs_path, norm_path, content, content_hash, modality,
+                    abs_path,
+                    norm_path,
+                    content,
+                    content_hash,
+                    modality,
                 )
 
                 # Auto-acquire lock on newly-created documents
@@ -687,13 +738,15 @@ class Stele:
             if result.get("removed"):
                 for chunk_id in result.get("chunk_ids", []):
                     self.vector_index.remove_chunk(chunk_id)
-                    if self._bm25_ready:
+                    if self._bm25_ready and self.bm25_index is not None:
                         self.bm25_index.remove_document(chunk_id)
                 self._save_index()
                 self._save_bm25()
                 if self._coordination:
                     self._coordination.notify_change(
-                        document_path, "removed", agent_id or "",
+                        document_path,
+                        "removed",
+                        agent_id or "",
                     )
             return result
 
@@ -714,9 +767,17 @@ class Stele:
 
         # Keywords that signal a new definition boundary in code
         _DEF_STARTS = (
-            "def ", "class ", "function ", "func ", "fn ", "pub fn ",
-            "async def ", "async function ", "export function ",
-            "export class ", "export default ",
+            "def ",
+            "class ",
+            "function ",
+            "func ",
+            "fn ",
+            "pub fn ",
+            "async def ",
+            "async function ",
+            "export function ",
+            "export class ",
+            "export default ",
         )
 
         merged = [chunks[0]]
@@ -777,7 +838,9 @@ class Stele:
                 if chunk is None:
                     return {"error": f"Chunk not found: {target}"}
 
-            annotation_id = self.storage.store_annotation(target, target_type, content, tags)
+            annotation_id = self.storage.store_annotation(
+                target, target_type, content, tags
+            )
             return {"id": annotation_id, "target": target, "target_type": target_type}
 
     def get_annotations(
@@ -857,7 +920,9 @@ class Stele:
             chunk = self.storage.get_chunk(target)
             if chunk is None:
                 return {"error": f"Chunk not found: {target}"}
-        annotation_id = self.storage.store_annotation(target, target_type, content, tags)
+        annotation_id = self.storage.store_annotation(
+            target, target_type, content, tags
+        )
         return {"id": annotation_id, "target": target, "target_type": target_type}
 
     def prune_history(
@@ -889,16 +954,18 @@ class Stele:
                 target=doc["document_path"], target_type="document"
             )
 
-            result.append({
-                "path": doc["document_path"],
-                "chunk_count": doc["chunk_count"],
-                "total_tokens": doc_tokens,
-                "indexed_at": doc["indexed_at"],
-                "annotations": [
-                    {"id": a["id"], "content": a["content"], "tags": a["tags"]}
-                    for a in annotations
-                ],
-            })
+            result.append(
+                {
+                    "path": doc["document_path"],
+                    "chunk_count": doc["chunk_count"],
+                    "total_tokens": doc_tokens,
+                    "indexed_at": doc["indexed_at"],
+                    "annotations": [
+                        {"id": a["id"], "content": a["content"], "tags": a["tags"]}
+                        for a in annotations
+                    ],
+                }
+            )
 
         return {
             "documents": result,
@@ -968,7 +1035,9 @@ class Stele:
             agent_sig = sig_to_list(summary_chunk.semantic_signature)
 
             ok = self.storage.store_semantic_summary(
-                chunk_id, summary, agent_sig,
+                chunk_id,
+                summary,
+                agent_sig,
             )
             if not ok:
                 return {"stored": False, "error": "chunk not found"}
@@ -1016,13 +1085,17 @@ class Stele:
             return {"stored": True, "chunk_id": chunk_id}
 
     def _classify_chunks_for_change(
-        self, new_chunks: list, old_chunks_meta: list,
-        modality: str, doc_path: str, results: Dict[str, Any],
+        self,
+        new_chunks: list,
+        old_chunks_meta: list,
+        modality: str,
+        doc_path: str,
+        results: Dict[str, Any],
     ) -> None:
         """Compare new chunks against old metadata; update results counters."""
-        change_thresh = self.MODALITY_THRESHOLDS.get(
-            modality, {}
-        ).get("change", self.change_threshold)
+        change_thresh = self.MODALITY_THRESHOLDS.get(modality, {}).get(
+            "change", self.change_threshold
+        )
 
         old_by_pos: Dict = {}
         for meta in old_chunks_meta:
@@ -1050,9 +1123,7 @@ class Stele:
                 results["kv_restored"] += 1
             else:
                 old_sig = sig_from_bytes(old_meta["semantic_signature"])
-                similarity = cosine_similarity(
-                    old_sig, new_chunk.semantic_signature
-                )
+                similarity = cosine_similarity(old_sig, new_chunk.semantic_signature)
                 if similarity >= change_thresh:
                     results["kv_restored"] += 1
                 else:
@@ -1108,7 +1179,7 @@ class Stele:
                 if rm_result.get("removed"):
                     for cid in rm_result.get("chunk_ids", []):
                         self.vector_index.remove_chunk(cid)
-                        if self._bm25_ready:
+                        if self._bm25_ready and self.bm25_index is not None:
                             self.bm25_index.remove_document(cid)
                 continue
 
@@ -1156,8 +1227,7 @@ class Stele:
                 # Re-chunk, inject cached sigs, merge, classify
                 chunker = self.chunkers.get(modality, self.chunkers["text"])
                 sig_cache = {
-                    c["content_hash"]: c["semantic_signature"]
-                    for c in old_chunks_meta
+                    c["content_hash"]: c["semantic_signature"] for c in old_chunks_meta
                 }
                 new_chunks = chunker.chunk(content, doc_path)
                 for nc in new_chunks:
@@ -1212,7 +1282,8 @@ class Stele:
                 changes.append((path, "removed"))
             if changes:
                 self._coordination.notify_changes_batch(
-                    changes, agent_id or "",
+                    changes,
+                    agent_id or "",
                 )
 
         return results
@@ -1256,6 +1327,7 @@ class Stele:
         self._ensure_bm25()
         candidate_ids = [cid for cid, _ in hnsw_results]
         hnsw_scores = {cid: score for cid, score in hnsw_results}
+        assert self.bm25_index is not None
         bm25_scores = self.bm25_index.score_batch(query, candidate_ids)
 
         # Normalize BM25 scores to [0, 1]
@@ -1273,9 +1345,7 @@ class Stele:
             kw_score = bm25_norm.get(cid, 0.0)
             combined[cid] = alpha * vec_score + (1.0 - alpha) * kw_score
 
-        ranked = sorted(
-            combined.items(), key=lambda x: x[1], reverse=True
-        )[:top_k]
+        ranked = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:top_k]
 
         results = []
         for chunk_id, score in ranked:
@@ -1483,9 +1553,7 @@ class Stele:
                 },
             }
 
-    def list_sessions(
-        self, agent_id: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    def list_sessions(self, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """List sessions, optionally filtered by agent_id."""
         with self._lock.read_lock():
             return self.storage.list_sessions(agent_id=agent_id)
@@ -1515,10 +1583,14 @@ class Stele:
             document_path = self._normalize_path(document_path)
             if self._coordination:
                 return self._coordination.refresh_lock(
-                    document_path, agent_id, ttl,
+                    document_path,
+                    agent_id,
+                    ttl,
                 )
             return self.storage.refresh_document_lock(
-                document_path, agent_id, ttl,
+                document_path,
+                agent_id,
+                ttl,
             )
 
     def release_document_lock(
@@ -1561,7 +1633,9 @@ class Stele:
                 document_path = self._normalize_path(document_path)
             if self._coordination:
                 return self._coordination.get_conflicts(
-                    document_path, agent_id, limit,
+                    document_path,
+                    agent_id,
+                    limit,
                 )
             return self.storage.get_conflicts(document_path, agent_id, limit)
 
@@ -1587,7 +1661,8 @@ class Stele:
         return self._coordination.heartbeat(agent_id)
 
     def list_agents(
-        self, active_only: bool = True,
+        self,
+        active_only: bool = True,
     ) -> List[Dict[str, Any]]:
         """List agents registered across all worktrees."""
         if not self._coordination:
@@ -1610,7 +1685,9 @@ class Stele:
         if not self._coordination:
             return {"notifications": [], "count": 0, "latest_timestamp": 0.0}
         return self._coordination.get_notifications(
-            since=since, exclude_agent=exclude_self, limit=limit,
+            since=since,
+            exclude_agent=exclude_self,
+            limit=limit,
         )
 
     # -- Environment checks ---------------------------------------------------
@@ -1623,20 +1700,25 @@ class Stele:
 
         if self._project_root:
             bytecache = scan_stale_pycache(
-                self._project_root, self.skip_dirs - {"__pycache__"},
+                self._project_root,
+                self.skip_dirs - {"__pycache__"},
             )
             if bytecache["total_stale_files"] > 0:
-                result["issues"].append({
-                    "type": "stale_bytecache",
-                    **bytecache,
-                })
+                result["issues"].append(
+                    {
+                        "type": "stale_bytecache",
+                        **bytecache,
+                    }
+                )
 
             editable = check_editable_installs(self._project_root)
             if editable["count"] > 0:
-                result["issues"].append({
-                    "type": "editable_install_mismatch",
-                    **editable,
-                })
+                result["issues"].append(
+                    {
+                        "type": "editable_install_mismatch",
+                        **editable,
+                    }
+                )
 
         result["total_issues"] = len(result["issues"])
         return result
@@ -1646,6 +1728,8 @@ class Stele:
         if not self._project_root:
             return {"cleaned": 0}
         from stele.env_checks import clean_stale_pycache
+
         return clean_stale_pycache(
-            self._project_root, self.skip_dirs - {"__pycache__"},
+            self._project_root,
+            self.skip_dirs - {"__pycache__"},
         )

@@ -9,7 +9,6 @@ Covers:
 """
 
 import multiprocessing
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -79,7 +78,6 @@ class TestRWLock:
     def test_write_excludes_writes(self):
         """Only one writer at a time."""
         lock = RWLock()
-        concurrent_writers = []
         active = [0]
         max_active = [0]
         mu = threading.Lock()
@@ -117,7 +115,9 @@ def engine_with_data(tmp_path):
     # Create test files
     for i in range(3):
         f = tmp_path / f"test_{i}.txt"
-        f.write_text(f"This is test document number {i} with some unique content about topic_{i}.")
+        f.write_text(
+            f"This is test document number {i} with some unique content about topic_{i}."
+        )
 
     engine.index_documents([str(tmp_path / f"test_{i}.txt") for i in range(3)])
     return engine
@@ -138,8 +138,7 @@ class TestEngineConcurrentReads:
                 errors.append(e)
 
         threads = [
-            threading.Thread(target=do_search, args=(f"topic_{i}",))
-            for i in range(10)
+            threading.Thread(target=do_search, args=(f"topic_{i}",)) for i in range(10)
         ]
         for t in threads:
             t.start()
@@ -189,9 +188,7 @@ class TestWriteBlocksReads:
                 p = tmp_path / f"new_{i}.txt"
                 p.write_text(f"New document {i} with content about indexing test {i}.")
             index_started.set()
-            engine.index_documents(
-                [str(tmp_path / f"new_{i}.txt") for i in range(5)]
-            )
+            engine.index_documents([str(tmp_path / f"new_{i}.txt") for i in range(5)])
             timeline.append("index_done")
 
         def do_search():
@@ -230,10 +227,7 @@ class TestBM25LazyInitThreadSafe:
             except Exception as e:
                 errors.append(e)
 
-        threads = [
-            threading.Thread(target=do_search, args=(i,))
-            for i in range(8)
-        ]
+        threads = [threading.Thread(target=do_search, args=(i,)) for i in range(8)]
         for t in threads:
             t.start()
         for t in threads:
@@ -299,15 +293,9 @@ class TestAgentSessions:
         f.write_text("Test doc.")
         engine.index_documents([str(f)])
 
-        engine.detect_changes_and_update(
-            session_id="s1", agent_id="agent-a"
-        )
-        engine.detect_changes_and_update(
-            session_id="s2", agent_id="agent-b"
-        )
-        engine.detect_changes_and_update(
-            session_id="s3", agent_id="agent-a"
-        )
+        engine.detect_changes_and_update(session_id="s1", agent_id="agent-a")
+        engine.detect_changes_and_update(session_id="s2", agent_id="agent-b")
+        engine.detect_changes_and_update(session_id="s3", agent_id="agent-a")
 
         a_sessions = engine.list_sessions(agent_id="agent-a")
         assert len(a_sessions) == 2

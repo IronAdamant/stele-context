@@ -51,13 +51,11 @@ class SymbolGraphManager:
         if outgoing or incoming:
             entry["edges"] = {
                 "depends_on": [
-                    {"chunk_id": e["target_chunk_id"],
-                     "symbol": e["symbol_name"]}
+                    {"chunk_id": e["target_chunk_id"], "symbol": e["symbol_name"]}
                     for e in outgoing
                 ],
                 "depended_on_by": [
-                    {"chunk_id": e["source_chunk_id"],
-                     "symbol": e["symbol_name"]}
+                    {"chunk_id": e["source_chunk_id"], "symbol": e["symbol_name"]}
                     for e in incoming
                 ],
             }
@@ -65,7 +63,9 @@ class SymbolGraphManager:
     # -- Extraction and edge building -----------------------------------------
 
     def extract_document_symbols(
-        self, doc_path: str, chunks: List[Chunk],
+        self,
+        doc_path: str,
+        chunks: List[Chunk],
     ) -> None:
         """Extract symbols from a document's chunks and store them."""
         self.storage.clear_document_symbols(doc_path)
@@ -74,14 +74,18 @@ class SymbolGraphManager:
         for chunk in chunks:
             if isinstance(chunk.content, str):
                 syms = self._extractor.extract(
-                    chunk.content, doc_path, chunk.chunk_id, ext,
+                    chunk.content,
+                    doc_path,
+                    chunk.chunk_id,
+                    ext,
                 )
                 doc_symbols.extend(syms)
         if doc_symbols:
             self.storage.store_symbols(doc_symbols)
 
     def rebuild_edges(
-        self, affected_chunk_ids: Optional[Set[str]] = None,
+        self,
+        affected_chunk_ids: Optional[Set[str]] = None,
     ) -> None:
         """Rebuild symbol edges from current symbols.
 
@@ -104,7 +108,8 @@ class SymbolGraphManager:
         else:
             self.storage.clear_chunk_edges(list(affected_chunk_ids))
             scoped = [
-                e for e in all_edges
+                e
+                for e in all_edges
                 if e[0] in affected_chunk_ids or e[1] in affected_chunk_ids
             ]
             self.storage.store_edges(scoped)
@@ -121,9 +126,7 @@ class SymbolGraphManager:
         Score decays by ``decay`` per hop.  Changed chunks get score 0.
         Returns the number of chunks marked stale.
         """
-        self.storage.set_staleness_batch(
-            [(0.0, cid) for cid in changed_chunk_ids]
-        )
+        self.storage.set_staleness_batch([(0.0, cid) for cid in changed_chunk_ids])
 
         visited: Dict[str, float] = {}
         queue = deque((cid, 0) for cid in changed_chunk_ids)
@@ -158,12 +161,14 @@ class SymbolGraphManager:
 
         by_doc: Dict[str, list] = {}
         for chunk in stale:
-            by_doc.setdefault(chunk["document_path"], []).append({
-                "chunk_id": chunk["chunk_id"],
-                "staleness_score": chunk["staleness_score"],
-                "token_count": chunk["token_count"],
-                "content_preview": (chunk.get("content") or "")[:200],
-            })
+            by_doc.setdefault(chunk["document_path"], []).append(
+                {
+                    "chunk_id": chunk["chunk_id"],
+                    "staleness_score": chunk["staleness_score"],
+                    "token_count": chunk["token_count"],
+                    "content_preview": (chunk.get("content") or "")[:200],
+                }
+            )
 
         return {
             "threshold": threshold,
@@ -188,16 +193,18 @@ class SymbolGraphManager:
             results = []
             for sym in syms:
                 chunk = self.storage.get_chunk(sym["chunk_id"])
-                results.append({
-                    "symbol": sym["name"],
-                    "kind": sym["kind"],
-                    "chunk_id": sym["chunk_id"],
-                    "document_path": sym["document_path"],
-                    "line_number": sym.get("line_number"),
-                    "content_preview": (
-                        (chunk.get("content") or "")[:200] if chunk else ""
-                    ),
-                })
+                results.append(
+                    {
+                        "symbol": sym["name"],
+                        "kind": sym["kind"],
+                        "chunk_id": sym["chunk_id"],
+                        "document_path": sym["document_path"],
+                        "line_number": sym.get("line_number"),
+                        "content_preview": (
+                            (chunk.get("content") or "")[:200] if chunk else ""
+                        ),
+                    }
+                )
             return results
 
         return {
@@ -214,15 +221,17 @@ class SymbolGraphManager:
         results = []
         for defn in definitions:
             chunk = self.storage.get_chunk(defn["chunk_id"])
-            results.append({
-                "symbol": defn["name"],
-                "kind": defn["kind"],
-                "chunk_id": defn["chunk_id"],
-                "document_path": defn["document_path"],
-                "line_number": defn.get("line_number"),
-                "content": chunk.get("content") if chunk else None,
-                "token_count": chunk["token_count"] if chunk else 0,
-            })
+            results.append(
+                {
+                    "symbol": defn["name"],
+                    "kind": defn["kind"],
+                    "chunk_id": defn["chunk_id"],
+                    "document_path": defn["document_path"],
+                    "line_number": defn.get("line_number"),
+                    "content": chunk.get("content") if chunk else None,
+                    "token_count": chunk["token_count"] if chunk else 0,
+                }
+            )
 
         return {
             "symbol": symbol,
@@ -231,7 +240,9 @@ class SymbolGraphManager:
         }
 
     def impact_radius(
-        self, chunk_id: str, depth: int = 2,
+        self,
+        chunk_id: str,
+        depth: int = 2,
     ) -> Dict[str, Any]:
         """Find all chunks affected by a change to this chunk (BFS)."""
         visited: set = set()
@@ -249,9 +260,7 @@ class SymbolGraphManager:
                 edges = self.storage.get_incoming_edges(current_id)
                 for edge in edges:
                     if edge["source_chunk_id"] not in visited:
-                        queue.append(
-                            (edge["source_chunk_id"], current_depth + 1)
-                        )
+                        queue.append((edge["source_chunk_id"], current_depth + 1))
 
         result_chunks = []
         for d, chunk_ids in sorted(layers.items()):
@@ -260,13 +269,15 @@ class SymbolGraphManager:
                     continue
                 meta = self.storage.get_chunk(cid)
                 if meta:
-                    result_chunks.append({
-                        "chunk_id": cid,
-                        "document_path": meta["document_path"],
-                        "depth": d,
-                        "content": meta.get("content"),
-                        "token_count": meta["token_count"],
-                    })
+                    result_chunks.append(
+                        {
+                            "chunk_id": cid,
+                            "document_path": meta["document_path"],
+                            "depth": d,
+                            "content": meta.get("content"),
+                            "token_count": meta["token_count"],
+                        }
+                    )
 
         return {
             "origin_chunk_id": chunk_id,
@@ -294,7 +305,10 @@ class SymbolGraphManager:
                 content = chunk.get("content")
                 if content:
                     syms = self._extractor.extract(
-                        content, doc_path, chunk["chunk_id"], ext,
+                        content,
+                        doc_path,
+                        chunk["chunk_id"],
+                        ext,
                     )
                     doc_symbols.extend(syms)
             if doc_symbols:

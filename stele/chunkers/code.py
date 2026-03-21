@@ -35,51 +35,103 @@ _GRAMMAR_CACHE: Dict[str, Any] = {}
 # Node types that represent "definition boundaries" per language.
 # We chunk between these top-level nodes.
 _DEFINITION_TYPES: Dict[str, frozenset] = {
-    "javascript": frozenset({
-        "function_declaration", "class_declaration",
-        "lexical_declaration", "variable_declaration",
-        "export_statement",
-    }),
-    "typescript": frozenset({
-        "function_declaration", "class_declaration",
-        "lexical_declaration", "variable_declaration",
-        "export_statement", "interface_declaration",
-        "type_alias_declaration", "enum_declaration",
-    }),
-    "java": frozenset({
-        "class_declaration", "interface_declaration",
-        "enum_declaration", "annotation_type_declaration",
-        "import_declaration", "package_declaration",
-    }),
-    "c": frozenset({
-        "function_definition", "declaration", "preproc_include",
-        "preproc_define", "struct_specifier", "enum_specifier",
-        "type_definition",
-    }),
-    "cpp": frozenset({
-        "function_definition", "declaration", "class_specifier",
-        "struct_specifier", "namespace_definition", "template_declaration",
-        "preproc_include", "preproc_define", "enum_specifier",
-        "type_definition",
-    }),
-    "go": frozenset({
-        "function_declaration", "method_declaration",
-        "type_declaration", "var_declaration", "const_declaration",
-        "import_declaration",
-    }),
-    "rust": frozenset({
-        "function_item", "struct_item", "enum_item",
-        "impl_item", "trait_item", "mod_item", "const_item",
-        "static_item", "type_item", "use_declaration",
-    }),
-    "ruby": frozenset({
-        "method", "class", "module", "singleton_method",
-    }),
-    "php": frozenset({
-        "function_definition", "class_declaration",
-        "interface_declaration", "trait_declaration",
-        "namespace_definition",
-    }),
+    "javascript": frozenset(
+        {
+            "function_declaration",
+            "class_declaration",
+            "lexical_declaration",
+            "variable_declaration",
+            "export_statement",
+        }
+    ),
+    "typescript": frozenset(
+        {
+            "function_declaration",
+            "class_declaration",
+            "lexical_declaration",
+            "variable_declaration",
+            "export_statement",
+            "interface_declaration",
+            "type_alias_declaration",
+            "enum_declaration",
+        }
+    ),
+    "java": frozenset(
+        {
+            "class_declaration",
+            "interface_declaration",
+            "enum_declaration",
+            "annotation_type_declaration",
+            "import_declaration",
+            "package_declaration",
+        }
+    ),
+    "c": frozenset(
+        {
+            "function_definition",
+            "declaration",
+            "preproc_include",
+            "preproc_define",
+            "struct_specifier",
+            "enum_specifier",
+            "type_definition",
+        }
+    ),
+    "cpp": frozenset(
+        {
+            "function_definition",
+            "declaration",
+            "class_specifier",
+            "struct_specifier",
+            "namespace_definition",
+            "template_declaration",
+            "preproc_include",
+            "preproc_define",
+            "enum_specifier",
+            "type_definition",
+        }
+    ),
+    "go": frozenset(
+        {
+            "function_declaration",
+            "method_declaration",
+            "type_declaration",
+            "var_declaration",
+            "const_declaration",
+            "import_declaration",
+        }
+    ),
+    "rust": frozenset(
+        {
+            "function_item",
+            "struct_item",
+            "enum_item",
+            "impl_item",
+            "trait_item",
+            "mod_item",
+            "const_item",
+            "static_item",
+            "type_item",
+            "use_declaration",
+        }
+    ),
+    "ruby": frozenset(
+        {
+            "method",
+            "class",
+            "module",
+            "singleton_method",
+        }
+    ),
+    "php": frozenset(
+        {
+            "function_definition",
+            "class_declaration",
+            "interface_declaration",
+            "trait_declaration",
+            "namespace_definition",
+        }
+    ),
 }
 
 # Map file extensions to (grammar_module_name, language_key)
@@ -160,20 +212,47 @@ class CodeChunker(BaseChunker):
     def supported_extensions(self) -> List[str]:
         """Return supported code file extensions."""
         return [
-            ".py", ".pyw", ".pyx",
-            ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
-            ".java", ".kt", ".kts", ".scala",
-            ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx",
+            ".py",
+            ".pyw",
+            ".pyx",
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",
+            ".mjs",
+            ".cjs",
+            ".java",
+            ".kt",
+            ".kts",
+            ".scala",
+            ".c",
+            ".cpp",
+            ".cc",
+            ".cxx",
+            ".h",
+            ".hpp",
+            ".hxx",
             ".cs",
             ".go",
             ".rs",
             ".rb",
             ".php",
             ".swift",
-            ".sh", ".bash", ".zsh",
-            ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+            ".sh",
+            ".bash",
+            ".zsh",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".ini",
+            ".cfg",
             ".sql",
-            ".html", ".htm", ".css", ".scss", ".less",
+            ".html",
+            ".htm",
+            ".css",
+            ".scss",
+            ".less",
         ]
 
     def chunk(
@@ -225,17 +304,22 @@ class CodeChunker(BaseChunker):
         definitions: List[Dict[str, Any]] = []
         for child in root.children:
             if child.type in def_types:
-                definitions.append({
-                    "type": child.type,
-                    "start_byte": child.start_byte,
-                    "end_byte": child.end_byte,
-                })
+                definitions.append(
+                    {
+                        "type": child.type,
+                        "start_byte": child.start_byte,
+                        "end_byte": child.end_byte,
+                    }
+                )
 
         if not definitions:
             return []  # signal caller to fall back to regex
 
         return self._boundaries_to_chunks(
-            content, document_path, definitions, lang_key,
+            content,
+            document_path,
+            definitions,
+            lang_key,
         )
 
     def _boundaries_to_chunks(
@@ -274,15 +358,17 @@ class CodeChunker(BaseChunker):
             if current_tokens + def_tokens > self.chunk_size and current_parts:
                 chunk_content = "".join(current_parts).strip()
                 if chunk_content:
-                    chunks.append(Chunk(
-                        content=chunk_content,
-                        modality="code",
-                        start_pos=current_start,
-                        end_pos=current_start + len(chunk_content),
-                        document_path=document_path,
-                        chunk_index=chunk_index,
-                        metadata={"language": language},
-                    ))
+                    chunks.append(
+                        Chunk(
+                            content=chunk_content,
+                            modality="code",
+                            start_pos=current_start,
+                            end_pos=current_start + len(chunk_content),
+                            document_path=document_path,
+                            chunk_index=chunk_index,
+                            metadata={"language": language},
+                        )
+                    )
                     chunk_index += 1
                 current_start += len("".join(current_parts))
                 current_parts = []
@@ -299,26 +385,30 @@ class CodeChunker(BaseChunker):
         if current_parts:
             chunk_content = "".join(current_parts).strip()
             if chunk_content:
-                chunks.append(Chunk(
-                    content=chunk_content,
-                    modality="code",
-                    start_pos=current_start,
-                    end_pos=current_start + len(chunk_content),
-                    document_path=document_path,
-                    chunk_index=chunk_index,
-                    metadata={"language": language},
-                ))
+                chunks.append(
+                    Chunk(
+                        content=chunk_content,
+                        modality="code",
+                        start_pos=current_start,
+                        end_pos=current_start + len(chunk_content),
+                        document_path=document_path,
+                        chunk_index=chunk_index,
+                        metadata={"language": language},
+                    )
+                )
 
         if not chunks:
-            chunks.append(Chunk(
-                content="",
-                modality="code",
-                start_pos=0,
-                end_pos=0,
-                document_path=document_path,
-                chunk_index=0,
-                metadata={"language": language},
-            ))
+            chunks.append(
+                Chunk(
+                    content="",
+                    modality="code",
+                    start_pos=0,
+                    end_pos=0,
+                    document_path=document_path,
+                    chunk_index=0,
+                    metadata={"language": language},
+                )
+            )
 
         return chunks
 
@@ -343,19 +433,24 @@ class CodeChunker(BaseChunker):
                     else start_line + 1
                 )
                 # Convert line ranges to byte offsets for shared boundary logic
-                start_byte = sum(len(l) for l in lines[:start_line])
-                end_byte = sum(len(l) for l in lines[:end_line])
-                definitions.append({
-                    "type": type(node).__name__,
-                    "start_byte": start_byte,
-                    "end_byte": end_byte,
-                })
+                start_byte = sum(len(ln) for ln in lines[:start_line])
+                end_byte = sum(len(ln) for ln in lines[:end_line])
+                definitions.append(
+                    {
+                        "type": type(node).__name__,
+                        "start_byte": start_byte,
+                        "end_byte": end_byte,
+                    }
+                )
 
         if not definitions:
             return self._chunk_regex(content, document_path, "py")
 
         return self._boundaries_to_chunks(
-            content, document_path, definitions, "python",
+            content,
+            document_path,
+            definitions,
+            "python",
         )
 
     # -- Regex fallback -------------------------------------------------------
@@ -374,8 +469,12 @@ class CodeChunker(BaseChunker):
         _ts = r"(?:^|\n)(?:export\s+)?(?:async\s+)?function\s+\w+|(?:^|\n)(?:export\s+)?(?:abstract\s+)?class\s+\w+|(?:^|\n)(?:export\s+)?interface\s+\w+|(?:^|\n)(?:export\s+)?type\s+\w+"
         _shell = r"(?:^|\n)(?:function\s+)?\w+\s*\(\s*\)\s*\{"
         patterns = {
-            "js": _js, "jsx": _js, "mjs": _js, "cjs": _js,
-            "ts": _ts, "tsx": _ts,
+            "js": _js,
+            "jsx": _js,
+            "mjs": _js,
+            "cjs": _js,
+            "ts": _ts,
+            "tsx": _ts,
             "java": r"(?:^|\n)(?:public\s+)?(?:private\s+)?(?:protected\s+)?(?:static\s+)?(?:abstract\s+)?(?:class|interface|enum)\s+\w+|(?:^|\n)(?:public\s+)?(?:private\s+)?(?:protected\s+)?(?:static\s+)?(?:final\s+)?(?:synchronized\s+)?(?:native\s+)?(?:abstract\s+)?[\w<>\[\]]+\s+\w+\s*\(",
             "cpp": r"(?:^|\n)(?:[\w:]+\s+)?(?:[\w:]+\s+)?[\w:]+\s+\w+\s*\([^)]*\)\s*(?:const\s*)?\{",
             "c": r"(?:^|\n)(?:[\w*]+\s+)+\w+\s*\([^)]*\)\s*\{",
@@ -384,7 +483,9 @@ class CodeChunker(BaseChunker):
             "rb": r"(?:^|\n)def\s+\w+|(?:^|\n)class\s+\w+|(?:^|\n)module\s+\w+",
             "php": r"(?:^|\n)(?:abstract\s+)?(?:class|interface|trait)\s+\w+|(?:^|\n)(?:public\s+)?(?:private\s+)?(?:protected\s+)?(?:static\s+)?function\s+\w+",
             "swift": r"(?:^|\n)(?:public\s+)?(?:private\s+)?(?:internal\s+)?(?:open\s+)?(?:final\s+)?class\s+\w+|(?:^|\n)(?:public\s+)?(?:private\s+)?(?:internal\s+)?(?:static\s+)?func\s+\w+",
-            "sh": _shell, "bash": _shell, "zsh": _shell,
+            "sh": _shell,
+            "bash": _shell,
+            "zsh": _shell,
         }
 
         pattern = patterns.get(language, patterns.get("js", r"(?:^|\n)\w+"))
@@ -401,28 +502,32 @@ class CodeChunker(BaseChunker):
             if match_start > last_end:
                 pre_content = content[last_end:match_start].strip()
                 if pre_content:
-                    chunks.append(Chunk(
-                        content=pre_content,
-                        modality="code",
-                        start_pos=last_end,
-                        end_pos=match_start,
-                        document_path=document_path,
-                        chunk_index=chunk_index,
-                        metadata={"language": language},
-                    ))
+                    chunks.append(
+                        Chunk(
+                            content=pre_content,
+                            modality="code",
+                            start_pos=last_end,
+                            end_pos=match_start,
+                            document_path=document_path,
+                            chunk_index=chunk_index,
+                            metadata={"language": language},
+                        )
+                    )
                     chunk_index += 1
 
             def_content = content[match_start:match_end].strip()
             if def_content:
-                chunks.append(Chunk(
-                    content=def_content,
-                    modality="code",
-                    start_pos=match_start,
-                    end_pos=match_end,
-                    document_path=document_path,
-                    chunk_index=chunk_index,
-                    metadata={"language": language},
-                ))
+                chunks.append(
+                    Chunk(
+                        content=def_content,
+                        modality="code",
+                        start_pos=match_start,
+                        end_pos=match_end,
+                        document_path=document_path,
+                        chunk_index=chunk_index,
+                        metadata={"language": language},
+                    )
+                )
                 chunk_index += 1
 
             last_end = match_end
@@ -430,22 +535,30 @@ class CodeChunker(BaseChunker):
         if last_end < len(content):
             remaining = content[last_end:].strip()
             if remaining:
-                chunks.append(Chunk(
-                    content=remaining,
-                    modality="code",
-                    start_pos=last_end,
-                    end_pos=len(content),
-                    document_path=document_path,
-                    chunk_index=chunk_index,
-                    metadata={"language": language},
-                ))
+                chunks.append(
+                    Chunk(
+                        content=remaining,
+                        modality="code",
+                        start_pos=last_end,
+                        end_pos=len(content),
+                        document_path=document_path,
+                        chunk_index=chunk_index,
+                        metadata={"language": language},
+                    )
+                )
 
         if not chunks:
-            chunks.append(Chunk(
-                content="", modality="code", start_pos=0, end_pos=0,
-                document_path=document_path, chunk_index=0,
-                metadata={"language": language},
-            ))
+            chunks.append(
+                Chunk(
+                    content="",
+                    modality="code",
+                    start_pos=0,
+                    end_pos=0,
+                    document_path=document_path,
+                    chunk_index=0,
+                    metadata={"language": language},
+                )
+            )
 
         return chunks
 
@@ -470,23 +583,31 @@ class CodeChunker(BaseChunker):
 
             if chunk_content:
                 start_pos = sum(len(line) for line in lines[:i])
-                chunks.append(Chunk(
-                    content=chunk_content,
-                    modality="code",
-                    start_pos=start_pos,
-                    end_pos=start_pos + len(chunk_content),
-                    document_path=document_path,
-                    chunk_index=chunk_index,
-                    metadata={"language": language},
-                ))
+                chunks.append(
+                    Chunk(
+                        content=chunk_content,
+                        modality="code",
+                        start_pos=start_pos,
+                        end_pos=start_pos + len(chunk_content),
+                        document_path=document_path,
+                        chunk_index=chunk_index,
+                        metadata={"language": language},
+                    )
+                )
                 chunk_index += 1
 
         return (
             chunks
             if chunks
-            else [Chunk(
-                content="", modality="code", start_pos=0, end_pos=0,
-                document_path=document_path, chunk_index=0,
-                metadata={"language": language},
-            )]
+            else [
+                Chunk(
+                    content="",
+                    modality="code",
+                    start_pos=0,
+                    end_pos=0,
+                    document_path=document_path,
+                    chunk_index=0,
+                    metadata={"language": language},
+                )
+            ]
         )

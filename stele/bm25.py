@@ -78,16 +78,12 @@ class BM25Index:
             idf = math.log((self.n_docs - n + 0.5) / (n + 0.5) + 1.0)
             tf = tf_map.get(term, 0)
             numerator = tf * (self.k1 + 1.0)
-            denominator = tf + self.k1 * (
-                1.0 - self.b + self.b * dl / self.avg_dl
-            )
+            denominator = tf + self.k1 * (1.0 - self.b + self.b * dl / self.avg_dl)
             total += idf * numerator / denominator
 
         return total
 
-    def score_batch(
-        self, query: str, doc_ids: List[str]
-    ) -> Dict[str, float]:
+    def score_batch(self, query: str, doc_ids: List[str]) -> Dict[str, float]:
         """Score multiple documents against a query (tokenizes once)."""
         terms = self._tokenize(query)
         return {doc_id: self._score_terms(terms, doc_id) for doc_id in doc_ids}
@@ -110,9 +106,7 @@ class BM25Index:
             "b": self.b,
             "doc_freqs": dict(self.doc_freqs),
             "doc_lengths": self.doc_lengths,
-            "term_freqs": {
-                doc_id: dict(tf) for doc_id, tf in self.term_freqs.items()
-            },
+            "term_freqs": {doc_id: dict(tf) for doc_id, tf in self.term_freqs.items()},
             "avg_dl": self.avg_dl,
             "n_docs": self.n_docs,
         }

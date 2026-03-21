@@ -4,11 +4,12 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from stele.engine import Stele
 from stele.symbols import (
-    SymbolExtractor, Symbol, resolve_symbols, _module_matches_path,
+    SymbolExtractor,
+    Symbol,
+    resolve_symbols,
+    _module_matches_path,
     _NOISE_REFS,
 )
 from stele.symbol_storage import SymbolStorage
@@ -488,7 +489,9 @@ class TestStalenessPropagation:
     def test_direct_dependent_gets_stale(self):
         """Changing base.py should make lib.py stale."""
         (self.src / "base.py").write_text("class Base:\n    pass\n")
-        (self.src / "lib.py").write_text("from base import Base\nclass Lib(Base):\n    pass\n")
+        (self.src / "lib.py").write_text(
+            "from base import Base\nclass Lib(Base):\n    pass\n"
+        )
         self.cf.index_documents([str(self.src)])
 
         # Modify base.py
@@ -497,16 +500,18 @@ class TestStalenessPropagation:
 
         stale = self.cf.stale_chunks(threshold=0.1)
         assert stale["total_stale"] >= 1
-        stale_paths = [
-            d["path"] for d in stale["by_document"]
-        ]
+        stale_paths = [d["path"] for d in stale["by_document"]]
         assert any("lib.py" in p for p in stale_paths)
 
     def test_transitive_staleness_decays(self):
         """Staleness should decay with graph distance."""
         (self.src / "base.py").write_text("def core():\n    return 1\n")
-        (self.src / "mid.py").write_text("from base import core\ndef middle():\n    return core()\n")
-        (self.src / "top.py").write_text("from mid import middle\ndef top():\n    return middle()\n")
+        (self.src / "mid.py").write_text(
+            "from base import core\ndef middle():\n    return core()\n"
+        )
+        (self.src / "top.py").write_text(
+            "from mid import middle\ndef top():\n    return middle()\n"
+        )
         self.cf.index_documents([str(self.src)])
 
         (self.src / "base.py").write_text("def core():\n    return 99\n")
@@ -526,8 +531,12 @@ class TestStalenessPropagation:
     def test_staleness_threshold_filtering(self):
         """stale_chunks with high threshold should return fewer results."""
         (self.src / "base.py").write_text("def core():\n    return 1\n")
-        (self.src / "mid.py").write_text("from base import core\ndef middle():\n    return core()\n")
-        (self.src / "top.py").write_text("from mid import middle\ndef top():\n    return middle()\n")
+        (self.src / "mid.py").write_text(
+            "from base import core\ndef middle():\n    return core()\n"
+        )
+        (self.src / "top.py").write_text(
+            "from mid import middle\ndef top():\n    return middle()\n"
+        )
         self.cf.index_documents([str(self.src)])
 
         (self.src / "base.py").write_text("def core():\n    return 99\n")
@@ -813,7 +822,9 @@ class TestSymbolBoostedSearch:
         results = self.cf.search("verify_credentials", top_k=10)
         assert len(results) >= 1
         # At least one result should contain the function definition
-        found_content = any("verify_credentials" in (r.get("content") or "") for r in results)
+        found_content = any(
+            "verify_credentials" in (r.get("content") or "") for r in results
+        )
         assert found_content, "Search should find chunks containing verify_credentials"
 
 
@@ -849,9 +860,7 @@ class TestIncrementalEdgeRebuild:
     def test_reindex_updates_edges(self):
         """Re-indexing a file should update its edges."""
         (self.src / "lib.py").write_text("def old_func():\n    pass\n")
-        (self.src / "app.py").write_text(
-            "from lib import old_func\nold_func()\n"
-        )
+        (self.src / "app.py").write_text("from lib import old_func\nold_func()\n")
         self.cf.index_documents([str(self.src)])
         assert self.cf.get_stats()["storage"]["edge_count"] >= 1
 

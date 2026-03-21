@@ -199,10 +199,12 @@ class TestMCPStdioIntegration:
         engine = Stele(storage_dir=str(tmp_path / "storage"))
         engine.index_documents([str(f1), str(f2)])
 
-        result = engine.bulk_annotate([
-            {"target": str(f1), "target_type": "document", "content": "A"},
-            {"target": str(f2), "target_type": "document", "content": "B"},
-        ])
+        result = engine.bulk_annotate(
+            [
+                {"target": str(f1), "target_type": "document", "content": "A"},
+                {"target": str(f2), "target_type": "document", "content": "B"},
+            ]
+        )
         assert len(result["created"]) == 2
 
     def test_prune_history_tool_logic(self, tmp_path):

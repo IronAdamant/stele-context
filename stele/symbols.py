@@ -14,43 +14,178 @@ from typing import Dict, List, Optional, Set, Tuple
 
 # Names too common/ambiguous to create useful cross-file edges.
 # Applied only to references (not definitions) during resolution.
-_NOISE_REFS: frozenset = frozenset({
-    # Python builtins (never user-defined)
-    "print", "len", "range", "enumerate", "zip", "sorted", "reversed",
-    "isinstance", "issubclass", "hasattr", "getattr", "setattr", "delattr",
-    "super", "type", "id", "hash", "repr", "input", "open", "iter", "next",
-    "abs", "min", "max", "sum", "round", "any", "all", "format", "callable",
-    "str", "int", "float", "bool", "list", "dict", "set", "tuple", "bytes",
-    "object", "property", "staticmethod", "classmethod",
-    # Python exceptions
-    "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
-    "AttributeError", "RuntimeError", "NotImplementedError", "StopIteration",
-    "OSError", "FileNotFoundError", "ImportError",
-    # Python dunder methods (every class has them)
-    "__init__", "__new__", "__del__", "__str__", "__repr__", "__eq__",
-    "__ne__", "__lt__", "__le__", "__gt__", "__ge__", "__hash__", "__bool__",
-    "__len__", "__iter__", "__next__", "__contains__", "__call__",
-    "__getitem__", "__setitem__", "__delitem__", "__getattr__", "__setattr__",
-    "__enter__", "__exit__", "__add__", "__sub__", "__mul__",
-    # JS/TS globals
-    "console", "log", "error", "warn", "info", "debug",
-    "setTimeout", "setInterval", "parseInt", "parseFloat", "isNaN",
-    "then", "catch", "resolve", "reject", "finally",
-    "toString", "valueOf", "toJSON",
-    "Array", "Object", "String", "Number", "Boolean", "Map", "Set",
-    "Promise", "Error", "Date", "RegExp", "JSON", "Math",
-    # Ambiguous method names (defined on too many types)
-    "get", "set", "add", "remove", "pop", "push", "append", "extend",
-    "update", "clear", "copy", "keys", "values", "items", "entries",
-    "find", "findIndex", "indexOf", "includes", "contains",
-    "join", "split", "replace", "match", "test", "search", "trim",
-    "forEach", "reduce", "slice", "splice",
-    "close", "read", "write", "flush", "seek",
-    "apply", "call", "bind",
-    "start", "stop", "run", "execute",
-    # Context names
-    "self", "cls", "this",
-})
+_NOISE_REFS: frozenset = frozenset(
+    {
+        # Python builtins (never user-defined)
+        "print",
+        "len",
+        "range",
+        "enumerate",
+        "zip",
+        "sorted",
+        "reversed",
+        "isinstance",
+        "issubclass",
+        "hasattr",
+        "getattr",
+        "setattr",
+        "delattr",
+        "super",
+        "type",
+        "id",
+        "hash",
+        "repr",
+        "input",
+        "open",
+        "iter",
+        "next",
+        "abs",
+        "min",
+        "max",
+        "sum",
+        "round",
+        "any",
+        "all",
+        "format",
+        "callable",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "bytes",
+        "object",
+        "property",
+        "staticmethod",
+        "classmethod",
+        # Python exceptions
+        "Exception",
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "IndexError",
+        "AttributeError",
+        "RuntimeError",
+        "NotImplementedError",
+        "StopIteration",
+        "OSError",
+        "FileNotFoundError",
+        "ImportError",
+        # Python dunder methods (every class has them)
+        "__init__",
+        "__new__",
+        "__del__",
+        "__str__",
+        "__repr__",
+        "__eq__",
+        "__ne__",
+        "__lt__",
+        "__le__",
+        "__gt__",
+        "__ge__",
+        "__hash__",
+        "__bool__",
+        "__len__",
+        "__iter__",
+        "__next__",
+        "__contains__",
+        "__call__",
+        "__getitem__",
+        "__setitem__",
+        "__delitem__",
+        "__getattr__",
+        "__setattr__",
+        "__enter__",
+        "__exit__",
+        "__add__",
+        "__sub__",
+        "__mul__",
+        # JS/TS globals
+        "console",
+        "log",
+        "error",
+        "warn",
+        "info",
+        "debug",
+        "setTimeout",
+        "setInterval",
+        "parseInt",
+        "parseFloat",
+        "isNaN",
+        "then",
+        "catch",
+        "resolve",
+        "reject",
+        "finally",
+        "toString",
+        "valueOf",
+        "toJSON",
+        "Array",
+        "Object",
+        "String",
+        "Number",
+        "Boolean",
+        "Map",
+        "Set",
+        "Promise",
+        "Error",
+        "Date",
+        "RegExp",
+        "JSON",
+        "Math",
+        # Ambiguous method names (defined on too many types)
+        "get",
+        "set",
+        "add",
+        "remove",
+        "pop",
+        "push",
+        "append",
+        "extend",
+        "update",
+        "clear",
+        "copy",
+        "keys",
+        "values",
+        "items",
+        "entries",
+        "find",
+        "findIndex",
+        "indexOf",
+        "includes",
+        "contains",
+        "join",
+        "split",
+        "replace",
+        "match",
+        "test",
+        "search",
+        "trim",
+        "forEach",
+        "reduce",
+        "slice",
+        "splice",
+        "close",
+        "read",
+        "write",
+        "flush",
+        "seek",
+        "apply",
+        "call",
+        "bind",
+        "start",
+        "stop",
+        "run",
+        "execute",
+        # Context names
+        "self",
+        "cls",
+        "this",
+    }
+)
 
 
 @dataclass
@@ -129,7 +264,9 @@ class SymbolExtractor:
 
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 symbols.append(
-                    Symbol(node.name, "function", "definition", chunk_id, doc_path, line)
+                    Symbol(
+                        node.name, "function", "definition", chunk_id, doc_path, line
+                    )
                 )
             elif isinstance(node, ast.ClassDef):
                 symbols.append(
@@ -138,31 +275,50 @@ class SymbolExtractor:
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     symbols.append(
-                        Symbol(alias.name, "module", "reference", chunk_id, doc_path, line)
+                        Symbol(
+                            alias.name, "module", "reference", chunk_id, doc_path, line
+                        )
                     )
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     symbols.append(
-                        Symbol(node.module, "module", "reference", chunk_id, doc_path, line)
+                        Symbol(
+                            node.module, "module", "reference", chunk_id, doc_path, line
+                        )
                     )
                 for alias in node.names or []:
                     if alias.name != "*":
                         symbols.append(
                             Symbol(
-                                alias.name, "import", "reference", chunk_id, doc_path, line
+                                alias.name,
+                                "import",
+                                "reference",
+                                chunk_id,
+                                doc_path,
+                                line,
                             )
                         )
             elif isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Name):
                     symbols.append(
                         Symbol(
-                            node.func.id, "function", "reference", chunk_id, doc_path, line
+                            node.func.id,
+                            "function",
+                            "reference",
+                            chunk_id,
+                            doc_path,
+                            line,
                         )
                     )
                 elif isinstance(node.func, ast.Attribute):
                     symbols.append(
                         Symbol(
-                            node.func.attr, "function", "reference", chunk_id, doc_path, line
+                            node.func.attr,
+                            "function",
+                            "reference",
+                            chunk_id,
+                            doc_path,
+                            line,
                         )
                     )
 
@@ -243,7 +399,9 @@ class SymbolExtractor:
 
             # Class method definitions (indented, no function keyword)
             m = re.match(r"\s+(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{", line)
-            if m and not re.match(r"\s*(if|for|while|switch|catch|function|return)\b", line):
+            if m and not re.match(
+                r"\s*(if|for|while|switch|catch|function|return)\b", line
+            ):
                 symbols.append(
                     Symbol(m.group(1), "function", "definition", chunk_id, doc_path, i)
                 )
@@ -295,7 +453,9 @@ class SymbolExtractor:
                 selector = m.group(1)
                 for cls in re.findall(r"\.([a-zA-Z_][\w-]*)", selector):
                     symbols.append(
-                        Symbol(f".{cls}", "css_class", "reference", chunk_id, doc_path, i)
+                        Symbol(
+                            f".{cls}", "css_class", "reference", chunk_id, doc_path, i
+                        )
                     )
                 for id_ in re.findall(r"#([a-zA-Z_][\w-]*)", selector):
                     symbols.append(
@@ -304,7 +464,9 @@ class SymbolExtractor:
 
             for m in re.finditer(r"getElementById\(['\"]([^'\"]+)['\"]\)", stripped):
                 symbols.append(
-                    Symbol(f"#{m.group(1)}", "css_id", "reference", chunk_id, doc_path, i)
+                    Symbol(
+                        f"#{m.group(1)}", "css_id", "reference", chunk_id, doc_path, i
+                    )
                 )
 
             for m in re.finditer(
@@ -323,7 +485,12 @@ class SymbolExtractor:
             ):
                 symbols.append(
                     Symbol(
-                        f".{m.group(1)}", "css_class", "reference", chunk_id, doc_path, i
+                        f".{m.group(1)}",
+                        "css_class",
+                        "reference",
+                        chunk_id,
+                        doc_path,
+                        i,
                     )
                 )
 
@@ -331,9 +498,7 @@ class SymbolExtractor:
 
     # -- HTML ----------------------------------------------------------------
 
-    def _extract_html(
-        self, content: str, doc_path: str, chunk_id: str
-    ) -> List[Symbol]:
+    def _extract_html(self, content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
         """Extract symbols from HTML."""
         symbols: List[Symbol] = []
 
@@ -360,9 +525,7 @@ class SymbolExtractor:
         for m in re.finditer(r'<link[^>]+href\s*=\s*["\']([^"\']+)["\']', content):
             href = m.group(1)
             if href.endswith((".css", ".scss", ".less")):
-                symbols.append(
-                    Symbol(href, "module", "reference", chunk_id, doc_path)
-                )
+                symbols.append(Symbol(href, "module", "reference", chunk_id, doc_path))
 
         # Inline event handlers
         for m in re.finditer(r'on\w+\s*=\s*["\'](\w+)\s*\(', content):
@@ -374,9 +537,7 @@ class SymbolExtractor:
 
     # -- CSS / SCSS / LESS ---------------------------------------------------
 
-    def _extract_css(
-        self, content: str, doc_path: str, chunk_id: str
-    ) -> List[Symbol]:
+    def _extract_css(self, content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
         """Extract symbols from CSS/SCSS/LESS."""
         symbols: List[Symbol] = []
 
@@ -411,9 +572,7 @@ class SymbolExtractor:
 
     # -- Java / Kotlin / Scala -----------------------------------------------
 
-    def _extract_java(
-        self, content: str, doc_path: str, chunk_id: str
-    ) -> List[Symbol]:
+    def _extract_java(self, content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
         """Extract symbols from Java/Kotlin/Scala."""
         symbols: List[Symbol] = []
         _skip = {"if", "while", "for", "switch", "catch", "return", "new", "throw"}
@@ -458,9 +617,7 @@ class SymbolExtractor:
 
     # -- Go ------------------------------------------------------------------
 
-    def _extract_go(
-        self, content: str, doc_path: str, chunk_id: str
-    ) -> List[Symbol]:
+    def _extract_go(self, content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
         """Extract symbols from Go."""
         symbols: List[Symbol] = []
 
@@ -489,9 +646,7 @@ class SymbolExtractor:
 
     # -- Rust ----------------------------------------------------------------
 
-    def _extract_rust(
-        self, content: str, doc_path: str, chunk_id: str
-    ) -> List[Symbol]:
+    def _extract_rust(self, content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
         """Extract symbols from Rust."""
         symbols: List[Symbol] = []
 
@@ -532,9 +687,7 @@ class SymbolExtractor:
 
     # -- C / C++ / C# -------------------------------------------------------
 
-    def _extract_c(
-        self, content: str, doc_path: str, chunk_id: str
-    ) -> List[Symbol]:
+    def _extract_c(self, content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
         """Extract symbols from C/C++/C#."""
         symbols: List[Symbol] = []
         _skip = {"if", "while", "for", "switch", "return", "sizeof", "typeof"}
@@ -571,9 +724,7 @@ class SymbolExtractor:
 
     # -- Ruby ----------------------------------------------------------------
 
-    def _extract_ruby(
-        self, content: str, doc_path: str, chunk_id: str
-    ) -> List[Symbol]:
+    def _extract_ruby(self, content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
         """Extract symbols from Ruby."""
         symbols: List[Symbol] = []
 
@@ -605,18 +756,14 @@ class SymbolExtractor:
 
     # -- PHP -----------------------------------------------------------------
 
-    def _extract_php(
-        self, content: str, doc_path: str, chunk_id: str
-    ) -> List[Symbol]:
+    def _extract_php(self, content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
         """Extract symbols from PHP."""
         symbols: List[Symbol] = []
 
         for i, line in enumerate(content.splitlines(), 1):
             stripped = line.strip()
 
-            m = re.match(
-                r"(?:abstract\s+)?(?:class|interface|trait)\s+(\w+)", stripped
-            )
+            m = re.match(r"(?:abstract\s+)?(?:class|interface|trait)\s+(\w+)", stripped)
             if m:
                 symbols.append(
                     Symbol(m.group(1), "class", "definition", chunk_id, doc_path, i)
@@ -711,7 +858,8 @@ def resolve_symbols(symbols: List[Symbol]) -> List[Tuple[str, str, str, str]]:
         hints = module_hints.get(sym.chunk_id, set())
         if hints and len(defs) > 1:
             hinted = [
-                (cid, dp) for cid, dp in defs
+                (cid, dp)
+                for cid, dp in defs
                 if any(_module_matches_path(mod, dp) for mod in hints)
             ]
             if hinted:

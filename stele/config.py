@@ -9,7 +9,7 @@ for Python 3.9-3.10.  Zero external dependencies.
 """
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional
 
 # Prefer stdlib tomllib (3.11+), then tomli, then builtin fallback
 try:

@@ -1,8 +1,5 @@
 """Tests for chunk history query tools."""
 
-import time
-import pytest
-
 from stele.storage import StorageBackend
 from stele.engine import Stele
 
@@ -20,14 +17,10 @@ class TestStorageChunkHistory:
         sig = [0.0] * 128
 
         # Store initial version
-        storage.store_chunk(
-            "chunk-1", "doc.py", "hash1", sig, 0, 100, 50, "content v1"
-        )
+        storage.store_chunk("chunk-1", "doc.py", "hash1", sig, 0, 100, 50, "content v1")
 
         # Update (creates history entry)
-        storage.store_chunk(
-            "chunk-1", "doc.py", "hash2", sig, 0, 100, 50, "content v2"
-        )
+        storage.store_chunk("chunk-1", "doc.py", "hash2", sig, 0, 100, 50, "content v2")
 
         history = storage.get_chunk_history(chunk_id="chunk-1")
         assert len(history) == 1

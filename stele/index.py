@@ -132,7 +132,7 @@ class HNSWIndex:
 
     def _search_layer(
         self,
-        query: List[float],
+        query: "List[float] | array.array[float]",
         entry_points: Set[str],
         ef: int,
         level: int,
@@ -432,9 +432,7 @@ class HNSWIndex:
                             if len(neighbor.connections[level]) >= max_conn:
                                 break
                             neighbor.connections[level].add(other_id)
-                            self.nodes[other_id].connections[level].add(
-                                neighbor_id
-                            )
+                            self.nodes[other_id].connections[level].add(neighbor_id)
 
         # Remove node
         del self.nodes[node_id]

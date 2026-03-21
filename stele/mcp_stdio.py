@@ -57,9 +57,7 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
     Returns the configured MCP Server instance.
     """
     if not HAS_MCP:
-        raise ImportError(
-            "MCP SDK not installed. Install with: pip install stele[mcp]"
-        )
+        raise ImportError("MCP SDK not installed. Install with: pip install stele[mcp]")
 
     engine = _create_engine(storage_dir)
     server = Server("stele")
@@ -868,7 +866,7 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
     async def list_resources() -> List[Resource]:
         return [
             Resource(
-                uri="stele://documents",
+                uri="stele://documents",  # type: ignore[arg-type]
                 name="Indexed Documents",
                 description="List of all indexed documents",
                 mimeType="application/json",

@@ -1,8 +1,5 @@
 """Tests for the .stele.toml configuration system."""
 
-import pytest
-from pathlib import Path
-
 from stele.config import load_config, apply_config, _parse_toml_minimal
 
 
@@ -84,19 +81,19 @@ class TestLoadConfig:
 
     def test_load_valid_config(self, tmp_path):
         config_file = tmp_path / ".stele.toml"
-        config_file.write_text('[stele]\nchunk_size = 512\n')
+        config_file.write_text("[stele]\nchunk_size = 512\n")
         result = load_config(tmp_path)
         assert result == {"chunk_size": 512}
 
     def test_load_config_without_section(self, tmp_path):
         config_file = tmp_path / ".stele.toml"
-        config_file.write_text('chunk_size = 512\n')
+        config_file.write_text("chunk_size = 512\n")
         result = load_config(tmp_path)
         assert result == {"chunk_size": 512}
 
     def test_load_malformed_config(self, tmp_path):
         config_file = tmp_path / ".stele.toml"
-        config_file.write_text('this is not valid toml {{{')
+        config_file.write_text("this is not valid toml {{{")
         result = load_config(tmp_path)
         # Should not raise, returns something (may be partial parse or empty)
         assert isinstance(result, dict)
@@ -142,9 +139,7 @@ class TestEngineConfigIntegration:
 
     def test_engine_reads_config(self, tmp_path):
         config_file = tmp_path / ".stele.toml"
-        config_file.write_text(
-            "[stele]\nchunk_size = 512\nsearch_alpha = 0.3\n"
-        )
+        config_file.write_text("[stele]\nchunk_size = 512\nsearch_alpha = 0.3\n")
         # Create .git so project root detection works
         (tmp_path / ".git").mkdir()
 

@@ -13,7 +13,9 @@ def _make_engine(tmp_path):
 class TestAnnotations:
     """Tests for annotation storage and retrieval."""
 
-    def _index_file(self, tmp_path, engine, name="test.py", content="def hello(): pass"):
+    def _index_file(
+        self, tmp_path, engine, name="test.py", content="def hello(): pass"
+    ):
         test_file = tmp_path / name
         test_file.write_text(content)
         engine.index_documents([str(test_file)])
@@ -106,7 +108,6 @@ class TestAnnotations:
         delete_result2 = engine.delete_annotation(ann_id)
         assert delete_result2["deleted"] is False
 
-
     def test_update_annotation_content(self, tmp_path):
         """Test updating annotation content."""
         engine = _make_engine(tmp_path)
@@ -162,10 +163,17 @@ class TestAnnotations:
         path1 = self._index_file(tmp_path, engine, "a.py", "def a(): pass")
         path2 = self._index_file(tmp_path, engine, "b.py", "def b(): pass")
 
-        result = engine.bulk_annotate([
-            {"target": path1, "target_type": "document", "content": "Module A"},
-            {"target": path2, "target_type": "document", "content": "Module B", "tags": ["core"]},
-        ])
+        result = engine.bulk_annotate(
+            [
+                {"target": path1, "target_type": "document", "content": "Module A"},
+                {
+                    "target": path2,
+                    "target_type": "document",
+                    "content": "Module B",
+                    "tags": ["core"],
+                },
+            ]
+        )
         assert len(result["created"]) == 2
         assert len(result["errors"]) == 0
 
@@ -174,10 +182,16 @@ class TestAnnotations:
         engine = _make_engine(tmp_path)
         path = self._index_file(tmp_path, engine)
 
-        result = engine.bulk_annotate([
-            {"target": path, "target_type": "document", "content": "Valid"},
-            {"target": "/no/such/file", "target_type": "document", "content": "Invalid"},
-        ])
+        result = engine.bulk_annotate(
+            [
+                {"target": path, "target_type": "document", "content": "Valid"},
+                {
+                    "target": "/no/such/file",
+                    "target_type": "document",
+                    "content": "Invalid",
+                },
+            ]
+        )
         assert len(result["created"]) == 1
         assert len(result["errors"]) == 1
         assert "error" in result["errors"][0]
@@ -286,12 +300,9 @@ class TestHistory:
         # All entries should mention the filtered document
         for entry in history_a:
             summary = entry["summary"]
-            mentioned = (
-                str(f1) in summary.get("unchanged", [])
-                or any(
-                    isinstance(m, dict) and m.get("path") == str(f1)
-                    for m in summary.get("modified", []) + summary.get("new", [])
-                )
+            mentioned = str(f1) in summary.get("unchanged", []) or any(
+                isinstance(m, dict) and m.get("path") == str(f1)
+                for m in summary.get("modified", []) + summary.get("new", [])
             )
             assert mentioned
 

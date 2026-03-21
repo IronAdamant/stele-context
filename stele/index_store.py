@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 
 try:
     import fcntl
+
     _HAS_FCNTL = True
 except ImportError:
     _HAS_FCNTL = False
@@ -51,9 +52,7 @@ def _lock_path(index_dir: Path, filename: str) -> Path:
     return index_dir / (filename + ".lock")
 
 
-def _save_compressed_json(
-    data: Dict[str, Any], filename: str, index_dir: Path
-) -> None:
+def _save_compressed_json(data: Dict[str, Any], filename: str, index_dir: Path) -> None:
     """Serialize a dict to a compressed JSON file (atomic write).
 
     Uses fcntl.flock(LOCK_EX) on a sidecar .lock file to prevent
@@ -85,9 +84,7 @@ def _save_compressed_json(
         lock_fd.close()
 
 
-def _load_compressed_json(
-    filename: str, index_dir: Path
-) -> Optional[Dict[str, Any]]:
+def _load_compressed_json(filename: str, index_dir: Path) -> Optional[Dict[str, Any]]:
     """Load a compressed JSON file, returning None on any error.
 
     Uses fcntl.flock(LOCK_SH) to allow concurrent readers but
