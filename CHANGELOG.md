@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tests/test_config.py`** (18 tests) — TOML parser, config loading, config merging, engine integration.
 - **`tests/test_chunk_history.py`** (8 tests) — Storage and engine chunk history queries.
 - **`tests/test_tree_sitter.py`** (13 tests) — Tree-sitter chunking for JS, TS, Go, Rust, Java, C, plus large files and edge cases.
+- **CODE_OF_CONDUCT.md** — Contributor Covenant v2.0.
+- **README.md overhaul** — Mermaid architecture diagram, comparison table vs alternatives, FAQ section, troubleshooting guide, updated tool counts and benchmark results.
+- **CI coverage enforcement** — `--cov-fail-under=80` added to test workflow.
 
 ### Changed
 - **MCP tools**: HTTP 28 (was 27), stdio 30 (was 29)

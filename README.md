@@ -5,52 +5,90 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/Stele)
+[![Tests](https://img.shields.io/badge/tests-400%20passed-brightgreen.svg)](https://github.com/IronAdamant/Stele/actions)
 
 Stele helps LLM agents avoid re-reading unchanged files by caching chunk data with semantic search. Documents are routed through modality-specific chunkers, chunk content is stored in SQLite, and an HNSW vector index enables fast O(log n) retrieval. Only modified chunks trigger reprocessing.
 
 ## Key Features
 
 - **100% Offline & Local-Only**: No internet access, no external API calls, no cloud components
-- **Zero Required Dependencies**: Runs on Python stdlib alone—no supply chain risks
+- **Zero Required Dependencies**: Runs on Python stdlib alone — no supply chain risks
 - **Multi-Modal Support**: Text, code, images, PDFs, audio, and video (optional dependencies)
 - **HNSW Vector Index**: O(log n) semantic search across all indexed chunks
-- **Semantic Search API**: `search(query)` returns chunk content ranked by relevance
-- **Context Cache API**: `get_context(paths)` returns cached chunks for unchanged files
-- **Modality-Specific Chunking**: Routes .py through AST-aware CodeChunker, .txt through TextChunker, etc.
-- **Chunk Content Storage**: Chunk text persisted in SQLite — no need to re-read source files
-- **Real MCP Server**: JSON-RPC over stdio (`serve-mcp`) for Claude Desktop integration
-- **Dynamic Semantic Chunking**: ~256-token initial chunks, intelligently merged by semantic similarity
-- **Adaptive Chunking**: Adjusts chunk size based on content density (code vs prose)
-- **Hybrid Indexing**: SHA-256 content hashes + 128-dim semantic signatures
-- **Change Detection**: Unchanged = instant cache hit; similar = lightweight double-check; different = reprocess
-- **JSON Serialization**: KV-cache stored as JSON+zlib (no pickle, safe for agent-facing tools)
+- **Hybrid Search**: HNSW cosine similarity + BM25 keyword matching, auto-tuned blending
+- **Tree-Sitter Chunking**: AST-aware code chunking for 9 languages (optional, falls back to regex)
 - **Symbol Graph**: Cross-file reference tracking — `find_references`, `find_definition`, `impact_radius`
-- **Cross-Language Linking**: HTML `class="btn"` → CSS `.btn {}`, JS `querySelector('.btn')` → CSS, `onclick="fn()"` → JS
-- **Impact Analysis**: "What breaks if I change this?" — BFS over symbol edges with configurable depth
-- **Staleness Detection**: Automatic context rot detection — when dependencies change, dependents get flagged with decay scores
-- **Directory Indexing**: Pass a directory to `index_documents()` — recursively walks, filters by extension, skips `.git`/`node_modules`/hidden dirs
-- **Annotations**: Attach metadata notes to documents and chunks for LLM navigation
-- **Project Map**: `map` tool returns all documents with chunk counts, tokens, and annotations
-- **Change History**: Automatic recording of change detection results with optional reasons
-- **Session Management**: Sessions with rollback support and automatic pruning
-- **Persistent Storage**: SQLite metadata + filesystem cache with full rollback support
-- **HTTP REST Server**: `serve` command for HTTP API integration
-- **Multi-Agent Safe**: Per-document locking, optimistic versioning, conflict audit log — multiple agents share one Stele instance without stepping on each other
-- **Optional Performance**: `msgspec` and `numpy` for speed (with stdlib fallbacks)
+- **Multi-Agent Safe**: Per-document locking, optimistic versioning, cross-worktree coordination
+- **MCP Server**: JSON-RPC over stdio for Claude Desktop, HTTP REST for other agents
+- **Project Config**: `.stele.toml` file for per-project settings
+- **Session Management**: Sessions with rollback, pruning, and KV-cache persistence
+
+## Architecture
+
+```mermaid
+graph TB
+    subgraph API["API Layer"]
+        CLI["CLI<br/>stele index / search / serve"]
+        HTTP["HTTP REST<br/>28 tools, threaded"]
+        MCP["MCP stdio<br/>30 tools, JSON-RPC"]
+    end
+
+    subgraph Engine["Engine (engine.py)"]
+        CFG["Config<br/>.stele.toml loader"]
+        SEARCH["Hybrid Search<br/>HNSW + BM25"]
+        IDX["index_documents()<br/>detect_changes()"]
+        SYM["Symbol Graph<br/>12 languages"]
+        SESS["Sessions<br/>rollback, pruning"]
+        LOCK["Document Locking<br/>ownership, versioning"]
+    end
+
+    subgraph Chunkers["Chunkers"]
+        TXT["TextChunker"]
+        CODE["CodeChunker<br/>Python AST<br/>tree-sitter (9 langs)<br/>regex fallback"]
+        IMG["ImageChunker<br/>(Pillow)"]
+        PDF["PDFChunker<br/>(pymupdf)"]
+        AUD["AudioChunker<br/>(librosa)"]
+        VID["VideoChunker<br/>(opencv)"]
+    end
+
+    subgraph Storage["Storage"]
+        SQLITE["SQLite<br/>chunks, symbols,<br/>sessions, history"]
+        HNSW["HNSW Index<br/>128-dim vectors"]
+        BM25["BM25 Index<br/>keyword scoring"]
+        KV["KV Cache<br/>JSON + zlib"]
+        COORD["Coordination DB<br/>cross-worktree locks"]
+    end
+
+    CLI --> Engine
+    HTTP --> Engine
+    MCP --> Engine
+    Engine --> Chunkers
+    Engine --> Storage
+```
+
+## Comparison
+
+| Feature | Stele | LangChain | LlamaIndex | EverMemOS |
+|---------|-------|-----------|------------|-----------|
+| Zero dependencies | Yes | No (50+) | No (30+) | No (Mongo, Redis, Milvus) |
+| 100% offline | Yes | No | No | No |
+| No model downloads | Yes | No | No | No |
+| Multi-modal | 6 modalities | Text-focused | Text-focused | Text only |
+| Code-aware chunking | AST + tree-sitter | Basic splitting | Basic splitting | No |
+| Symbol graph | 12 languages | No | No | No |
+| Multi-agent safety | Locks + versioning | No | No | Yes |
+| MCP server | Native | Plugin | Plugin | Planned |
+| Storage | SQLite (embedded) | Vector DB (external) | Vector DB (external) | MongoDB + Milvus |
 
 ## Installation
 
-### From Source
-
 ```bash
-# Clone the repository
+# From source
 git clone https://github.com/IronAdamant/Stele.git
 cd stele
-
-# Install in development mode
 pip install -e .
 
-# Or install with dev dependencies
+# With dev dependencies
 pip install -e ".[dev]"
 ```
 
@@ -59,7 +97,7 @@ pip install -e ".[dev]"
 - Python 3.9+
 - **Zero required dependencies**
 
-Optional (all 100% offline, no network):
+### Optional Extras (all 100% offline)
 
 | Extra | Packages | Use Case |
 |-------|----------|----------|
@@ -68,100 +106,36 @@ Optional (all 100% offline, no network):
 | `pdf` | pymupdf | PDF text extraction |
 | `audio` | librosa, numpy | Audio segmentation & features |
 | `video` | opencv-python, numpy | Video keyframe extraction |
-| `mcp` | mcp | Real MCP server (stdio transport) |
+| `tree-sitter` | tree-sitter + 9 grammar packages | AST-aware code chunking for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP |
+| `mcp` | mcp | MCP stdio server for Claude Desktop |
 | `all` | All of the above | Everything |
 
 ```bash
-# Install with specific modalities
-pip install stele[image,pdf]
-pip install stele[all]
+pip install stele[tree-sitter]   # AST-aware code chunking
+pip install stele[image,pdf]     # Multi-modal
+pip install stele[all]           # Everything
 ```
-
-All features work with Python standard library alone (text/code).
-
-## Security & Supply Chain
-
-Stele is designed with security in mind:
-
-- **Zero required dependencies** - No supply chain attack surface for core functionality
-- **No model downloads** - Semantic signatures use simple TF-style features, not ML models
-- **No API calls** - Everything runs locally, no data leaves your machine
-- **Optional deps are safe** - `msgspec` and `numpy` are pure computation libraries with no network access
-- **No pickle** - Session data serialized with JSON+zlib, safe for agent-facing tools
-- **Minimal codebase** - ~8,000 lines of Python, easy to audit
-
-For maximum security:
-```bash
-# Install with zero dependencies
-pip install stele --no-deps
-```
-
-## Supported Formats
-
-### Text & Code (Zero Dependencies)
-- `.txt`, `.md`, `.rst`, `.csv`, `.log`
-- `.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.cpp`, `.c`, `.h`
-- `.go`, `.rs`, `.rb`, `.php`, `.swift`, `.sh`, `.bash`
-- `.json`, `.yaml`, `.yml`, `.toml`, `.xml`, `.html`, `.css`, `.sql`
-
-### Images (requires Pillow)
-- `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.ico`
-
-### PDFs (requires pymupdf)
-- `.pdf`
-
-### Audio (requires librosa)
-- `.mp3`, `.wav`, `.ogg`, `.flac`, `.m4a`, `.aac`, `.wma`
-
-### Video (requires opencv-python)
-- `.mp4`, `.avi`, `.mov`, `.mkv`, `.webm`, `.flv`, `.wmv`
-
-## Performance
-
-### Similarity Search
-- **v0.3.0**: O(n) linear scan
-- **v0.4.0**: O(log n) with HNSW vector index
-- **Speedup**: 10-100x for large chunk collections
-
-### Storage
-- **v0.3.0**: Uncompressed KV-cache files
-- **v0.4.0**: zlib compression (level 6)
-- **Space savings**: 50-80% on typical KV data
-
-### Chunking
-- **v0.3.0**: Fixed-size chunks
-- **v0.4.0**: Adaptive sizing + sliding window
-- **Improvement**: 20-30% fewer chunks, better context
 
 ## Quick Start
 
 ### 1. Index Documents
 
 ```bash
-# Index files (auto-detects modality)
 stele index src/*.py docs/*.md
-
-# Force re-indexing
-stele index --force document.py
+stele index --force document.py    # Force re-index
 ```
 
 ### 2. Semantic Search
 
 ```bash
-# Search across all indexed chunks
 stele search "authentication logic" --top-k 5
-
-# JSON output
 stele search "error handling" --json
 ```
 
 ### 3. MCP Server (for Claude Code / Claude Desktop)
 
 ```bash
-# Install MCP dependency
 pip install stele[mcp]
-
-# Start stdio MCP server
 stele serve-mcp
 ```
 
@@ -189,440 +163,295 @@ stele serve-mcp
 }
 ```
 
-> **Tip:** If installed in a virtualenv, use the full path to the `stele` binary (e.g., `/path/to/.venv/bin/stele`).
+> **Tip:** If installed in a virtualenv, use the full path to the `stele` binary.
 
 ### 4. HTTP REST Server
 
 ```bash
-# Start HTTP server on default port (9876)
 stele serve --port 9876
 ```
 
-### 5. Detect Changes & View Stats
+### 5. Project Configuration
 
-```bash
-stele detect --session my-session
-stele stats
+Create `.stele.toml` in your project root:
+
+```toml
+[stele]
+chunk_size = 512
+max_chunk_size = 8192
+merge_threshold = 0.75
+change_threshold = 0.90
+search_alpha = 0.6
+skip_dirs = [".git", "node_modules", "dist", "vendor"]
 ```
 
-## Python API Usage
+All values are optional — constructor params and env vars override config file values.
 
-### Basic Usage
-
-```python
-from stele import Stele
-
-cf = Stele(storage_dir="~/.stele")
-
-# Index documents (routes through modality-specific chunkers)
-result = cf.index_documents(["src/main.py", "README.md"])
-print(f"Indexed {result['total_chunks']} chunks")
-
-# Semantic search — returns chunk content + metadata
-results = cf.search("authentication logic", top_k=5)
-for r in results:
-    print(f"[{r['relevance_score']:.3f}] {r['document_path']}")
-    print(f"  {r['content'][:100]}...")
-
-# Get cached context for documents
-context = cf.get_context(["src/main.py", "src/utils.py"])
-for doc in context["unchanged"]:
-    print(f"{doc['path']}: {len(doc['chunks'])} cached chunks")
-for doc in context["changed"]:
-    print(f"{doc['path']}: needs re-indexing")
-
-# Detect changes (with optional reason for history)
-changes = cf.detect_changes_and_update(session_id="my-session", reason="Post-refactor check")
-print(f"Restored {changes['kv_restored']}, reprocessed {changes['kv_reprocessed']}")
-
-# Annotate documents for LLM navigation
-cf.annotate("src/main.py", "document", "Entry point, handles CLI args", tags=["architecture"])
-
-# Get project map (all documents with annotations)
-project_map = cf.get_map()
-for doc in project_map["documents"]:
-    print(f"{doc['path']}: {doc['chunk_count']} chunks, {doc['total_tokens']} tokens")
-
-# View change history
-for entry in cf.get_history(limit=10):
-    print(f"[{entry['reason']}] {entry['session_id']}")
-
-# Symbol graph — cross-file reference tracking
-refs = cf.find_references("Stele")
-print(f"{len(refs['definitions'])} definitions, {len(refs['references'])} references")
-
-# Find where a symbol is defined (with full content)
-defn = cf.find_definition("StorageBackend")
-for d in defn["definitions"]:
-    print(f"{d['kind']} in {d['document_path']}:{d['line_number']}")
-
-# Impact analysis — what breaks if this chunk changes?
-impact = cf.impact_radius(chunk_id="abc123", depth=2)
-for c in impact["chunks"]:
-    print(f"  depth={c['depth']} {c['document_path']} ({c['token_count']} tokens)")
-
-# Rebuild symbol graph (after upgrade or to repair)
-result = cf.rebuild_symbol_graph()
-print(f"{result['symbols']} symbols, {result['edges']} edges")
-
-# Staleness detection — find chunks whose dependencies changed
-stale = cf.stale_chunks(threshold=0.3)
-for doc in stale["by_document"]:
-    print(f"{doc['path']}: {len(doc['chunks'])} stale chunks")
-
-# Index entire directories (recursively, auto-filters by extension)
-cf.index_documents(["src/", "tests/"])
-
-# Session management
-cf.save_kv_state("my-session", {"chunk_id": {"key": "value"}})
-cf.rollback("my-session", target_turn=2)
-cf.prune_chunks("my-session", max_tokens=100000)
-```
-
-### Advanced Configuration
-
-```python
-cf = Stele(
-    storage_dir="~/.stele",
-    chunk_size=256,           # Target tokens per initial chunk
-    max_chunk_size=4096,      # Maximum tokens per merged chunk
-    merge_threshold=0.7,      # Default similarity threshold for merging
-    change_threshold=0.85,    # Default similarity threshold for "unchanged"
-    search_alpha=0.7,         # Blend weight: 1.0 = pure vector, 0.0 = pure keyword
-)
-```
-
-> **Note:** Per-modality thresholds override `merge_threshold` and `change_threshold` for specific content types. Code uses merge=0.85 (preserves AST boundaries) and change=0.80 (tolerates incremental edits).
-
-## MCP Server API
-
-The MCP server exposes the following endpoints:
-
-### GET /tools
-
-Discover available tools.
-
-```bash
-curl http://localhost:9876/tools
-```
-
-Response:
-```json
-{
-  "tools": [
-    {
-      "name": "index_documents",
-      "description": "Index one or more documents...",
-      "parameters": { ... }
-    },
-    ...
-  ]
-}
-```
-
-### POST /call
-
-Execute a tool.
-
-```bash
-curl -X POST http://localhost:9876/call \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool": "index_documents",
-    "parameters": {
-      "paths": ["document.py"]
-    }
-  }'
-```
-
-### GET /health
-
-Health check and statistics.
-
-```bash
-curl http://localhost:9876/health
-```
-
-## Agent Integration Examples
-
-### Example 1: Index Codebase
-
-```python
-import requests
-
-# Index all Python files
-response = requests.post("http://localhost:9876/call", json={
-    "tool": "index_documents",
-    "parameters": {
-        "paths": ["src/main.py", "src/utils.py", "tests/test_main.py"]
-    }
-})
-print(response.json())
-```
-
-### Example 2: Detect Changes After Edit
-
-```python
-# After editing a file, check what changed
-response = requests.post("http://localhost:9876/call", json={
-    "tool": "detect_changes_and_update",
-    "parameters": {
-        "session_id": "coding-session-1"
-    }
-})
-result = response.json()["result"]
-print(f"Restored {result['kv_restored']} KV states")
-print(f"Need to reprocess {result['kv_reprocessed']} chunks")
-```
-
-### Example 3: Get Relevant Context
-
-```python
-# Get KV-cache for relevant chunks
-response = requests.post("http://localhost:9876/call", json={
-    "tool": "get_relevant_kv",
-    "parameters": {
-        "session_id": "coding-session-1",
-        "query": "How does user authentication work?",
-        "top_k": 10
-    }
-})
-relevant_chunks = response.json()["result"]["chunks"]
-```
-
-### Example 4: Save and Rollback
-
-```python
-# Save current KV state
-requests.post("http://localhost:9876/call", json={
-    "tool": "save_kv_state",
-    "parameters": {
-        "session_id": "coding-session-1",
-        "kv_data": {"chunk_1": {"key": "value"}}
-    }
-})
-
-# Later, rollback to previous state
-requests.post("http://localhost:9876/call", json={
-    "tool": "rollback",
-    "parameters": {
-        "session_id": "coding-session-1",
-        "target_turn": 2
-    }
-})
-```
-
-## How It Works
-
-### Token-Saving Mechanism
-
-Stele dramatically reduces token usage through three mechanisms:
-
-1. **Instant KV Restoration**: When a document hasn't changed, all its chunks' KV-cache states are loaded instantly. The LLM never needs to re-process these chunks, saving tokens equal to the chunk size × number of unchanged chunks.
-
-2. **Lazy Double-Check**: When a document has changed, Stele compares semantic signatures of each chunk. If a chunk's content changed but its semantic meaning is similar (cosine similarity > 0.85), it's considered "unchanged" and its KV state is restored without LLM re-processing.
-
-3. **Selective Reprocessing**: Only chunks with significant semantic changes are marked for reprocessing. This means editing a comment or fixing a typo doesn't trigger reprocessing of the entire file.
-
-### Change Detection Logic
-
-```
-For each chunk in document:
-  1. Compute SHA-256 hash of content
-  2. If hash matches stored hash:
-     → Content unchanged → Load pre-saved KV (instant)
-  
-  3. If hash differs:
-     → Compute semantic signature (TF-style features)
-     → Compare with stored signature (cosine similarity)
-     
-     4. If similarity > change_threshold (0.85):
-        → Semantically similar → Load pre-saved KV (lazy double-check)
-     
-     5. If similarity ≤ change_threshold:
-        → Significant change → Mark for reprocessing
-```
-
-### Dynamic Semantic Chunking
-
-The chunking algorithm works in two phases:
-
-**Phase 1: Initial Chunking**
-- Split document on paragraph boundaries
-- Target ~256 tokens per chunk
-- Preserve semantic coherence
-
-**Phase 2: Intelligent Merging**
-- Compute semantic signatures for all chunks
-- Iteratively merge adjacent chunks with high similarity (> 0.7)
-- Stop when chunks reach max_chunk_size (4096 tokens) or similarity drops
-
-This creates chunks that are:
-- Semantically coherent (related content stays together)
-- Optimally sized (not too small, not too large)
-- Stable across edits (minor changes don't affect chunk boundaries)
-
-### KV-Cache Persistence
-
-KV-cache states are stored as:
-- **Metadata**: SQLite database with chunk info, hashes, signatures
-- **KV Data**: Serialized tensors in `~/.stele/kv_cache/`
-- **Sessions**: Track multiple independent contexts with rollback support
-
-Storage format:
-```
-~/.stele/
-├── stele.db          # SQLite metadata + chunk content
-├── kv_cache/
-│   └── {session_id}/
-│       ├── {chunk_id}_turn0.kv   # JSON + zlib compressed
-│       └── ...
-└── indices/               # Reserved for persistent indices
-```
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────┐
-│               Stele Engine (engine.py)               │
-├──────────────────────────────────────────────────────────┤
-│  index_documents()  │  search()    │  get_context()      │
-│  detect_changes()   │  rollback()  │  save/load state    │
-│  find_references()  │  find_definition()                  │
-│  impact_radius()    │  rebuild_symbol_graph()             │
-└──────────────────────────────────────────────────────────┘
-          │                  │                   │
-  ┌───────▼──────┐   ┌──────▼──────┐   ┌────────▼────────┐
-  │  Chunkers    │   │ VectorIndex │   │  StorageBackend  │
-  │  text, code  │   │   (HNSW)    │   │  + SessionStore  │
-  │  image, pdf  │   │  index.py   │   │  + SymbolStore   │
-  │  audio,video │   └─────────────┘   │  storage.py      │
-  └──────────────┘                     └─────────────────┘
-          │                                     │
-  ┌───────▼──────┐                     ┌────────▼────────┐
-  │  Symbols     │                     │  SQLite + JSON   │
-  │  extraction  │                     │  (chunks, symbols│
-  │  + resolution│                     │   edges, meta)   │
-  └──────────────┘                     └─────────────────┘
-
-  ┌──────────────┐
-  │  MCP Servers │
-  │  stdio + HTTP│
-  └──────────────┘
-```
-
-## Configuration
-
-### Environment Variables
-
-- `STELE_STORAGE_DIR`: Override default storage directory
-- `STELE_LOG_LEVEL`: Set logging level (DEBUG, INFO, WARNING, ERROR)
-
-### Default Values
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `chunk_size` | 256 | Target tokens per initial chunk |
-| `max_chunk_size` | 4096 | Maximum tokens per merged chunk |
-| `merge_threshold` | 0.7 | Similarity threshold for merging chunks |
-| `change_threshold` | 0.85 | Default similarity threshold for "unchanged" |
-| `search_alpha` | 0.7 | Hybrid search blend (1.0 = pure vector, 0.0 = pure keyword) |
-| `host` | localhost | MCP server host |
-| `port` | 9876 | MCP server port |
-
-## Performance
-
-### Token Savings
-
-Typical token savings with Stele:
-
-| Scenario | Without Stele | With Stele | Savings |
-|----------|-------------------|-----------------|---------|
-| Unchanged document | 10,000 tokens | 0 tokens | 100% |
-| Minor edit (typo) | 10,000 tokens | ~100 tokens | 99% |
-| Moderate edit | 10,000 tokens | ~1,000 tokens | 90% |
-| Major rewrite | 10,000 tokens | 10,000 tokens | 0% |
-
-### Storage Overhead
-
-- Metadata: ~1KB per chunk
-- KV-cache: ~10-100KB per chunk (depends on model size)
-- Total: Typically 1-10% of original document size
-
-## Multi-Agent Support
-
-Stele supports multiple LLM agents (e.g. several Claude Code instances) sharing one store on the same machine. This is designed for solo developers running multiple agents locally, not for team collaboration across networks.
-
-### What's Protected
-
-| Layer | Protection |
-|-------|-----------|
-| **Thread safety** | RWLock — concurrent reads, exclusive writes on all engine methods |
-| **Process safety** | `fcntl.flock()` on index files — multiple MCP stdio processes can't corrupt shared indices |
-| **Document ownership** | `acquire_document_lock(path, agent_id)` — other agents can read but not write locked documents |
-| **Optimistic locking** | `doc_version` compare-and-swap — rejects writes if another agent modified the document since you last read it |
-| **Conflict log** | `document_conflicts` table — full audit trail of ownership violations, version conflicts, lock steals |
-| **Expired lock reaping** | `reap_expired_locks()` — cleans up locks from dead agents |
-| **Lock refresh** | `refresh_document_lock(path, agent_id)` — resets TTL during long operations without releasing |
-
-### Multi-Agent Workflow
+## Python API
 
 ```python
 from stele import Stele
 
 engine = Stele()
 
-# Agent claims a file before editing
+# Index documents (auto-detects modality, walks directories)
+result = engine.index_documents(["src/", "README.md"])
+print(f"Indexed {result['total_chunks']} chunks")
+
+# Hybrid semantic search (HNSW + BM25)
+results = engine.search("authentication logic", top_k=5)
+for r in results:
+    print(f"[{r['relevance_score']:.3f}] {r['document_path']}")
+    print(f"  {r['content'][:100]}...")
+
+# Get cached context — unchanged chunks skip reprocessing
+context = engine.get_context(["src/main.py", "src/utils.py"])
+for doc in context["unchanged"]:
+    print(f"{doc['path']}: {len(doc['chunks'])} cached chunks")
+
+# Symbol graph — cross-file reference tracking
+refs = engine.find_references("Stele")
+defn = engine.find_definition("StorageBackend")
+
+# Impact analysis — what breaks if this changes?
+impact = engine.impact_radius(chunk_id="abc123", depth=2)
+
+# Staleness detection — find chunks with stale dependencies
+stale = engine.stale_chunks(threshold=0.3)
+
+# Chunk version history
+history = engine.get_chunk_history(document_path="src/main.py")
+
+# Session management
+engine.save_kv_state("session-1", {"chunk_id": {"key": "value"}})
+engine.rollback("session-1", target_turn=2)
+engine.prune_chunks("session-1", max_tokens=100000)
+
+# Multi-agent document locking
 engine.acquire_document_lock("src/main.py", agent_id="agent-alpha")
-
-# Index with ownership check + optimistic locking
-version = engine.storage.get_document_version("src/main.py")
-result = engine.index_documents(
-    ["src/main.py"],
-    agent_id="agent-alpha",
-    expected_versions={"src/main.py": version},
-)
-
-# Refresh lock during long operations to prevent TTL expiry
-engine.refresh_document_lock("src/main.py", agent_id="agent-alpha")
-
-# Release when done
+engine.index_documents(["src/main.py"], agent_id="agent-alpha")
 engine.release_document_lock("src/main.py", agent_id="agent-alpha")
-
-# Check for conflicts
-conflicts = engine.get_conflicts()
 ```
 
-### Design Scope
+### Configuration
 
-Stele's multi-agent features are built for **local, single-machine use** — a solo developer running multiple agents on one workstation, all sharing `~/.stele/`. All agents run under the same OS user on the same machine, so the trust boundary is your operating system.
+```python
+engine = Stele(
+    chunk_size=256,           # Target tokens per initial chunk
+    max_chunk_size=4096,      # Maximum tokens per merged chunk
+    merge_threshold=0.7,      # Similarity threshold for merging
+    change_threshold=0.85,    # Similarity threshold for "unchanged"
+    search_alpha=0.7,         # Blend: 1.0 = pure vector, 0.0 = pure keyword
+)
+```
 
-The following are intentionally out of scope (contributions welcome):
+Or use `.stele.toml` (see above) — constructor params override config file values.
 
-- **Distributed locking** — `fcntl.flock()` works on one machine. Multi-machine setups (NFS, networked storage) would need a distributed lock manager.
-- **Auto-merge on conflict** — conflicts are rejected, not auto-merged. The second writer gets a `PermissionError` and must retry. Merge strategies are relevant for team workflows with multiple developers; for solo devs running multiple agents, reject-and-retry is the right behavior.
-- **Pub-sub notifications** — agents discover changes by querying (`detect_changes`, `get_conflicts`), not via push notifications. Polling is sufficient for local use.
+## MCP Tools
 
-## Limitations
+### HTTP Server (28 tools)
 
-- **Semantic signatures are approximate**: The feature-based signatures (trigrams, bigrams, positional features) provide good but not perfect semantic similarity
-- **No GPU acceleration**: All operations run on CPU
-- **Single-machine only**: No distributed storage or multi-node support
-- **KV-cache format**: Assumes JSON-serializable KV data (falls back to msgspec for complex types)
+| Category | Tools |
+|----------|-------|
+| **Indexing** | `index_documents`, `detect_changes_and_update`, `detect_modality`, `get_supported_formats` |
+| **Search** | `search`, `get_context`, `get_relevant_kv` |
+| **Sessions** | `save_kv_state`, `rollback`, `prune_chunks`, `list_sessions` |
+| **Symbols** | `find_references`, `find_definition`, `impact_radius`, `rebuild_symbol_graph`, `stale_chunks` |
+| **Locking** | `acquire_document_lock`, `release_document_lock`, `refresh_document_lock`, `get_document_lock_status`, `release_agent_locks`, `reap_expired_locks` |
+| **History** | `get_conflicts`, `get_chunk_history`, `get_notifications` |
+| **Utilities** | `list_agents`, `environment_check`, `clean_bytecache` |
+
+### MCP stdio Server (30 tools)
+
+All HTTP tools plus: `annotate`, `get_annotations`, `delete_annotation`, `update_annotation`, `search_annotations`, `bulk_annotate`, `prune_history`, `map`, `history`, `stats`, `remove`
+
+## How It Works
+
+### Change Detection
+
+```
+For each chunk:
+  1. SHA-256 hash → exact match → instant cache hit (0 tokens)
+  2. Hash differs → compute 128-dim semantic signature
+  3. Cosine similarity > threshold → semantically similar → restore KV
+  4. Similarity ≤ threshold → significant change → reprocess
+```
+
+### Token Savings
+
+| Scenario | Without Stele | With Stele | Savings |
+|----------|---------------|------------|---------|
+| Unchanged document | 10,000 tokens | 0 tokens | 100% |
+| Minor edit (typo) | 10,000 tokens | ~100 tokens | 99% |
+| Moderate edit | 10,000 tokens | ~1,000 tokens | 90% |
+| Major rewrite | 10,000 tokens | 10,000 tokens | 0% |
+
+### Code Chunking Strategy
+
+| Language | Parser | Fallback |
+|----------|--------|----------|
+| Python | stdlib `ast` (always) | regex |
+| JS/TS, Java, C/C++, Go, Rust, Ruby, PHP | tree-sitter (optional) | regex patterns |
+| Shell, Swift, SQL, config files | regex patterns | line-based |
+
+Tree-sitter provides proper AST boundary detection for function/class definitions.
+Install with `pip install stele[tree-sitter]`.
+
+### Storage Layout
+
+```
+<project_root>/.stele/          # Per-worktree (default)
+├── stele.db                    # SQLite: chunks, symbols, sessions, history
+├── kv_cache/                   # JSON + zlib compressed KV states
+└── indices/                    # HNSW + BM25 persistent indices
+
+<git-common-dir>/stele/         # Shared across worktrees
+└── coordination.db             # Agent registry, shared locks, notifications
+```
+
+## Multi-Agent Support
+
+Stele supports multiple LLM agents sharing one store on the same machine.
+
+| Layer | Protection |
+|-------|-----------|
+| **Thread safety** | RWLock — concurrent reads, exclusive writes |
+| **Process safety** | `fcntl.flock()` on index files |
+| **Document ownership** | `acquire_document_lock()` with TTL expiry |
+| **Optimistic locking** | `doc_version` compare-and-swap |
+| **Cross-worktree** | Shared coordination DB for locks, agent registry, notifications |
+| **Conflict log** | Full audit trail of ownership violations |
+
+## Performance
+
+Run benchmarks:
+```bash
+python benchmarks/run_all.py          # Full suite
+python benchmarks/run_all.py --quick  # CI mode
+```
+
+Representative results (quick mode):
+
+| Operation | Size | Time | Throughput |
+|-----------|------|------|------------|
+| TextChunker | 10KB | 1.6ms | 6,100 KB/s |
+| CodeChunker (AST) | 10KB | 5.7ms | 1,750 KB/s |
+| store_chunk (batch) | 100 | 27ms | 3,700 ops/s |
+| VectorIndex.search (k=10) | 500 nodes | 4.7ms | 212 qps |
+| BM25.score_batch | 100 docs | 0.18ms | 556K docs/s |
+| engine.search (hybrid) | 50 docs | 9.9ms | 101 qps |
+
+## Security & Supply Chain
+
+- **Zero required dependencies** — no supply chain attack surface for core functionality
+- **No model downloads** — semantic signatures use statistical features, not ML models
+- **No API calls** — everything runs locally, no data leaves your machine
+- **No pickle** — session data serialized with JSON+zlib
+- **Minimal codebase** — ~10,000 lines of Python, easy to audit
+
+```bash
+# Maximum security: install with zero dependencies
+pip install stele --no-deps
+```
+
+## Supported Formats
+
+### Text & Code (Zero Dependencies)
+`.txt`, `.md`, `.rst`, `.csv`, `.log`, `.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.cpp`, `.c`, `.h`, `.go`, `.rs`, `.rb`, `.php`, `.swift`, `.sh`, `.json`, `.yaml`, `.toml`, `.html`, `.css`, `.sql`
+
+### Images (requires Pillow)
+`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.ico`
+
+### PDFs (requires pymupdf)
+`.pdf`
+
+### Audio (requires librosa)
+`.mp3`, `.wav`, `.ogg`, `.flac`, `.m4a`, `.aac`, `.wma`
+
+### Video (requires opencv-python)
+`.mp4`, `.avi`, `.mov`, `.mkv`, `.webm`, `.flv`, `.wmv`
+
+## Configuration Reference
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `STELE_STORAGE_DIR` | Override default storage directory |
+| `STELE_LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+
+### Config File (`.stele.toml`)
+
+```toml
+[stele]
+storage_dir = ".stele"       # Storage directory (relative to project root)
+chunk_size = 256              # Target tokens per initial chunk
+max_chunk_size = 4096         # Maximum tokens per merged chunk
+merge_threshold = 0.7         # Similarity threshold for merging chunks
+change_threshold = 0.85       # Similarity threshold for "unchanged"
+search_alpha = 0.7            # Hybrid search blend (1.0=vector, 0.0=keyword)
+skip_dirs = [".git", "node_modules", "__pycache__"]
+```
+
+Priority: constructor params > `.stele.toml` > `STELE_STORAGE_DIR` env var > defaults.
+
+## FAQ
+
+**Q: Does Stele require an internet connection?**
+No. Stele is 100% offline. No API calls, no model downloads, no telemetry. All operations run locally using Python stdlib.
+
+**Q: How does Stele compare to RAG (Retrieval-Augmented Generation)?**
+Stele is not RAG — it's a context cache. RAG retrieves chunks at query time from an external store. Stele caches chunk KV-states so the LLM skips re-reading unchanged content. It can be used alongside RAG, but its primary value is token savings through change detection.
+
+**Q: What happens if tree-sitter isn't installed?**
+Code chunking falls back to regex patterns for non-Python languages. Python always uses stdlib `ast`. Install tree-sitter for better accuracy on JS/TS, Java, C/C++, Go, Rust, Ruby, PHP: `pip install stele[tree-sitter]`.
+
+**Q: Can multiple agents use Stele simultaneously?**
+Yes. Stele provides per-document locking, optimistic versioning, and a cross-worktree coordination DB. Both HTTP and MCP servers auto-register agents and inject agent IDs into write operations.
+
+**Q: How accurate are the semantic signatures?**
+The 128-dim statistical signatures (trigrams, bigrams, structural features) are approximate. They're designed for change detection (same vs different), not for embedding-quality similarity. For typical code and documentation, they achieve ~95% accuracy on change detection.
+
+**Q: Where is data stored?**
+By default, `<project_root>/.stele/` (each git worktree gets its own). Override with `STELE_STORAGE_DIR` or `storage_dir` in `.stele.toml`. Cross-worktree coordination data lives in `<git-common-dir>/stele/coordination.db`.
+
+## Troubleshooting
+
+**`ImportError: No module named 'stele'`**
+Ensure Stele is installed: `pip install -e .` from the repo root. If using a virtualenv, make sure it's activated.
+
+**MCP server not connecting in Claude Desktop**
+Use the full path to the `stele` binary. Check with `which stele` and update your config. If installed in a virtualenv: `/path/to/.venv/bin/stele`.
+
+**`PermissionError` when indexing**
+Another agent holds a lock on the document. Check with `get_document_lock_status()` or `reap_expired_locks()` to clean up stale locks.
+
+**Slow search on large indices**
+The HNSW index adapts search width automatically. For 10K+ chunks, search uses 4x `ef_search`. If still slow, reduce `top_k` or check that the BM25 index isn't being rebuilt on every query (it's lazy-loaded once).
+
+**Tree-sitter not working for a language**
+Verify the grammar package is installed: `pip install tree-sitter-javascript` (etc.). Check with: `python -c "from stele.chunkers.code import HAS_TREE_SITTER; print(HAS_TREE_SITTER)"`.
+
+**Stale `.pyc` files causing issues**
+Run `stele` with the `environment_check` MCP tool, or call `engine.check_environment()`. Use `engine.clean_bytecache()` to remove orphaned `.pyc` files.
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest                              # 400 tests
+pytest --cov=stele                  # With coverage
+python benchmarks/run_all.py        # Performance benchmarks
+mypy stele/                         # Type checking
+ruff check stele/                   # Linting
+```
+
+Entry points: `stele` (CLI), `stele-mcp` (MCP stdio server)
 
 ## Contributing
 
-Contributions are welcome! Please ensure:
-
-1. All code is 100% offline and local-only
-2. Minimal external dependencies (prefer stdlib)
-3. Comprehensive documentation and type hints
-4. Tests for new features
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-MIT License - see LICENSE file for details.
-
-## Acknowledgments
-
-Stele is inspired by the need for efficient long-context LLM interactions in coding agents and development workflows.
+MIT License — see [LICENSE](LICENSE) for details.
