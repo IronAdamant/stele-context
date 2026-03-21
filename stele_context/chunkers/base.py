@@ -7,6 +7,8 @@ the chunk() method to split content into semantically coherent units.
 
 from __future__ import annotations
 
+__all__ = ["Chunk", "BaseChunker", "estimate_tokens"]
+
 import hashlib
 import re
 from abc import ABC, abstractmethod

@@ -14,6 +14,8 @@ All storage is local-only with zero network dependencies.
 
 from __future__ import annotations
 
+__all__ = ["StorageBackend"]
+
 import re as _re
 import sqlite3
 import time

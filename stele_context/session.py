@@ -7,6 +7,8 @@ with HNSW-accelerated chunk retrieval.
 
 from __future__ import annotations
 
+__all__ = ["SessionManager"]
+
 from typing import Any
 
 from stele_context.chunkers.base import Chunk

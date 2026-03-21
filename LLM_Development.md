@@ -2,6 +2,16 @@
 
 Chronological record of development activity on Stele Context, maintained for LLM agent context.
 
+## 2026-03-22 - v0.11.0 Beta Release
+
+### Status upgrade
+- Changed pyproject.toml classifier from "3 - Alpha" to "4 - Beta"
+- Bumped version to 0.11.0 to mark the milestone
+
+### API surface definition
+- Added `__all__` to `engine.py` (`["Stele"]`), `storage.py` (`["StorageBackend"]`), `session.py` (`["SessionManager"]`), `chunkers/base.py` (`["Chunk", "BaseChunker", "estimate_tokens"]`)
+- Created STABILITY.md with full API stability guarantees, public vs internal method catalog, deprecation policy, and deprecation schedule
+
 ## 2026-03-22 - v0.10.6 1.0 Readiness Items
 
 ### Infrastructure

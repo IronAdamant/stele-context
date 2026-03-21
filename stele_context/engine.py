@@ -4,6 +4,8 @@ Stele engine -- smart context cache with semantic chunking and vector search.
 
 from __future__ import annotations
 
+__all__ = ["Stele"]
+
 import hashlib
 import os
 import threading

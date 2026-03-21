@@ -5,6 +5,16 @@ All notable changes to Stele Context will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-03-22
+
+### Changed
+- **Development Status: Beta** — classifier updated from "3 - Alpha" to "4 - Beta" in pyproject.toml
+- **Version bump** to 0.11.0 to mark the Beta milestone
+
+### Added
+- **STABILITY.md** — API stability guarantees, public vs internal method documentation, deprecation policy, and typing protocol reference
+- **`__all__` exports** on `engine.py`, `storage.py`, `session.py`, `chunkers/base.py` — defines the public API boundary for each module
+
 ## [0.10.6] - 2026-03-22
 
 ### Added
