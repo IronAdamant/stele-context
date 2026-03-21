@@ -18,7 +18,8 @@ Stele (engine.py) -- thin facade orchestrator
   |-- VectorIndex (HNSW, index.py) + BM25Index (bm25.py)
   |-- IndexStore (index_store.py) -- persistent index serialization
   |-- StorageBackend (storage.py, SQLite + filesystem)
-  |     |-- storage_schema.py -- database init + migrations
+  |     |-- ConnectionPool (connection_pool.py) -- thread-local connection reuse
+  |     |-- storage_schema.py -- database init + migrations + pool-aware connect()
   |     |-- storage_delegates.py -- forwarding mixin
   |     |-- SessionStorage (session_storage.py)
   |     |-- MetadataStorage (metadata_storage.py)
@@ -108,6 +109,10 @@ Backward compat: core.py re-exports Stele + Chunk
 - **Chunk history query**: `get_chunk_history(chunk_id=, document_path=, limit=)` exposes the `chunk_history` table via engine and both MCP servers. History tracks previous versions when the same chunk_id is updated in-place.
 - **Performance benchmarks**: `benchmarks/` directory with `bench_chunking.py`, `bench_storage.py`, `bench_search.py`, and `run_all.py` runner. Zero deps, standalone-runnable, `--quick` mode for CI.
 - **Agent-supplied semantic embeddings**: Two-tier signature system. Tier 1 (always): 128-dim statistical signatures for change detection. Tier 2 (optional): agent-supplied semantic summaries or raw vectors for search quality. `store_semantic_summary(chunk_id, summary)` computes signature from agent's description; `store_embedding(chunk_id, vector)` stores raw vectors. HNSW index uses agent signature when available, falls back to statistical. Zero new dependencies — the agent IS the embedding model.
+- **Thread-local connection pool**: `ConnectionPool` in `connection_pool.py` gives each thread a single reused SQLite connection. The `connect()` helper in `storage_schema.py` is pool-aware: uses the pool when one is initialized (by `StorageBackend.__init__`), falls back to fresh connections otherwise (coordination DB, tests). Eliminates ~70 per-method connection opens. `row_factory` is reset to `None` on each context-manager entry to prevent state leakage. `close_all()` for clean shutdown.
+- **Text pattern search**: `search_text(pattern, regex=, document_path=, limit=)` provides perfect-recall exact/regex search across stored chunk content. Complements semantic (HNSW) and keyword (BM25) search. Uses `str.find()` for substring, stdlib `re` for regex. Zero dependencies. Key use case: verify all usages before renaming/removing symbols.
+- **Unified tool registry**: `tool_registry.py` is the single source of truth for tool dispatch (`build_tool_map`), write-tool sets (`WRITE_TOOLS`), and HTTP schema generation (`get_http_schemas`). Both servers expose identical 42-tool sets. `mcp_schemas.py` was deleted; schemas generated from `mcp_tool_defs.py`.
+- **MCP stdio server bundle**: `_ServerBundle` dataclass holds server, engine, and agent_id together. Replaces monkey-patching `_stele_engine`/`_stele_agent_id` onto the MCP Server object. No `type: ignore` comments.
 
 ## SQLite Tables
 
@@ -139,7 +144,7 @@ Coordination DB (`<git-common-dir>/stele/coordination.db`):
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 569 tests (568 pass, 1 skipped without mcp SDK)
+pytest                    # 573 tests (572 pass, 1 skipped without mcp SDK)
 mypy stele/
 ruff check stele/
 ```

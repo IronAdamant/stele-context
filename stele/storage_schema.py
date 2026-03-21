@@ -8,18 +8,59 @@ migrations.  Called from StorageBackend.__init__().
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
+
+from stele.connection_pool import ConnectionPool
+
+# Module-level pool, initialized by StorageBackend.__init__().
+_pool: ConnectionPool | None = None
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
-    """Create a SQLite connection with performance PRAGMAs applied.
+def init_pool(db_path: Path) -> ConnectionPool:
+    """Initialize the global thread-local connection pool."""
+    global _pool
+    _pool = ConnectionPool(db_path)
+    return _pool
 
-    Sets synchronous=NORMAL (connection-scoped, must be set per connection).
-    WAL journal mode persists at database level so is set only in init_database.
+
+def get_pool() -> ConnectionPool | None:
+    """Return the active pool (for shutdown/testing)."""
+    return _pool
+
+
+@contextmanager
+def connect(db_path: Any) -> Any:
+    """Context manager that yields a SQLite connection.
+
+    If a connection pool is active and ``db_path`` matches, reuses the
+    thread-local connection (zero overhead).  Otherwise falls back to a
+    fresh connection (backward-compat for coordination DB, tests, etc.).
+
+    The context manager commits on success and rolls back on exception,
+    matching the stdlib ``with sqlite3.connect(...) as conn:`` behavior.
     """
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
+    if _pool is not None and _pool.db_path == db_path:
+        conn = _pool.get()
+        conn.row_factory = None  # reset to default each time
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    else:
+        conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA synchronous=NORMAL")
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 def init_database(db_path: Path) -> None:

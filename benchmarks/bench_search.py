@@ -219,6 +219,77 @@ def run(iterations=ITERATIONS, batch_sizes=None):
             )
 
     print(sep)
+
+    # === Text pattern search (search_text) ==================================
+    print("\n=== Engine Text Pattern Search ===\n")
+    print(header)
+    print(sep)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        engine = Stele(storage_dir=tmpdir, enable_coordination=False)
+
+        n_docs = min(50, batch_sizes[-1] // 10)
+        doc_dir = os.path.join(tmpdir, "docs")
+        os.makedirs(doc_dir, exist_ok=True)
+        paths = []
+        for i in range(n_docs):
+            p = os.path.join(doc_dir, f"doc_{i}.py")
+            with open(p, "w") as f:
+                f.write(
+                    f"from typing import Dict, List\n\n"
+                    f"def function_{i}(data: Dict[str, List[int]]):\n"
+                    f"    result = {{}}\n"
+                    f"    for k in data:\n"
+                    f"        result[k] = sum(data[k])\n"
+                    f"    return result\n"
+                )
+            paths.append(p)
+
+        engine.index_documents(paths)
+
+        # Substring search
+        t, result = _bench(
+            lambda: engine.search_text("Dict["),
+            iterations,
+        )
+        print(
+            _format_row(
+                "search_text (substring)",
+                f"{n_docs} docs",
+                t * 1000,
+                f"{result['match_count']} matches",
+            )
+        )
+
+        # Regex search
+        t, result = _bench(
+            lambda: engine.search_text(r"def function_\d+", regex=True),
+            iterations,
+        )
+        print(
+            _format_row(
+                "search_text (regex)",
+                f"{n_docs} docs",
+                t * 1000,
+                f"{result['match_count']} matches",
+            )
+        )
+
+        # Scoped to single document
+        t, result = _bench(
+            lambda: engine.search_text("Dict[", document_path=paths[0]),
+            iterations,
+        )
+        print(
+            _format_row(
+                "search_text (scoped)",
+                "1 doc",
+                t * 1000,
+                f"{result['match_count']} matches",
+            )
+        )
+
+    print(sep)
     print()
 
 

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from stele.document_lock_storage import DocumentLockStorage
-from stele.storage_schema import connect
+from stele.storage_schema import connect, init_pool
 from stele.metadata_storage import MetadataStorage
 from stele.session_storage import SessionStorage
 from stele.storage_delegates import StorageDelegatesMixin
@@ -59,9 +59,10 @@ class StorageBackend(StorageDelegatesMixin):
         self.kv_dir.mkdir(parents=True, exist_ok=True)
         self.index_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize database
+        # Initialize database and connection pool
         self._init_database()
         self._migrate_database()
+        self._pool = init_pool(self.db_path)
 
         # Initialize storage delegates
         self._session_storage = SessionStorage(self.db_path, self.kv_dir)
@@ -76,6 +77,11 @@ class StorageBackend(StorageDelegatesMixin):
     def _migrate_database(self) -> None:
         """Run database migrations for schema changes."""
         migrate_database(self.db_path)
+
+    def close(self) -> None:
+        """Close all pooled connections. Safe to call multiple times."""
+        if self._pool is not None:
+            self._pool.close_all()
 
     # -- Core chunk operations ------------------------------------------------
 

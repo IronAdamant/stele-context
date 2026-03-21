@@ -56,11 +56,21 @@ def _create_engine(storage_dir: str | None = None):
     return Stele(storage_dir=storage_dir)
 
 
-def create_server(storage_dir: str | None = None) -> Any:
-    """
-    Create and configure an MCP server with Stele tools.
+class _ServerBundle:
+    """Holds the MCP server, engine, and agent_id together."""
 
-    Returns the configured MCP Server instance.
+    __slots__ = ("server", "engine", "agent_id")
+
+    def __init__(self, server: Any, engine: Any, agent_id: str) -> None:
+        self.server = server
+        self.engine = engine
+        self.agent_id = agent_id
+
+
+def create_server(storage_dir: str | None = None) -> _ServerBundle:
+    """Create and configure an MCP server with Stele tools.
+
+    Returns a ``_ServerBundle`` containing the server, engine, and agent_id.
     """
     if not HAS_MCP:
         raise ImportError("MCP SDK not installed. Install with: pip install stele[mcp]")
@@ -68,10 +78,6 @@ def create_server(storage_dir: str | None = None) -> Any:
     engine = _create_engine(storage_dir)
     server = Server("stele")
     server_agent_id = f"stele-mcp-{os.getpid()}"
-
-    # Store engine and agent_id for lifecycle management
-    server._stele_engine = engine  # type: ignore[attr-defined]
-    server._stele_agent_id = server_agent_id  # type: ignore[attr-defined]
 
     # Build tool dispatch map once (not per request)
     tool_map = build_tool_map(engine)
@@ -152,15 +158,12 @@ def create_server(storage_dir: str | None = None) -> Any:
             return json.dumps(enriched, indent=2, default=str)
         return json.dumps({"error": f"Unknown resource: {uri_str}"})
 
-    return server
+    return _ServerBundle(server, engine, server_agent_id)
 
 
-async def _run_server(server: Any) -> None:
+async def _run_server(bundle: _ServerBundle) -> None:
     """Run the MCP server on stdio transport."""
-    engine = server._stele_engine  # type: ignore[attr-defined]
-    agent_id = server._stele_agent_id  # type: ignore[attr-defined]
-
-    engine.register_agent(agent_id)
+    bundle.engine.register_agent(bundle.agent_id)
 
     try:
         init_options = InitializationOptions(
@@ -172,9 +175,9 @@ async def _run_server(server: Any) -> None:
             ),
         )
         async with stdio_server() as (read_stream, write_stream):
-            await server.run(read_stream, write_stream, init_options)
+            await bundle.server.run(read_stream, write_stream, init_options)
     finally:
-        engine.deregister_agent(agent_id)
+        bundle.engine.deregister_agent(bundle.agent_id)
 
 
 def run(storage_dir: str | None = None) -> None:
@@ -187,8 +190,8 @@ def run(storage_dir: str | None = None) -> None:
         sys.exit(1)
 
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
-    server = create_server(storage_dir)
-    asyncio.run(_run_server(server))
+    bundle = create_server(storage_dir)
+    asyncio.run(_run_server(bundle))
 
 
 if __name__ == "__main__":
