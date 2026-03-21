@@ -224,8 +224,6 @@ class Chunk:
         word_list = re.findall(r"\b\w+\b", self.content.lower())
         if word_list:
             signature[112] = len(set(word_list)) / len(word_list)
-        # Average word length
-        if word_list:
             signature[113] = min(
                 sum(len(w) for w in word_list) / len(word_list) / 10.0, 1.0
             )

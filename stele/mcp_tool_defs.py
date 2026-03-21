@@ -4,7 +4,7 @@ Tool definitions for the Stele MCP stdio server (core tools).
 Part 1: index, search, context, annotations, history, stats.
 Each entry is a dict with name, description, and inputSchema.
 These are converted to MCP Tool objects at server startup.
-Standalone module with zero internal dependencies.
+Depends only on mcp_tool_defs_ext (sibling data module).
 
 Extended tools (symbols, locking, agents, etc.) are in mcp_tool_defs_ext.py.
 The combined list is available as TOOL_DEFINITIONS.

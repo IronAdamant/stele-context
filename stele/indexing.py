@@ -46,7 +46,7 @@ def merge_similar_chunks(
     if len(chunks) <= 1:
         return chunks
 
-    modality = chunks[0].modality if chunks else "text"
+    modality = chunks[0].modality
     threshold = modality_thresholds.get(modality, {}).get("merge", merge_threshold)
 
     merged = [chunks[0]]
@@ -423,7 +423,7 @@ def expand_paths(
             expanded.append(normalize_path(str(p)))
         elif p.is_dir():
             for child in sorted(p.rglob("*")):
-                if any(part in skip_dirs for part in child.parts):
+                if any(part in skip_dirs for part in child.relative_to(p).parts):
                     continue
                 if any(part.startswith(".") for part in child.relative_to(p).parts):
                     continue

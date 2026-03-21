@@ -13,7 +13,7 @@ import argparse
 import json
 import sys
 import time
-from typing import Optional
+from typing import List, Optional
 
 from stele import __version__ as stele_version
 from stele.engine import Stele
@@ -527,7 +527,7 @@ def cmd_clear(args: argparse.Namespace, stele: Stele) -> int:
     return 0
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     """Main entry point for Stele CLI."""
     parser = create_parser()
     args = parser.parse_args(argv)

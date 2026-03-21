@@ -222,7 +222,7 @@ def detect_changes_unlocked(
             )
             storage.increment_doc_version(doc_path)
 
-    if results["modified"]:
+    if results["modified"] or results["removed"]:
         save_index()
         save_bm25()
         modified_chunk_ids: set = set()

@@ -243,9 +243,9 @@ class SymbolExtractor:
             return extract_rust(content, document_path, chunk_id)
         if ext in ("c", "cpp", "cc", "cxx", "h", "hpp", "hxx", "cs"):
             return extract_c(content, document_path, chunk_id)
-        if ext in ("rb",):
+        if ext == "rb":
             return extract_ruby(content, document_path, chunk_id)
-        if ext in ("php",):
+        if ext == "php":
             return extract_php(content, document_path, chunk_id)
         return []
 

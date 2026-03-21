@@ -206,4 +206,4 @@ def get_regex_pattern(language: str) -> str:
 
     Falls back to the JS pattern when the language is unknown.
     """
-    return REGEX_PATTERNS.get(language, REGEX_PATTERNS.get("js", r"(?:^|\n)\w+"))
+    return REGEX_PATTERNS.get(language, REGEX_PATTERNS["js"])

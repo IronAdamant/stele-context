@@ -49,9 +49,11 @@ def _get_ts_parser(ext: str) -> Optional[Any]:
 
     module_name, lang_key = info
 
-    if lang_key in _GRAMMAR_CACHE:
-        cached = _GRAMMAR_CACHE[lang_key]
-        return cached if cached is not None else None
+    # Use ext-based cache key so .ts and .tsx get distinct parsers
+    cache_key = f"{lang_key}_{ext}" if lang_key == "typescript" else lang_key
+
+    if cache_key in _GRAMMAR_CACHE:
+        return _GRAMMAR_CACHE[cache_key]
 
     try:
         import importlib
@@ -67,10 +69,10 @@ def _get_ts_parser(ext: str) -> Optional[Any]:
 
         language = _ts.Language(lang_fn())
         parser = _ts.Parser(language)
-        _GRAMMAR_CACHE[lang_key] = parser
+        _GRAMMAR_CACHE[cache_key] = parser
         return parser
     except Exception:
-        _GRAMMAR_CACHE[lang_key] = None
+        _GRAMMAR_CACHE[cache_key] = None
         return None
 
 

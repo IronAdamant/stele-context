@@ -469,9 +469,7 @@ class HNSWIndex:
         return {
             "node_count": len(self.nodes),
             "max_level": self.max_level,
-            "avg_connections": total_connections / len(self.nodes)
-            if self.nodes
-            else 0.0,
+            "avg_connections": total_connections / len(self.nodes),
             "insert_count": self._insert_count,
         }
 

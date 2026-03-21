@@ -39,7 +39,7 @@ def detect_project_root(explicit: Optional[str] = None) -> Optional[Path]:
     if explicit is not None:
         return Path(explicit).resolve()
     cwd = Path.cwd().resolve()
-    for parent in [cwd] + list(cwd.parents):
+    for parent in (cwd, *cwd.parents):
         if (parent / ".git").exists():
             return parent
     return None
@@ -128,5 +128,5 @@ def init_coordination(
         return None
     try:
         return CoordinationBackend(git_common)
-    except (OSError, Exception):
+    except Exception:
         return None

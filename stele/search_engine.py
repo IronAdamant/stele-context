@@ -39,6 +39,19 @@ _QUERY_STOP_WORDS = frozenset(
 )
 
 
+def _text_signature(text: str) -> List[float]:
+    """Compute a semantic signature from a text string."""
+    return sig_to_list(
+        Chunk(
+            content=text,
+            modality="text",
+            start_pos=0,
+            end_pos=len(text),
+            document_path="<query>",
+        ).semantic_signature
+    )
+
+
 def extract_query_identifiers(query: str) -> List[str]:
     """Extract identifier-like tokens from a search query.
 
@@ -60,7 +73,7 @@ def compute_search_alpha(query: str, base_alpha: float) -> float:
     alpha to weight keyword matching more heavily.
     """
     signals = sum(
-        [
+        (
             "_" in query,
             bool(re.search(r"[A-Z][a-z]+[A-Z]", query)),
             any(c in query for c in "{}[]();"),
@@ -70,7 +83,7 @@ def compute_search_alpha(query: str, base_alpha: float) -> float:
                 )
             ),
             "." in query and not query.endswith("."),
-        ]
+        )
     )
     if signals >= 3:
         return max(0.3, base_alpha - 0.3)
@@ -145,15 +158,7 @@ def search_unlocked(
     do_ensure_bm25: Any,
 ) -> List[Dict[str, Any]]:
     """Core hybrid semantic + keyword search logic."""
-    query_chunk = Chunk(
-        content=query,
-        modality="text",
-        start_pos=0,
-        end_pos=len(query),
-        document_path="<query>",
-    )
-
-    query_sig = sig_to_list(query_chunk.semantic_signature)
+    query_sig = _text_signature(query)
 
     # Widen HNSW candidate set for re-ranking
     hnsw_results = vector_index.search(query_sig, k=top_k * 3)
@@ -164,9 +169,10 @@ def search_unlocked(
     # BM25 re-ranking -- ensure_bm25 may initialize the index
     do_ensure_bm25()
     bm25_index = get_bm25()
-    candidate_ids = [cid for cid, _ in hnsw_results]
-    hnsw_scores = {cid: score for cid, score in hnsw_results}
-    assert bm25_index is not None
+    hnsw_scores = dict(hnsw_results)
+    candidate_ids = list(hnsw_scores.keys())
+    if bm25_index is None:
+        raise RuntimeError("BM25 index not initialized")
     bm25_scores = bm25_index.score_batch(query, candidate_ids)
 
     # Normalize BM25 scores to [0, 1]
@@ -349,15 +355,7 @@ def store_semantic_summary_unlocked(
     save_index: Any,
 ) -> Dict[str, Any]:
     """Compute signature from agent summary, update HNSW index."""
-    sig = sig_to_list(
-        Chunk(
-            content=summary,
-            modality="text",
-            start_pos=0,
-            end_pos=len(summary),
-            document_path="<summary>",
-        ).semantic_signature
-    )
+    sig = _text_signature(summary)
     ok = storage.store_semantic_summary(chunk_id, summary, sig)
     if not ok:
         return {"stored": False, "error": "chunk not found"}
