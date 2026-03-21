@@ -200,10 +200,10 @@ def multiply(a, b):
         assert "chunk_count" in stats["index"]
         assert stats["version"] == __version__
 
-    def test_save_and_load_state_alias(self, tmp_path):
-        """Test that save_state is an alias for save_kv_state."""
+    def test_save_kv_state_exists(self, tmp_path):
+        """Test that save_kv_state is callable."""
         cf = Stele(storage_dir=str(tmp_path / "storage"))
-        assert cf.save_state == cf.save_kv_state
+        assert callable(cf.save_kv_state)
 
     def test_merge_similar_chunks(self, tmp_path):
         """Test that similar adjacent chunks get merged."""

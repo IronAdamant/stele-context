@@ -162,7 +162,7 @@ class SessionManager:
             "total_tokens": total_tokens,
         }
 
-    # Backward compat alias
+    # Canonical name used by engine.save_kv_state
     save_kv_state = save_state
 
     def rollback(

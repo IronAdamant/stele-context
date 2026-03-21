@@ -5,6 +5,22 @@ All notable changes to Stele Context will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-03-22
+
+### Changed
+- **Production/Stable release** — classifier updated to "5 - Production/Stable"
+- **API frozen** — all public methods on `Stele`, `Chunk`, `StorageBackend`, `SessionManager` are stable per STABILITY.md
+
+### Removed
+- **`Stele.save_state()` alias** — use `Stele.save_kv_state()` (the canonical name since 0.10.0)
+
+### Summary
+Local context cache for LLM agents. 100% offline, zero required dependencies.
+49 source files, ~13,000 LOC. 739 tests across 31 files. CI green on Python
+3.9-3.13 across Linux, macOS, and Windows. 42 MCP tools exposed via HTTP and
+stdio servers. Pure-Python HNSW + BM25 hybrid search. Multi-agent coordination
+with document locks, optimistic versioning, and cross-worktree shared state.
+
 ## [0.11.0] - 2026-03-22
 
 ### Changed

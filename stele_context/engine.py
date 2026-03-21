@@ -476,8 +476,6 @@ class Stele:
                 self.storage.create_session(session_id, agent_id=agent_id)
             return self.session_manager.save_state(session_id, kv_data, chunk_ids)
 
-    save_state = save_kv_state
-
     def rollback(self, session_id: str, target_turn: int) -> dict[str, Any]:
         with self._lock.write_lock():
             return self.session_manager.rollback(session_id, target_turn)

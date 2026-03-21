@@ -2,6 +2,18 @@
 
 Chronological record of development activity on Stele Context, maintained for LLM agent context.
 
+## 2026-03-22 - v1.0.0 Stable Release
+
+### Breaking changes
+- Removed `Stele.save_state()` alias (use `save_kv_state()`)
+
+### Status
+- Classifier: "Development Status :: 5 - Production/Stable"
+- 49 source files, ~13,000 LOC implementation
+- 739 tests across 31 test files
+- CI: Python 3.9-3.13, Linux/macOS/Windows
+- Zero required dependencies
+
 ## 2026-03-22 - v0.11.0 Beta Release
 
 ### Status upgrade

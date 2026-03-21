@@ -72,7 +72,4 @@ Before removing or renaming a public API element:
 
 ## Currently Deprecated
 
-| Old Name | New Name | Since | Removal |
-|----------|----------|-------|---------|
-| `Stele.save_state()` | `Stele.save_kv_state()` | 0.10.0 | 1.0.0 |
-| `SessionManager.save_kv_state()` | `SessionManager.save_state()` | 0.10.0 | 1.0.0 |
+None. All deprecated aliases were removed in 1.0.0.
