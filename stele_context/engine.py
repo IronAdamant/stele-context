@@ -97,9 +97,9 @@ class Stele:
         )
         resolved_storage = cfg.get("storage_dir", storage_dir)
         if resolved_storage is None:
-            resolved_storage = os.environ.get("STELE_STORAGE_DIR")
+            resolved_storage = os.environ.get("STELE_CONTEXT_STORAGE_DIR")
         if resolved_storage is None and self._project_root is not None:
-            resolved_storage = str(self._project_root / ".stele")
+            resolved_storage = str(self._project_root / ".stele-context")
         self.storage = StorageBackend(resolved_storage)
         self.chunk_size = cfg.get("chunk_size", self.DEFAULT_CHUNK_SIZE)
         self.max_chunk_size = cfg.get("max_chunk_size", self.DEFAULT_MAX_CHUNK_SIZE)

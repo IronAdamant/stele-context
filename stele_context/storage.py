@@ -44,13 +44,13 @@ class StorageBackend(StorageDelegatesMixin):
         Initialize storage backend.
 
         Args:
-            base_dir: Base directory for storage. Defaults to ~/.stele/
+            base_dir: Base directory for storage. Defaults to ~/.stele-context/
         """
         if base_dir is None:
-            base_dir = str(Path("~/.stele").expanduser())
+            base_dir = str(Path("~/.stele-context").expanduser())
 
         self.base_dir = Path(base_dir)
-        self.db_path = self.base_dir / "stele.db"
+        self.db_path = self.base_dir / "stele_context.db"
         self.kv_dir = self.base_dir / "kv_cache"
         self.index_dir = self.base_dir / "indices"
 

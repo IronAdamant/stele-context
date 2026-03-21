@@ -1,16 +1,16 @@
-# Stele
+# Stele Context
 
 Local context cache for LLM agents. 100% offline, zero required dependencies.
 
 ## Architecture
 
 ```
-Stele (engine.py) -- thin facade orchestrator
+Stele Context (engine.py) -- thin facade orchestrator
   |-- indexing.py -- document indexing, chunk merging, expand paths
   |-- search_engine.py -- hybrid HNSW+BM25 search, context, stats
   |-- change_detection.py -- detect file changes, re-index modified
   |-- engine_utils.py -- path normalization, lock routing, env checks
-  |-- Config (config.py) -- .stele.toml loader with minimal TOML parser
+  |-- Config (config.py) -- .stele-context.toml loader with minimal TOML parser
   |-- Chunkers (text, code, image, pdf, audio, video)
   |     |-- BaseChunker ABC + Chunk dataclass (chunkers/base.py)
   |     |-- CodeChunker: Python AST, tree-sitter (optional), regex fallback
@@ -92,12 +92,12 @@ Backward compat: core.py re-exports Stele + Chunk
 - **Optimistic locking**: `doc_version INTEGER` on documents table, auto-incremented on each write. `index_documents(expected_versions={path: N})` rejects if version changed since last read. Prevents silent overwrites.
 - **Conflict log**: `document_conflicts` table records ownership violations, version conflicts, and lock steals with full audit trail. `get_conflicts(document_path=, agent_id=)` for querying.
 - **Store document upsert**: `store_document()` uses `INSERT ... ON CONFLICT DO UPDATE` instead of `INSERT OR REPLACE` to preserve `locked_by`/`doc_version` columns.
-- **Project-root detection**: `_detect_project_root()` walks up from CWD looking for `.git` (file or dir). Works with both normal repos and git worktrees. Returns `None` if no `.git` found (disables normalization, falls back to `~/.stele/`).
+- **Project-root detection**: `_detect_project_root()` walks up from CWD looking for `.git` (file or dir). Works with both normal repos and git worktrees. Returns `None` if no `.git` found (disables normalization, falls back to `~/.stele-context/`).
 - **Path normalization**: `_normalize_path()` converts absolute paths to project-relative. Relative paths resolve against project root (not CWD) for idempotent normalization. Paths outside the project root stay absolute. Applied at every engine public method boundary.
-- **Per-worktree storage isolation**: Default storage is `<project_root>/.stele/` (not `~/.stele/`). Each git worktree gets its own `.stele/` directory since worktrees have separate directory trees. Priority: explicit `storage_dir` > `STELE_STORAGE_DIR` env var > `<project_root>/.stele/` > `~/.stele/`.
+- **Per-worktree storage isolation**: Default storage is `<project_root>/.stele-context/` (not `~/.stele-context/`). Each git worktree gets its own `.stele-context/` directory since worktrees have separate directory trees. Priority: explicit `storage_dir` > `STELE_CONTEXT_STORAGE_DIR` env var > `<project_root>/.stele-context/` > `~/.stele-context/`.
 - **Auto-lock acquisition**: When `agent_id` is passed to `index_documents()`, locks are auto-acquired on all documents being indexed. New docs get locked after creation; existing unlocked docs get locked before write. Locks persist after indexing (agent must explicitly release).
-- **MCP server auto agent_id**: Both HTTP (`mcp_server.py`) and stdio (`mcp_stdio.py`) servers generate a unique agent_id (`stele-http-{pid}` / `stele-mcp-{pid}`) and inject it into write operations when the caller doesn't provide one and the server_agent_id is truthy. Ensures all MCP-driven writes are attributed and locked.
-- **Cross-worktree coordination**: `coordination.py` provides a shared SQLite DB in `<git-common-dir>/stele/coordination.db`. Agents from all worktrees share it for locks, registry, and conflict log. `detect_git_common_dir()` parses `.git` file + `commondir` for worktrees. Falls back gracefully when no git repo or read-only `.git/`. Controlled via `enable_coordination` constructor param.
+- **MCP server auto agent_id**: Both HTTP (`mcp_server.py`) and stdio (`mcp_stdio.py`) servers generate a unique agent_id (`stele-context-http-{pid}` / `stele-context-mcp-{pid}`) and inject it into write operations when the caller doesn't provide one and the server_agent_id is truthy. Ensures all MCP-driven writes are attributed and locked.
+- **Cross-worktree coordination**: `coordination.py` provides a shared SQLite DB in `<git-common-dir>/stele-context/coordination.db`. Agents from all worktrees share it for locks, registry, and conflict log. `detect_git_common_dir()` parses `.git` file + `commondir` for worktrees. Falls back gracefully when no git repo or read-only `.git/`. Controlled via `enable_coordination` constructor param.
 - **Agent registry + heartbeat**: `register_agent()`, `deregister_agent()`, `heartbeat()`, `list_agents()`. MCP servers auto-register on start, heartbeat every 30s, deregister on stop. `reap_stale_agents(timeout=600)` cleans up dead agents and releases their locks.
 - **Lock routing**: `_do_acquire_lock()`, `_do_get_lock_status()`, `_do_release_lock()` route through coordination (shared) when available, otherwise fall back to per-worktree local locks. Transparent to callers.
 - **Stale bytecache detection**: `env_checks.scan_stale_pycache()` finds `__pycache__` dirs with orphaned `.pyc` files (source `.py` missing). `clean_stale_pycache()` removes them. Exposed via `engine.check_environment()` and `engine.clean_bytecache()`.
@@ -105,8 +105,8 @@ Backward compat: core.py re-exports Stele + Chunk
 - **Change notifications**: `change_notifications` table in coordination DB. Written after `index_documents()` and `detect_changes_and_update()`. Agents poll via `get_notifications(since=timestamp, exclude_self=agent_id)`. Enables near-real-time awareness: "what files did other agents change since my last check?"
 - **SymbolGraphManager**: Extracted from `engine.py` into `symbol_graph.py` following the `SessionManager` delegate pattern. Owns: symbol extraction, edge resolution, staleness propagation, find_references, find_definition, impact_radius, rebuild_graph. Engine delegates with locking wrappers.
 - **Cross-worktree chunk sharing**: Not implemented — not architecturally needed. The signature cache (`content_hash → semantic_signature` in `_chunk_and_store`) already prevents recomputation for unchanged content. Each worktree needs its own chunk records because file content may differ between worktrees.
-- **`.stele.toml` config**: `config.py` loads `<project_root>/.stele.toml` with `[stele]` section. Uses stdlib `tomllib` (3.11+) with minimal fallback parser for 3.9-3.10. Explicit constructor params override config file values. Supports: `storage_dir`, `chunk_size`, `max_chunk_size`, `merge_threshold`, `change_threshold`, `search_alpha`, `skip_dirs`.
-- **Tree-sitter code chunking**: `CodeChunker` tries tree-sitter for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP when installed (`pip install stele[tree-sitter]`). Falls back to regex if not available. Uses `_DEFINITION_TYPES` dict to identify top-level node types per language. Grammar packages are lazy-loaded and cached.
+- **`.stele-context.toml` config**: `config.py` loads `<project_root>/.stele-context.toml` with `[stele-context]` section. Uses stdlib `tomllib` (3.11+) with minimal fallback parser for 3.9-3.10. Explicit constructor params override config file values. Supports: `storage_dir`, `chunk_size`, `max_chunk_size`, `merge_threshold`, `change_threshold`, `search_alpha`, `skip_dirs`.
+- **Tree-sitter code chunking**: `CodeChunker` tries tree-sitter for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP when installed (`pip install stele-context[tree-sitter]`). Falls back to regex if not available. Uses `_DEFINITION_TYPES` dict to identify top-level node types per language. Grammar packages are lazy-loaded and cached.
 - **Chunk history query**: `get_chunk_history(chunk_id=, document_path=, limit=)` exposes the `chunk_history` table via engine and both MCP servers. History tracks previous versions when the same chunk_id is updated in-place.
 - **Performance benchmarks**: `benchmarks/` directory with `bench_chunking.py`, `bench_storage.py`, `bench_search.py`, and `run_all.py` runner. Zero deps, standalone-runnable, `--quick` mode for CI.
 - **Agent-supplied semantic embeddings**: Two-tier signature system. Tier 1 (always): 128-dim statistical signatures for change detection. Tier 2 (optional): agent-supplied semantic summaries or raw vectors for search quality. `store_semantic_summary(chunk_id, summary)` computes signature from agent's description; `store_embedding(chunk_id, vector)` stores raw vectors. HNSW index uses agent signature when available, falls back to statistical. Zero new dependencies — the agent IS the embedding model.
@@ -117,7 +117,7 @@ Backward compat: core.py re-exports Stele + Chunk
 - **Text pattern search**: `search_text(pattern, regex=, document_path=, limit=)` provides perfect-recall exact/regex search across stored chunk content. Complements semantic (HNSW) and keyword (BM25) search. Uses `str.find()` for substring, stdlib `re` for regex. Zero dependencies. Key use case: verify all usages before renaming/removing symbols.
 - **Unified tool registry**: `tool_registry.py` is the single source of truth for tool dispatch (`build_tool_map`), write-tool sets (`WRITE_TOOLS`), and HTTP schema generation (`get_http_schemas`). Both servers expose identical 42-tool sets with modality_flags for utility tools. `mcp_schemas.py` was deleted; schemas generated from `mcp_tool_defs.py`. `WRITE_TOOLS` includes lock operations (`acquire_document_lock`, `release_document_lock`, `refresh_document_lock`, `release_agent_locks`) for auto agent_id injection.
 - **No redundant commits**: Storage modules (`storage.py`, `session_storage.py`, `metadata_storage.py`, `symbol_storage.py`, `document_lock_storage.py`) never call `conn.commit()` inside `connect()` context manager blocks — the context manager auto-commits on successful exit.
-- **MCP stdio server bundle**: `_ServerBundle` dataclass holds server, engine, and agent_id together. Replaces monkey-patching `_stele_engine`/`_stele_agent_id` onto the MCP Server object. No `type: ignore` comments.
+- **MCP stdio server bundle**: `_ServerBundle` dataclass holds server, engine, and agent_id together. Replaces monkey-patching `_stele_engine`/`_stele_agent_id` onto the MCP Server object.
 - **Index store context managers**: Lock file handles in `index_store.py` use `with` statements for guaranteed cleanup. Read path uses nested try/finally to ensure unlock before close.
 
 ## SQLite Tables
@@ -130,7 +130,7 @@ Backward compat: core.py re-exports Stele + Chunk
 `document_conflicts` -- conflict audit log (DocumentLockStorage)
 `documents` columns: `locked_by`, `locked_at`, `lock_ttl`, `doc_version`
 
-Coordination DB (`<git-common-dir>/stele/coordination.db`):
+Coordination DB (`<git-common-dir>/stele-context/coordination.db`):
 `agents` -- agent registry with heartbeats
 `shared_locks` -- cross-worktree document locks
 `shared_conflicts` -- cross-worktree conflict log
@@ -155,20 +155,20 @@ mypy stele_context/
 ruff check stele_context/
 ```
 
-Entry points: `stele` (CLI), `stele-mcp` (MCP stdio server)
+Entry points: `stele-context` (CLI), `stele-context-mcp` (MCP stdio server)
 
-## Agent Workflow with Stele
+## Agent Workflow with Stele Context
 
-When using Stele's MCP tools during refactoring:
+When using Stele Context's MCP tools during refactoring:
 
 ### Before bulk edits
-- `stele search "<symbol>"` to find all chunks that reference a name before removing/renaming it
-- `stele find_references "<symbol>"` for definition/reference graph lookups
-- `stele get_context` to read current file content from the index
+- `stele-context search "<symbol>"` to find all chunks that reference a name before removing/renaming it
+- `stele-context find_references "<symbol>"` for definition/reference graph lookups
+- `stele-context get_context` to read current file content from the index
 
 ### After edits
-- `stele index --force-reindex` the changed files to update the cache
-- `stele detect_changes` to verify what changed
+- `stele-context index --force-reindex` the changed files to update the cache
+- `stele-context detect_changes` to verify what changed
 
 ### Multi-agent coordination rules
 - **Atomic transformations**: Never split "remove X" and "replace X with Y" across parallel agents. Both steps must happen atomically per file.

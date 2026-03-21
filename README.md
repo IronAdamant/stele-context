@@ -1,4 +1,4 @@
-# Stele
+# Stele Context
 
 **Local context cache for LLM agents with semantic chunking and vector search.**
 
@@ -8,7 +8,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/stele-context)
 [![Tests](https://github.com/IronAdamant/stele-context/actions/workflows/test.yml/badge.svg)](https://github.com/IronAdamant/stele-context/actions)
 
-Stele helps LLM agents avoid re-reading unchanged files by caching chunk data with semantic search. Documents are routed through modality-specific chunkers, chunk content is stored in SQLite, and an HNSW vector index enables fast O(log n) retrieval. Only modified chunks trigger reprocessing.
+Stele Context helps LLM agents avoid re-reading unchanged files by caching chunk data with semantic search. Documents are routed through modality-specific chunkers, chunk content is stored in SQLite, and an HNSW vector index enables fast O(log n) retrieval. Only modified chunks trigger reprocessing.
 
 ## Key Features
 
@@ -21,7 +21,7 @@ Stele helps LLM agents avoid re-reading unchanged files by caching chunk data wi
 - **Symbol Graph**: Cross-file reference tracking — `find_references`, `find_definition`, `impact_radius`
 - **Multi-Agent Safe**: Per-document locking, optimistic versioning, cross-worktree coordination
 - **MCP Server**: JSON-RPC over stdio for Claude Desktop, HTTP REST for other agents
-- **Project Config**: `.stele.toml` file for per-project settings
+- **Project Config**: `.stele-context.toml` file for per-project settings
 - **Session Management**: Sessions with rollback, pruning, and KV-cache persistence
 
 ## Architecture
@@ -29,13 +29,13 @@ Stele helps LLM agents avoid re-reading unchanged files by caching chunk data wi
 ```mermaid
 graph TB
     subgraph API["API Layer"]
-        CLI["CLI<br/>stele index / search / serve"]
+        CLI["CLI<br/>stele-context index / search / serve"]
         HTTP["HTTP REST<br/>42 tools, threaded"]
         MCP["MCP stdio<br/>42 tools, JSON-RPC"]
     end
 
     subgraph Engine["Engine (engine.py)"]
-        CFG["Config<br/>.stele.toml loader"]
+        CFG["Config<br/>.stele-context.toml loader"]
         SEARCH["Hybrid Search<br/>HNSW + BM25"]
         IDX["index_documents()<br/>detect_changes()"]
         SYM["Symbol Graph<br/>12 languages"]
@@ -69,7 +69,7 @@ graph TB
 
 ## Comparison
 
-| Feature | Stele | LangChain | LlamaIndex | EverMemOS |
+| Feature | Stele Context | LangChain | LlamaIndex | EverMemOS |
 |---------|-------|-----------|------------|-----------|
 | Zero dependencies | Yes | No (50+) | No (30+) | No (Mongo, Redis, Milvus) |
 | 100% offline | Yes | No | No | No |
@@ -134,30 +134,30 @@ pip install stele-context[all]           # Everything
 ### 1. Index Documents
 
 ```bash
-stele index src/*.py docs/*.md
-stele index --force document.py    # Force re-index
+stele-context index src/*.py docs/*.md
+stele-context index --force document.py    # Force re-index
 ```
 
 ### 2. Semantic Search
 
 ```bash
-stele search "authentication logic" --top-k 5
-stele search "error handling" --json
+stele-context search "authentication logic" --top-k 5
+stele-context search "error handling" --json
 ```
 
 ### 3. MCP Server (for Claude Code / Claude Desktop)
 
 ```bash
 pip install stele-context[mcp]
-stele serve-mcp
+stele-context serve-mcp
 ```
 
 **Claude Code** (`~/.claude/settings.json`):
 ```json
 {
   "mcpServers": {
-    "stele": {
-      "command": "stele",
+    "stele-context": {
+      "command": "stele-context",
       "args": ["serve-mcp"]
     }
   }
@@ -168,28 +168,28 @@ stele serve-mcp
 ```json
 {
   "mcpServers": {
-    "stele": {
-      "command": "stele",
+    "stele-context": {
+      "command": "stele-context",
       "args": ["serve-mcp"]
     }
   }
 }
 ```
 
-> **Tip:** If installed in a virtualenv, use the full path to the `stele` binary.
+> **Tip:** If installed in a virtualenv, use the full path to the `stele-context` binary.
 
 ### 4. HTTP REST Server
 
 ```bash
-stele serve --port 9876
+stele-context serve --port 9876
 ```
 
 ### 5. Project Configuration
 
-Create `.stele.toml` in your project root:
+Create `.stele-context.toml` in your project root:
 
 ```toml
-[stele]
+[stele-context]
 chunk_size = 512
 max_chunk_size = 8192
 merge_threshold = 0.75
@@ -258,11 +258,11 @@ engine = Stele(
 )
 ```
 
-Or use `.stele.toml` (see above) — constructor params override config file values.
+Or use `.stele-context.toml` (see above) — constructor params override config file values.
 
 ### Agent-Supplied Semantic Embeddings
 
-LLM agents already understand the semantics of every chunk they read. Instead of using a separate embedding model, Stele captures the agent's understanding directly:
+LLM agents already understand the semantics of every chunk they read. Instead of using a separate embedding model, Stele Context captures the agent's understanding directly:
 
 ```python
 # After indexing, the agent describes what each chunk does
@@ -276,7 +276,7 @@ engine.store_semantic_summary(
 results = engine.search("token validation middleware")
 ```
 
-The agent IS the embedding model. Stele just stores and indexes what the agent tells it — zero new dependencies, no model downloads, no API calls.
+The agent IS the embedding model. Stele Context just stores and indexes what the agent tells it — zero new dependencies, no model downloads, no API calls.
 
 **How it works:**
 - **Tier 1** (always): 128-dim statistical signatures — trigrams, bigrams, structural features. Used for change detection.
@@ -316,7 +316,7 @@ For each chunk:
 
 ### Token Savings
 
-| Scenario | Without Stele | With Stele | Savings |
+| Scenario | Without Stele Context | With Stele Context | Savings |
 |----------|---------------|------------|---------|
 | Unchanged document | 10,000 tokens | 0 tokens | 100% |
 | Minor edit (typo) | 10,000 tokens | ~100 tokens | 99% |
@@ -337,18 +337,18 @@ Install with `pip install stele-context[tree-sitter]`.
 ### Storage Layout
 
 ```
-<project_root>/.stele/          # Per-worktree (default)
-├── stele.db                    # SQLite: chunks, symbols, sessions, history
-├── kv_cache/                   # JSON + zlib compressed KV states
-└── indices/                    # HNSW + BM25 persistent indices
+<project_root>/.stele-context/          # Per-worktree (default)
+├── stele_context.db                    # SQLite: chunks, symbols, sessions, history
+├── kv_cache/                           # JSON + zlib compressed KV states
+└── indices/                            # HNSW + BM25 persistent indices
 
-<git-common-dir>/stele/         # Shared across worktrees
-└── coordination.db             # Agent registry, shared locks, notifications
+<git-common-dir>/stele-context/         # Shared across worktrees
+└── coordination.db                     # Agent registry, shared locks, notifications
 ```
 
 ## Multi-Agent Support
 
-Stele supports multiple LLM agents sharing one store on the same machine.
+Stele Context supports multiple LLM agents sharing one store on the same machine.
 
 | Layer | Protection |
 |-------|-----------|
@@ -414,14 +414,14 @@ pip install stele-context --no-deps
 
 | Variable | Description |
 |----------|-------------|
-| `STELE_STORAGE_DIR` | Override default storage directory |
-| `STELE_LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+| `STELE_CONTEXT_STORAGE_DIR` | Override default storage directory |
+| `STELE_CONTEXT_LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 
-### Config File (`.stele.toml`)
+### Config File (`.stele-context.toml`)
 
 ```toml
-[stele]
-storage_dir = ".stele"       # Storage directory (relative to project root)
+[stele-context]
+storage_dir = ".stele-context"       # Storage directory (relative to project root)
 chunk_size = 256              # Target tokens per initial chunk
 max_chunk_size = 4096         # Maximum tokens per merged chunk
 merge_threshold = 0.7         # Similarity threshold for merging chunks
@@ -430,35 +430,35 @@ search_alpha = 0.7            # Hybrid search blend (1.0=vector, 0.0=keyword)
 skip_dirs = [".git", "node_modules", "__pycache__"]
 ```
 
-Priority: constructor params > `.stele.toml` > `STELE_STORAGE_DIR` env var > defaults.
+Priority: constructor params > `.stele-context.toml` > `STELE_CONTEXT_STORAGE_DIR` env var > defaults.
 
 ## FAQ
 
-**Q: Does Stele require an internet connection?**
-No. Stele is 100% offline. No API calls, no model downloads, no telemetry. All operations run locally using Python stdlib.
+**Q: Does Stele Context require an internet connection?**
+No. Stele Context is 100% offline. No API calls, no model downloads, no telemetry. All operations run locally using Python stdlib.
 
-**Q: How does Stele compare to RAG (Retrieval-Augmented Generation)?**
-Stele is not RAG — it's a context cache. RAG retrieves chunks at query time from an external store. Stele caches chunk KV-states so the LLM skips re-reading unchanged content. It can be used alongside RAG, but its primary value is token savings through change detection.
+**Q: How does Stele Context compare to RAG (Retrieval-Augmented Generation)?**
+Stele Context is not RAG — it's a context cache. RAG retrieves chunks at query time from an external store. Stele Context caches chunk KV-states so the LLM skips re-reading unchanged content. It can be used alongside RAG, but its primary value is token savings through change detection.
 
 **Q: What happens if tree-sitter isn't installed?**
 Code chunking falls back to regex patterns for non-Python languages. Python always uses stdlib `ast`. Install tree-sitter for better accuracy on JS/TS, Java, C/C++, Go, Rust, Ruby, PHP: `pip install stele-context[tree-sitter]`.
 
-**Q: Can multiple agents use Stele simultaneously?**
-Yes. Stele provides per-document locking, optimistic versioning, and a cross-worktree coordination DB. Both HTTP and MCP servers auto-register agents and inject agent IDs into write operations.
+**Q: Can multiple agents use Stele Context simultaneously?**
+Yes. Stele Context provides per-document locking, optimistic versioning, and a cross-worktree coordination DB. Both HTTP and MCP servers auto-register agents and inject agent IDs into write operations.
 
 **Q: How accurate are the semantic signatures?**
 The 128-dim statistical signatures (trigrams, bigrams, structural features) are approximate. They're designed for change detection (same vs different), not for embedding-quality similarity. For typical code and documentation, they achieve ~95% accuracy on change detection.
 
 **Q: Where is data stored?**
-By default, `<project_root>/.stele/` (each git worktree gets its own). Override with `STELE_STORAGE_DIR` or `storage_dir` in `.stele.toml`. Cross-worktree coordination data lives in `<git-common-dir>/stele/coordination.db`.
+By default, `<project_root>/.stele-context/` (each git worktree gets its own). Override with `STELE_CONTEXT_STORAGE_DIR` or `storage_dir` in `.stele-context.toml`. Cross-worktree coordination data lives in `<git-common-dir>/stele-context/coordination.db`.
 
 ## Troubleshooting
 
 **`ImportError: No module named 'stele_context'`**
-Ensure Stele is installed: `pip install -e .` from the repo root. If using a virtualenv, make sure it's activated.
+Ensure Stele Context is installed: `pip install -e .` from the repo root. If using a virtualenv, make sure it's activated.
 
 **MCP server not connecting in Claude Desktop**
-Use the full path to the `stele` binary. Check with `which stele` and update your config. If installed in a virtualenv: `/path/to/.venv/bin/stele`.
+Use the full path to the `stele-context` binary. Check with `which stele-context` and update your config. If installed in a virtualenv: `/path/to/.venv/bin/stele-context`.
 
 **`PermissionError` when indexing**
 Another agent holds a lock on the document. Check with `get_document_lock_status()` or `reap_expired_locks()` to clean up stale locks.
@@ -470,7 +470,7 @@ The HNSW index adapts search width automatically. For 10K+ chunks, search uses 4
 Verify the grammar package is installed: `pip install tree-sitter-javascript` (etc.). Check with: `python -c "from stele_context.chunkers.code import HAS_TREE_SITTER; print(HAS_TREE_SITTER)"`.
 
 **Stale `.pyc` files causing issues**
-Run `stele` with the `environment_check` MCP tool, or call `engine.check_environment()`. Use `engine.clean_bytecache()` to remove orphaned `.pyc` files.
+Run `stele-context` with the `environment_check` MCP tool, or call `engine.check_environment()`. Use `engine.clean_bytecache()` to remove orphaned `.pyc` files.
 
 ## Development
 
@@ -483,7 +483,7 @@ mypy stele_context/                 # Type checking
 ruff check stele_context/           # Linting
 ```
 
-Entry points: `stele` (CLI), `stele-mcp` (MCP stdio server)
+Entry points: `stele-context` (CLI), `stele-context-mcp` (MCP stdio server)
 
 ## Contributing
 

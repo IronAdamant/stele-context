@@ -1,6 +1,6 @@
-# Contributing to Stele
+# Contributing to Stele Context
 
-Thank you for your interest in contributing to Stele! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Stele Context! This document provides guidelines and information for contributors.
 
 ## Table of Contents
 
@@ -58,7 +58,7 @@ pytest
 mypy stele_context/
 
 # Run CLI
-stele --version
+stele-context --version
 ```
 
 ## Making Changes
@@ -264,7 +264,7 @@ Brief description of changes
 ### Bug Reports
 
 Include:
-- Stele version
+- Stele Context version
 - Python version
 - Operating system
 - Steps to reproduce
@@ -316,4 +316,4 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-Thank you for contributing to Stele! 🚀
+Thank you for contributing to Stele Context! 🚀

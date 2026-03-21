@@ -1,4 +1,4 @@
-# Stele Wiki
+# Stele Context Wiki
 
 ## Pages
 

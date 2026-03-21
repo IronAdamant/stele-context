@@ -4,15 +4,15 @@ MCP server for Stele using JSON-RPC over stdio.
 Implements the Model Context Protocol (MCP) standard, allowing
 MCP clients (like Claude Desktop) to connect via stdio transport.
 
-Requires the ``mcp`` package: pip install stele[mcp]
+Requires the ``mcp`` package: pip install stele-context[mcp]
 
 Usage:
-    stele serve-mcp
+    stele-context serve-mcp
     # Or directly:
     python -m stele_context.mcp_stdio
 
 Claude Desktop config:
-    "stele": {"command": "stele", "args": ["serve-mcp"]}
+    "stele-context": {"command": "stele-context", "args": ["serve-mcp"]}
 """
 
 from __future__ import annotations
@@ -73,7 +73,9 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
     Returns a ``_ServerBundle`` containing the server, engine, and agent_id.
     """
     if not HAS_MCP:
-        raise ImportError("MCP SDK not installed. Install with: pip install stele[mcp]")
+        raise ImportError(
+            "MCP SDK not installed. Install with: pip install stele-context[mcp]"
+        )
 
     from stele_context.chunkers import (
         HAS_IMAGE_CHUNKER,
@@ -83,8 +85,8 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
     )
 
     engine = _create_engine(storage_dir)
-    server = Server("stele")
-    server_agent_id = f"stele-mcp-{os.getpid()}"
+    server = Server("stele-context")
+    server_agent_id = f"stele-context-mcp-{os.getpid()}"
 
     # Build tool dispatch map once (not per request)
     modality_flags = {
@@ -136,7 +138,7 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
     async def list_resources() -> list[Resource]:
         return [
             Resource(
-                uri="stele://documents",  # type: ignore[arg-type]
+                uri="stele-context://documents",  # type: ignore[arg-type]
                 name="Indexed Documents",
                 description="List of all indexed documents",
                 mimeType="application/json",
@@ -147,7 +149,7 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
     async def list_resource_templates() -> list[ResourceTemplate]:
         return [
             ResourceTemplate(
-                uriTemplate="stele://document/{path}",
+                uriTemplate="stele-context://document/{path}",
                 name="Document Chunks",
                 description="Chunks for a specific document with content",
                 mimeType="application/json",
@@ -157,11 +159,11 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
     @server.read_resource()
     async def read_resource(uri: str) -> str:
         uri_str = str(uri)
-        if uri_str == "stele://documents":
+        if uri_str == "stele-context://documents":
             docs = engine.get_map()
             return json.dumps(docs, indent=2, default=str)
-        elif uri_str.startswith("stele://document/"):
-            doc_path = uri_str[len("stele://document/") :]
+        elif uri_str.startswith("stele-context://document/"):
+            doc_path = uri_str[len("stele-context://document/") :]
             chunks = engine.storage.get_document_chunks(doc_path)
             enriched = []
             for meta in chunks:
@@ -180,7 +182,7 @@ async def _run_server(bundle: _ServerBundle) -> None:
 
     try:
         init_options = InitializationOptions(
-            server_name="stele",
+            server_name="stele-context",
             server_version=_version,
             capabilities=ServerCapabilities(
                 tools=ToolsCapability(listChanged=False),
@@ -194,10 +196,10 @@ async def _run_server(bundle: _ServerBundle) -> None:
 
 
 def run(storage_dir: str | None = None) -> None:
-    """Entry point for ``stele serve-mcp``."""
+    """Entry point for ``stele-context serve-mcp``."""
     if not HAS_MCP:
         print(
-            "Error: MCP SDK not installed.\nInstall with: pip install stele[mcp]",
+            "Error: MCP SDK not installed.\nInstall with: pip install stele-context[mcp]",
             file=sys.stderr,
         )
         sys.exit(1)

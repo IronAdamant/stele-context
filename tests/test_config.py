@@ -1,4 +1,4 @@
-"""Tests for the .stele.toml configuration system."""
+"""Tests for the .stele-context.toml configuration system."""
 
 from stele_context.config import load_config, apply_config, _parse_toml_minimal
 
@@ -38,13 +38,13 @@ class TestParseTomlMinimal:
         assert result == {"items": []}
 
     def test_section_header(self):
-        result = _parse_toml_minimal("[stele]\nchunk_size = 512")
-        assert result == {"stele": {"chunk_size": 512}}
+        result = _parse_toml_minimal("[stele-context]\nchunk_size = 512")
+        assert result == {"stele-context": {"chunk_size": 512}}
 
     def test_multiple_sections(self):
-        toml = "[stele]\nchunk_size = 512\n[other]\nfoo = 1"
+        toml = "[stele-context]\nchunk_size = 512\n[other]\nfoo = 1"
         result = _parse_toml_minimal(toml)
-        assert result == {"stele": {"chunk_size": 512}, "other": {"foo": 1}}
+        assert result == {"stele-context": {"chunk_size": 512}, "other": {"foo": 1}}
 
     def test_inline_comment(self):
         result = _parse_toml_minimal("chunk_size = 512 # comment")
@@ -52,8 +52,8 @@ class TestParseTomlMinimal:
 
     def test_full_config(self):
         toml = """
-[stele]
-storage_dir = "/tmp/stele"
+[stele-context]
+storage_dir = "/tmp/stele-context"
 chunk_size = 512
 max_chunk_size = 8192
 merge_threshold = 0.75
@@ -62,16 +62,16 @@ search_alpha = 0.6
 skip_dirs = [".git", "node_modules", "dist"]
 """
         result = _parse_toml_minimal(toml)
-        assert result["stele"]["storage_dir"] == "/tmp/stele"
-        assert result["stele"]["chunk_size"] == 512
-        assert result["stele"]["max_chunk_size"] == 8192
-        assert result["stele"]["merge_threshold"] == 0.75
-        assert result["stele"]["search_alpha"] == 0.6
-        assert ".git" in result["stele"]["skip_dirs"]
+        assert result["stele-context"]["storage_dir"] == "/tmp/stele-context"
+        assert result["stele-context"]["chunk_size"] == 512
+        assert result["stele-context"]["max_chunk_size"] == 8192
+        assert result["stele-context"]["merge_threshold"] == 0.75
+        assert result["stele-context"]["search_alpha"] == 0.6
+        assert ".git" in result["stele-context"]["skip_dirs"]
 
 
 class TestLoadConfig:
-    """Tests for loading .stele.toml from project root."""
+    """Tests for loading .stele-context.toml from project root."""
 
     def test_no_project_root(self):
         assert load_config(None) == {}
@@ -80,19 +80,19 @@ class TestLoadConfig:
         assert load_config(tmp_path) == {}
 
     def test_load_valid_config(self, tmp_path):
-        config_file = tmp_path / ".stele.toml"
-        config_file.write_text("[stele]\nchunk_size = 512\n")
+        config_file = tmp_path / ".stele-context.toml"
+        config_file.write_text("[stele-context]\nchunk_size = 512\n")
         result = load_config(tmp_path)
         assert result == {"chunk_size": 512}
 
     def test_load_config_without_section(self, tmp_path):
-        config_file = tmp_path / ".stele.toml"
+        config_file = tmp_path / ".stele-context.toml"
         config_file.write_text("chunk_size = 512\n")
         result = load_config(tmp_path)
         assert result == {"chunk_size": 512}
 
     def test_load_malformed_config(self, tmp_path):
-        config_file = tmp_path / ".stele.toml"
+        config_file = tmp_path / ".stele-context.toml"
         config_file.write_text("this is not valid toml {{{")
         result = load_config(tmp_path)
         # Should not raise, returns something (may be partial parse or empty)
@@ -135,11 +135,13 @@ class TestApplyConfig:
 
 
 class TestEngineConfigIntegration:
-    """Tests that Stele engine loads .stele.toml correctly."""
+    """Tests that Stele engine loads .stele-context.toml correctly."""
 
     def test_engine_reads_config(self, tmp_path):
-        config_file = tmp_path / ".stele.toml"
-        config_file.write_text("[stele]\nchunk_size = 512\nsearch_alpha = 0.3\n")
+        config_file = tmp_path / ".stele-context.toml"
+        config_file.write_text(
+            "[stele-context]\nchunk_size = 512\nsearch_alpha = 0.3\n"
+        )
         # Create .git so project root detection works
         (tmp_path / ".git").mkdir()
 
@@ -155,8 +157,8 @@ class TestEngineConfigIntegration:
         assert engine.max_chunk_size == 4096
 
     def test_explicit_params_override_config(self, tmp_path):
-        config_file = tmp_path / ".stele.toml"
-        config_file.write_text("[stele]\nchunk_size = 512\n")
+        config_file = tmp_path / ".stele-context.toml"
+        config_file.write_text("[stele-context]\nchunk_size = 512\n")
         (tmp_path / ".git").mkdir()
 
         from stele_context.engine import Stele

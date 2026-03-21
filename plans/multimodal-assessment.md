@@ -1,8 +1,8 @@
-# Stele Multi-Modal Support Assessment
+# Stele Context Multi-Modal Support Assessment
 
 ## Current State: Text/Code Only
 
-Stele v0.1.0 is **text-only**. Here's what that means:
+Stele Context v0.1.0 is **text-only**. Here's what that means:
 
 ### What Works Now
 - ✅ Plain text files (.txt, .md, .rst)
@@ -155,22 +155,22 @@ Multi-modal needs:
 
 ```python
 # Core: zero dependencies
-pip install stele
+pip install stele-context
 
 # Image support
-pip install stele[image]
+pip install stele-context[image]
 
-# Audio support  
-pip install stele[audio]
+# Audio support
+pip install stele-context[audio]
 
 # Video support
-pip install stele[video]
+pip install stele-context[video]
 
 # PDF support
-pip install stele[pdf]
+pip install stele-context[pdf]
 
 # Everything
-pip install stele[all]
+pip install stele-context[all]
 ```
 
 ### Modular Chunker Architecture
@@ -200,7 +200,7 @@ except ImportError:
 class ImageChunker:
     def __init__(self):
         if not HAS_PIL:
-            raise ImportError("Pillow required for image support. Install: pip install stele[image]")
+            raise ImportError("Pillow required for image support. Install: pip install stele-context[image]")
 ```
 
 ---

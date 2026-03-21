@@ -1,6 +1,6 @@
 # LLM Development Log
 
-Chronological record of development activity on Stele, maintained for LLM agent context.
+Chronological record of development activity on Stele Context, maintained for LLM agent context.
 
 ## 2026-03-21 - v0.10.3 Codebase Audit & Cleanup
 
@@ -69,7 +69,7 @@ Chronological record of development activity on Stele, maintained for LLM agent 
 ## 2026-03-21 - v0.9.0 Release & CI Fixes
 
 ### Features added
-- Config system (`.stele.toml`) with minimal TOML parser for Python 3.9-3.10
+- Config system (`.stele-context.toml`) with minimal TOML parser for Python 3.9-3.10
 - Tree-sitter code chunking for 9 languages (JS/TS, Java, C/C++, Go, Rust, Ruby, PHP)
 - Chunk history query tools (`get_chunk_history`)
 - Agent-supplied semantic embeddings (`store_semantic_summary`, `store_embedding`)
@@ -117,7 +117,7 @@ Chronological record of development activity on Stele, maintained for LLM agent 
 
 ## 2026-03-16 - Project Rename
 
-- Renamed from ChunkForge to Stele
+- Renamed from ChunkForge to Stele Context
 - Updated all references, package name, CLI commands
 
 ## Earlier Development

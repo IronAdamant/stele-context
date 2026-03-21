@@ -193,7 +193,7 @@ class MCPServer:
         self.stele = stele
         self.host = host
         self.port = port
-        self.agent_id = agent_id or f"stele-http-{os.getpid()}"
+        self.agent_id = agent_id or f"stele-context-http-{os.getpid()}"
         self.server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._heartbeat_thread: threading.Thread | None = None
@@ -232,7 +232,7 @@ class MCPServer:
             self._thread = threading.Thread(
                 target=self.server.serve_forever,
                 daemon=True,
-                name="stele-mcp-server",
+                name="stele-context-mcp-server",
             )
             self._thread.start()
             logger.info("Server running in background thread")

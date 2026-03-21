@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an idea for Stele
+about: Suggest an idea for Stele Context
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''

@@ -18,7 +18,7 @@
 | **Document Lock** | Per-document exclusive write access for an agent. TTL-based with auto-expiry |
 | **Optimistic Locking** | `doc_version` compare-and-swap on document writes. Prevents silent overwrites |
 | **Coordination** | Cross-worktree shared SQLite DB for agent registry, shared locks, and conflict log |
-| **Worktree** | A git worktree - a separate working directory sharing the same `.git`. Each gets its own `.stele/` |
+| **Worktree** | A git worktree - a separate working directory sharing the same `.git`. Each gets its own `.stele-context/` |
 | **Project Root** | The directory containing `.git`. Used for path normalization and storage location |
 | **MCP** | Model Context Protocol. JSON-RPC over stdio for Claude Desktop integration |
 | **KV-Cache** | Key-value cache stored as JSON+zlib blobs on the filesystem. Used by sessions |

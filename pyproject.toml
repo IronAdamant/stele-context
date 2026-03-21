@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
-    {name = "Stele Contributors"}
+    {name = "Stele Context Contributors"}
 ]
 keywords = ["llm", "context-cache", "chunking", "vector-search", "semantic-search", "offline", "local"]
 classifiers = [
@@ -90,8 +90,8 @@ dev = [
 ]
 
 [project.scripts]
-stele = "stele_context.cli:main"
-stele-mcp = "stele_context.mcp_stdio:main"
+stele-context = "stele_context.cli:main"
+stele-context-mcp = "stele_context.mcp_stdio:main"
 
 [project.urls]
 Homepage = "https://github.com/IronAdamant/stele-context"

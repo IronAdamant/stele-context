@@ -79,7 +79,7 @@ class TestStorageMigration:
 
     def test_migration_preserves_existing_data(self, tmp_path):
         """Test that migration doesn't destroy existing chunk data."""
-        db_path = tmp_path / "storage" / "stele.db"
+        db_path = tmp_path / "storage" / "stele_context.db"
         db_path.parent.mkdir(parents=True)
 
         # Create old schema without content column

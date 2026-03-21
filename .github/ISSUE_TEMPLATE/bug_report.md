@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Create a report to help us improve Stele
+about: Create a report to help us improve Stele Context
 title: '[BUG] '
 labels: bug
 assignees: ''
@@ -12,7 +12,7 @@ A clear and concise description of what the bug is.
 
 ## Steps to Reproduce
 
-1. Install Stele version '...'
+1. Install Stele Context version '...'
 2. Run command '...'
 3. With configuration '...'
 4. See error
@@ -33,7 +33,7 @@ Paste any error messages or stack traces here
 
 ## Environment
 
-- **Stele Version**: [e.g., 0.1.0]
+- **Stele Context Version**: [e.g., 0.1.0]
 - **Python Version**: [e.g., 3.12.0]
 - **Operating System**: [e.g., Ubuntu 22.04, macOS 14.0, Windows 11]
 - **Installation Method**: [e.g., pip install -e ., pip install stele-context]

@@ -1,4 +1,4 @@
-"""Benchmark chunking operations for Stele.
+"""Benchmark chunking operations for Stele Context.
 
 Measures TextChunker and CodeChunker throughput on synthetic content
 of various sizes (1KB to 1MB). Reports median time over 3 iterations.
@@ -11,7 +11,7 @@ import time
 from stele_context.chunkers.text import TextChunker
 from stele_context.chunkers.code import CodeChunker
 
-_QUICK = os.environ.get("STELE_BENCH_QUICK") == "1"
+_QUICK = os.environ.get("STELE_CONTEXT_BENCH_QUICK") == "1"
 
 
 # ---------------------------------------------------------------------------

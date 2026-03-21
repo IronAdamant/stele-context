@@ -1,4 +1,4 @@
-"""Benchmark storage operations for Stele.
+"""Benchmark storage operations for Stele Context.
 
 Measures SQLite-backed store_chunk, get_chunk, search_chunks,
 store_document, get_document, and get_storage_stats performance.
@@ -14,7 +14,7 @@ import time
 
 from stele_context.storage import StorageBackend
 
-_QUICK = os.environ.get("STELE_BENCH_QUICK") == "1"
+_QUICK = os.environ.get("STELE_CONTEXT_BENCH_QUICK") == "1"
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 ---
 name: Question
-about: Ask a question about Stele
+about: Ask a question about Stele Context
 title: '[QUESTION] '
 labels: question
 assignees: ''
@@ -8,7 +8,7 @@ assignees: ''
 
 ## Question
 
-A clear and concise question about Stele.
+A clear and concise question about Stele Context.
 
 ## Context
 
@@ -19,7 +19,7 @@ Provide any relevant context for your question:
 
 ## Environment (if relevant)
 
-- **Stele Version**: [e.g., 0.1.0]
+- **Stele Context Version**: [e.g., 0.1.0]
 - **Python Version**: [e.g., 3.12.0]
 - **Operating System**: [e.g., Ubuntu 22.04, macOS 14.0, Windows 11]
 

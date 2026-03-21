@@ -2,13 +2,13 @@
 
 ## Overview
 
-Stele is a local context cache for LLM agents. It indexes documents through modality-specific chunkers, stores chunk data in SQLite, and provides O(log n) semantic search via an HNSW vector index. Designed for 100% offline use with zero required dependencies.
+Stele Context is a local context cache for LLM agents. It indexes documents through modality-specific chunkers, stores chunk data in SQLite, and provides O(log n) semantic search via an HNSW vector index. Designed for 100% offline use with zero required dependencies.
 
 ## Architecture
 
 ```
 API Layer
-  CLI (cli.py)              -- stele index / search / serve
+  CLI (cli.py)              -- stele-context index / search / serve
   HTTP REST (mcp_server.py) -- 30 tools, threaded
   MCP stdio (mcp_stdio.py)  -- 32 tools, JSON-RPC
 
@@ -42,7 +42,7 @@ Chunker Layer
   chunkers/video.py   -- VideoChunker (OpenCV)
 
 Cross-cutting
-  config.py        -- .stele.toml loader
+  config.py        -- .stele-context.toml loader
   rwlock.py        -- read-write lock
   coordination.py  -- cross-worktree coordination
   agent_registry.py -- agent registration/heartbeat
@@ -75,7 +75,7 @@ Cross-cutting
 
 ## Entry Points
 
-- `stele` CLI command -> `stele.cli:main`
-- `stele-mcp` command -> `stele.mcp_stdio:main`
-- Python API -> `from stele.engine import Stele`
+- `stele-context` CLI command -> `stele_context.cli:main`
+- `stele-context-mcp` command -> `stele_context.mcp_stdio:main`
+- Python API -> `from stele_context.engine import Stele`
 - PyPI package -> `pip install stele-context`

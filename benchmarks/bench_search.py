@@ -1,4 +1,4 @@
-"""Benchmark search operations for Stele.
+"""Benchmark search operations for Stele Context.
 
 Measures VectorIndex insert and search, BM25Index add_document and
 score_batch, and full hybrid search via engine.search(). All data is
@@ -17,7 +17,7 @@ from stele_context.index import VectorIndex
 from stele_context.bm25 import BM25Index
 from stele_context.engine import Stele
 
-_QUICK = os.environ.get("STELE_BENCH_QUICK") == "1"
+_QUICK = os.environ.get("STELE_CONTEXT_BENCH_QUICK") == "1"
 
 
 # ---------------------------------------------------------------------------

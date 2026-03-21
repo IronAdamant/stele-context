@@ -1,4 +1,4 @@
-"""Run all Stele benchmarks and print a summary.
+"""Run all Stele Context benchmarks and print a summary.
 
 Executes each benchmark file as a subprocess. Supports a --quick flag
 that reduces iteration counts and data sizes for CI environments.
@@ -31,7 +31,7 @@ def run_benchmark(name, script, quick=False):
     env = os.environ.copy()
     env["PYTHONPATH"] = PROJECT_ROOT + os.pathsep + env.get("PYTHONPATH", "")
     if quick:
-        env["STELE_BENCH_QUICK"] = "1"
+        env["STELE_CONTEXT_BENCH_QUICK"] = "1"
 
     start = time.perf_counter()
     result = subprocess.run(
@@ -52,7 +52,7 @@ def main():
     mode = "QUICK" if quick else "FULL"
 
     print(f"\n{'=' * 72}")
-    print(f"  Stele Performance Benchmarks ({mode})")
+    print(f"  Stele Context Performance Benchmarks ({mode})")
     print(f"{'=' * 72}")
 
     results = []

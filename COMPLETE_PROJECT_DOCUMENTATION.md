@@ -1,4 +1,4 @@
-# Stele - Complete Project Documentation
+# Stele Context - Complete Project Documentation
 
 ## File Table
 
@@ -11,7 +11,7 @@
 | `stele_context/indexing.py` | Document indexing: chunk, store, merge, expand | chunkers.base, chunkers.numpy_compat | test_engine.py |
 | `stele_context/search_engine.py` | Hybrid search (HNSW+BM25), get_context, stats | bm25, index, index_store, chunkers | test_engine.py |
 | `stele_context/change_detection.py` | Detect file changes, re-index modified chunks | chunkers.base, chunkers.numpy_compat | test_engine.py |
-| `stele_context/config.py` | `.stele.toml` loader with minimal TOML parser | None | test_config.py |
+| `stele_context/config.py` | `.stele-context.toml` loader with minimal TOML parser | None | test_config.py |
 | `stele_context/storage.py` | `StorageBackend` - SQLite + filesystem persistence | storage_schema, storage_delegates, all sub-storages | test_engine.py, test_storage_migration.py |
 | `stele_context/storage_schema.py` | Database init and migration SQL | connection_pool | test_storage_migration.py |
 | `stele_context/connection_pool.py` | Thread-local SQLite connection reuse | None | (via test_engine.py) |
@@ -43,7 +43,7 @@
 | `stele_context/chunkers/pdf.py` | `PDFChunker` - pymupdf-based (optional) | chunkers.base | (requires pymupdf) |
 | `stele_context/chunkers/audio.py` | `AudioChunker` - librosa-based (optional) | chunkers.base | (requires librosa) |
 | `stele_context/chunkers/video.py` | `VideoChunker` - OpenCV-based (optional) | chunkers.base | (requires opencv) |
-| `stele_context/cli.py` | CLI entry point (`stele` command) | engine | (manual testing) |
+| `stele_context/cli.py` | CLI entry point (`stele-context` command) | engine | (manual testing) |
 | `stele_context/cli_metadata.py` | CLI metadata/annotation subcommands | engine | (manual testing) |
 | `stele_context/mcp_server.py` | HTTP REST server (42 tools, threaded) | mcp_handlers, tool_registry | test_mcp_server.py |
 | `stele_context/mcp_handlers.py` | HTTP tool dispatch and agent_id injection | tool_registry | test_mcp_server.py |

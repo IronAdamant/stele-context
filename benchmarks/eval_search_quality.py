@@ -1,4 +1,4 @@
-"""Search quality evaluation suite for Stele.
+"""Search quality evaluation suite for Stele Context.
 
 Creates a synthetic but realistic corpus of code and text documents,
 defines an eval set of queries with expected relevant documents, and
@@ -1306,7 +1306,7 @@ def _print_results(results: List[Dict]) -> None:
     sep = "  " + "-" * (col_q + col_cat + col_r5 + col_r10 + col_status + 8)
 
     print(f"\n{'=' * 78}")
-    print("  Stele Search Quality Evaluation")
+    print("  Stele Context Search Quality Evaluation")
     print(f"{'=' * 78}")
     print(f"\n  Corpus: {len(CORPUS)} documents | Queries: {len(EVAL_QUERIES)}")
     print(f"\n{header}")

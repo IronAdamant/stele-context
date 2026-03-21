@@ -75,13 +75,13 @@ def detect_git_common_dir(project_root: Path | None) -> Path | None:
 
 
 class CoordinationBackend:
-    """Cross-worktree coordination via shared SQLite in ``<git-common-dir>/stele/``.
+    """Cross-worktree coordination via shared SQLite in ``<git-common-dir>/stele-context/``.
 
     Manages agent registry, shared document locks, and conflict log.
     """
 
     def __init__(self, git_common_dir: Path):
-        self.base_dir = git_common_dir / "stele"
+        self.base_dir = git_common_dir / "stele-context"
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.base_dir / "coordination.db"
         self._init_database()

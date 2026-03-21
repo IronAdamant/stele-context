@@ -24,39 +24,39 @@ from stele_context.mcp_server import DEFAULT_MCP_PORT, MCPServer
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for Stele CLI."""
     parser = argparse.ArgumentParser(
-        prog="stele",
-        description="Stele — Local context cache for LLM agents",
+        prog="stele-context",
+        description="Stele Context — Local context cache for LLM agents",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Start the stdio MCP server (for Claude Desktop)
-  stele serve-mcp
+  stele-context serve-mcp
 
   # Start the HTTP REST server
-  stele serve --port 9876
+  stele-context serve --port 9876
 
   # Index documents
-  stele index document1.py document2.md
+  stele-context index document1.py document2.md
 
   # Semantic search
-  stele search "authentication logic" --top-k 5
+  stele-context search "authentication logic" --top-k 5
 
   # Show statistics
-  stele stats
+  stele-context stats
         """,
     )
 
     parser.add_argument(
         "--version",
         action="version",
-        version=f"stele {stele_version}",
+        version=f"stele-context {stele_version}",
     )
 
     parser.add_argument(
         "--storage-dir",
         type=str,
         default=None,
-        help="Storage directory (default: ~/.stele/)",
+        help="Storage directory (default: ~/.stele-context/)",
     )
 
     subparsers = parser.add_subparsers(

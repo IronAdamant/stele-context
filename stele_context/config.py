@@ -1,7 +1,7 @@
 """
 Configuration loader for Stele.
 
-Reads `.stele.toml` from the project root (if present) and provides
+Reads `.stele-context.toml` from the project root (if present) and provides
 defaults that can be overridden by constructor parameters.
 
 Uses stdlib tomllib (Python 3.11+) with a minimal fallback parser
@@ -35,7 +35,7 @@ def _parse_toml_minimal(text: str) -> dict[str, Any]:
       - blank lines
 
     Does NOT handle nested tables, inline tables, multi-line strings,
-    or other advanced TOML features.  Sufficient for .stele.toml.
+    or other advanced TOML features.  Sufficient for .stele-context.toml.
     """
     result: dict[str, Any] = {}
     current_section: str | None = None
@@ -121,15 +121,15 @@ def _parse_value(val: str) -> Any:
 
 
 def load_config(project_root: Path | None = None) -> dict[str, Any]:
-    """Load configuration from .stele.toml in the project root.
+    """Load configuration from .stele-context.toml in the project root.
 
-    Returns a flat dict of config values from the [stele] section.
+    Returns a flat dict of config values from the [stele-context] section.
     Returns empty dict if no config file exists or parsing fails.
     """
     if project_root is None:
         return {}
 
-    config_path = project_root / ".stele.toml"
+    config_path = project_root / ".stele-context.toml"
     if not config_path.is_file():
         return {}
 
@@ -146,8 +146,8 @@ def load_config(project_root: Path | None = None) -> dict[str, Any]:
     except Exception:
         return {}
 
-    # Extract [stele] section (or top-level if no section)
-    return data.get("stele", data)
+    # Extract [stele-context] section (or top-level if no section)
+    return data.get("stele-context", data)
 
 
 def apply_config(

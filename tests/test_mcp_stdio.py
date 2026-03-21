@@ -243,7 +243,7 @@ class TestMCPResourceLogic:
     """Tests for MCP resource handler backing logic."""
 
     def test_resource_documents_list(self, tmp_path):
-        """Test stele://documents resource returns indexed document data."""
+        """Test stele-context://documents resource returns indexed document data."""
         f1 = tmp_path / "a.py"
         f1.write_text("def a(): pass")
         f2 = tmp_path / "b.py"
@@ -259,7 +259,7 @@ class TestMCPResourceLogic:
         json.dumps(result, default=str)
 
     def test_resource_document_chunks(self, tmp_path):
-        """Test stele://document/{path} resource returns enriched chunks."""
+        """Test stele-context://document/{path} resource returns enriched chunks."""
         test_file = tmp_path / "test.py"
         test_file.write_text("def hello(): pass\ndef world(): pass")
 

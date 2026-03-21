@@ -4,7 +4,7 @@ Tests for worktree safety features added after session 17-18 stress test.
 Covers:
 - Project root detection (git repos, worktrees, no-git fallback)
 - Path normalization (project-relative, outside-project, absolute-passthrough)
-- Per-worktree storage isolation (project-local .stele/ directory)
+- Per-worktree storage isolation (project-local .stele-context/ directory)
 - Automatic lock acquisition when agent_id is set
 - MCP server agent_id injection
 """
@@ -127,7 +127,7 @@ class TestPathNormalization:
 
 class TestStorageIsolation:
     def test_default_storage_in_project_root(self, tmp_path):
-        """When no storage_dir, uses <project_root>/.stele/."""
+        """When no storage_dir, uses <project_root>/.stele-context/."""
         repo = tmp_path / "myrepo"
         repo.mkdir()
         (repo / ".git").mkdir()
@@ -135,21 +135,21 @@ class TestStorageIsolation:
         try:
             os.chdir(repo)
             e = Stele(project_root=str(repo))
-            assert ".stele" in str(e.storage.base_dir)
+            assert ".stele-context" in str(e.storage.base_dir)
             assert str(repo) in str(e.storage.base_dir)
         finally:
             os.chdir(orig)
 
     def test_env_var_overrides_default(self, tmp_path, monkeypatch):
-        """STELE_STORAGE_DIR env var takes priority over project root."""
+        """STELE_CONTEXT_STORAGE_DIR env var takes priority over project root."""
         custom = str(tmp_path / "custom_storage")
-        monkeypatch.setenv("STELE_STORAGE_DIR", custom)
+        monkeypatch.setenv("STELE_CONTEXT_STORAGE_DIR", custom)
         e = Stele(project_root=str(tmp_path))
         assert str(e.storage.base_dir) == custom
 
     def test_explicit_storage_dir_wins(self, tmp_path, monkeypatch):
         """Explicit storage_dir overrides both env var and project root."""
-        monkeypatch.setenv("STELE_STORAGE_DIR", "/should/not/use")
+        monkeypatch.setenv("STELE_CONTEXT_STORAGE_DIR", "/should/not/use")
         explicit = str(tmp_path / "explicit")
         e = Stele(
             storage_dir=explicit,
@@ -329,7 +329,7 @@ class TestMCPAgentId:
 
         stele = MagicMock()
         server = MCPServer(stele=stele, port=0)
-        assert server.agent_id.startswith("stele-http-")
+        assert server.agent_id.startswith("stele-context-http-")
         assert str(os.getpid()) in server.agent_id
 
     def test_http_server_custom_agent_id(self):

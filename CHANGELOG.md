@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Stele will be documented in this file.
+All notable changes to Stele Context will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,11 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.0] - 2026-03-21
 
 ### Added
-- **`.stele.toml` configuration** — Project-level config file loaded from `<project_root>/.stele.toml`. Supports `storage_dir`, `chunk_size`, `max_chunk_size`, `merge_threshold`, `change_threshold`, `search_alpha`, `skip_dirs` under a `[stele]` section. Uses stdlib `tomllib` (Python 3.11+) with a minimal fallback parser for 3.9-3.10. Explicit constructor params override config values.
-- **Tree-sitter code chunking** — `CodeChunker` now uses tree-sitter AST parsing for JavaScript, TypeScript, Java, C, C++, Go, Rust, Ruby, and PHP when installed (`pip install stele[tree-sitter]`). Falls back to regex patterns if tree-sitter is not available. Grammar packages are lazy-loaded and cached.
+- **`.stele-context.toml` configuration** — Project-level config file loaded from `<project_root>/.stele-context.toml`. Supports `storage_dir`, `chunk_size`, `max_chunk_size`, `merge_threshold`, `change_threshold`, `search_alpha`, `skip_dirs` under a `[stele-context]` section. Uses stdlib `tomllib` (Python 3.11+) with a minimal fallback parser for 3.9-3.10. Explicit constructor params override config values.
+- **Tree-sitter code chunking** — `CodeChunker` now uses tree-sitter AST parsing for JavaScript, TypeScript, Java, C, C++, Go, Rust, Ruby, and PHP when installed (`pip install stele-context[tree-sitter]`). Falls back to regex patterns if tree-sitter is not available. Grammar packages are lazy-loaded and cached.
 - **Chunk history query tools** — `get_chunk_history(chunk_id=, document_path=, limit=)` method on engine, exposed as MCP tools on both HTTP (28 tools total) and stdio (30 tools total) servers. Queries the `chunk_history` table for chunk version history.
 - **Performance benchmarks** — `benchmarks/` directory with `bench_chunking.py`, `bench_storage.py`, `bench_search.py`, and `run_all.py` runner. Zero external dependencies, standalone-runnable, `--quick` mode for CI.
-- **`[tree-sitter]` optional dependency group** — `pip install stele[tree-sitter]` installs tree-sitter + 9 language grammar packages.
+- **`[tree-sitter]` optional dependency group** — `pip install stele-context[tree-sitter]` installs tree-sitter + 9 language grammar packages.
 - **`tests/test_config.py`** (18 tests) — TOML parser, config loading, config merging, engine integration.
 - **`tests/test_chunk_history.py`** (8 tests) — Storage and engine chunk history queries.
 - **`tests/test_tree_sitter.py`** (13 tests) — Tree-sitter chunking for JS, TS, Go, Rust, Java, C, plus large files and edge cases.
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.0] - 2026-03-16
 
 ### Added
-- **Multi-agent support** — Multiple LLM agents can safely share one Stele instance (via HTTP) or use separate MCP stdio processes without data corruption or semantic conflicts.
+- **Multi-agent support** — Multiple LLM agents can safely share one Stele Context instance (via HTTP) or use separate MCP stdio processes without data corruption or semantic conflicts.
 - **Read-write lock** (`rwlock.py`) — `RWLock` protects all engine public methods. Read operations (search, get_context, get_stats, etc.) allow concurrent access. Write operations (index_documents, detect_changes, annotate, etc.) get exclusive access. Zero external dependencies (stdlib `threading` only).
 - **Threaded HTTP server** — `ThreadedHTTPServer(ThreadingMixIn, HTTPServer)` handles each request in a new thread. Safe because RWLock protects engine state.
 - **Agent-aware sessions** — `sessions` table gains `agent_id TEXT` column (added via migration). `create_session(id, agent_id=)`, `list_sessions(agent_id=)` for multi-agent tracking. All existing APIs backward-compatible (agent_id defaults to None).
@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`list_sessions` tool** — New MCP tool (HTTP + stdio) to query sessions, optionally filtered by agent_id.
 - **`agent_id` parameter** — Added to `index_documents()`, `detect_changes_and_update()`, `save_kv_state()`, and `remove_document()` for ownership checking.
 - **`expected_versions` parameter** — Added to `index_documents()` for optimistic locking.
-- **Cross-process file locking** — `index_store.py` uses `fcntl.flock()` on `.lock` sidecar files to prevent index corruption when multiple MCP stdio processes share `~/.stele/`. LOCK_EX for writes, LOCK_SH for reads. No-op fallback on Windows.
+- **Cross-process file locking** — `index_store.py` uses `fcntl.flock()` on `.lock` sidecar files to prevent index corruption when multiple MCP stdio processes share `~/.stele-context/`. LOCK_EX for writes, LOCK_SH for reads. No-op fallback on Windows.
 - **BM25 double-checked locking** — `_ensure_bm25()` uses a separate `threading.Lock` so concurrent readers don't race during lazy initialization.
 - **`tests/test_concurrency.py`** (12 tests) — RWLock semantics, concurrent searches, write-blocks-read, BM25 lazy-init thread safety, agent_id roundtrip, backward compat, cross-process file locking.
 - **`tests/test_conflicts.py`** (31 tests) — Per-document ownership (acquire, release, expiry, force-steal, ownership blocking), optimistic locking (version increment, stale rejection, CAS), conflict resolution (logging, filtering, pruning), backward compatibility, concurrent races.
@@ -177,7 +177,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.2] - 2026-03-13
 
 ### Added
-- **Persistent HNSW index serialization** — index saved to `~/.stele/indices/hnsw_index.json.zlib` after indexing or change detection. Loaded on startup if fresh (chunk IDs hash matches), otherwise rebuilt from SQLite. Eliminates redundant O(n) rebuild on every startup.
+- **Persistent HNSW index serialization** — index saved to `~/.stele-context/indices/hnsw_index.json.zlib` after indexing or change detection. Loaded on startup if fresh (chunk IDs hash matches), otherwise rebuilt from SQLite. Eliminates redundant O(n) rebuild on every startup.
 - **`to_dict()`/`from_dict()` on `HNSWIndex` and `VectorIndex`** — serialization methods for round-tripping the full graph structure
 - **`index_store.py` module** — `save_index()`, `load_index()`, `load_if_fresh()`, `compute_chunk_ids_hash()` functions for persistent index management
 - **14 new tests** in `test_index_store.py` — round-trip serialization, staleness detection, corrupt file handling, search-after-reload integration
@@ -224,8 +224,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Chunk content storage**: SQLite `chunks` table now has `content TEXT` column; chunk text retrievable without re-reading files
 - **`get_chunk_content()`** and **`search_chunks()`** methods on StorageBackend
 - **`save_state`/`load_state` aliases** on Stele (clearer naming alongside existing `save_kv_state`)
-- **MCP SDK optional dependency**: `pip install stele[mcp]`
-- **`stele-mcp` entry point**: Direct entry point for MCP stdio server
+- **MCP SDK optional dependency**: `pip install stele-context[mcp]`
+- **`stele-context-mcp` entry point**: Direct entry point for MCP stdio server
 - **4 new test files**: `test_engine.py`, `test_session.py`, `test_mcp_stdio.py`, `test_storage_migration.py`
 
 ### Changed
@@ -322,7 +322,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lazy imports for optional dependencies (graceful fallback if not installed)
 
 ### Changed
-- Core Stele class now initializes and manages multiple chunkers
+- Core Stele Context class now initializes and manages multiple chunkers
 - `index_documents()` automatically selects appropriate chunker based on file type
 - `detect_modality()` method to identify file type
 - README updated with multi-modal documentation and supported formats
@@ -353,7 +353,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-03-12
 
 ### Added
-- Initial release of Stele
+- Initial release of Stele Context
 - Dynamic semantic chunking with intelligent merging
 - Hybrid indexing (SHA-256 hashes + semantic signatures)
 - Change detection with lazy double-check
@@ -392,7 +392,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `prune_chunks(session_id, max_tokens)` - Prune low-relevance chunks
 
 ### Storage
-- Location: `~/.stele/` (configurable)
+- Location: `~/.stele-context/` (configurable)
 - Database: SQLite with WAL mode
 - KV-cache: Serialized tensors in session directories
 - Metadata: Chunks, documents, sessions, session-chunks
@@ -450,10 +450,10 @@ This is the initial release, no upgrade needed.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for information on how to contribute to Stele.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for information on how to contribute to Stele Context.
 
 ---
 
 ## License
 
-Stele is released under the MIT License. See [LICENSE](LICENSE) for details.
+Stele Context is released under the MIT License. See [LICENSE](LICENSE) for details.
