@@ -94,9 +94,9 @@ stele = "stele.cli:main"
 stele-mcp = "stele.mcp_stdio:main"
 
 [project.urls]
-Homepage = "https://github.com/IronAdamant/Stele"
-Repository = "https://github.com/IronAdamant/Stele"
-Documentation = "https://github.com/IronAdamant/Stele#readme"
+Homepage = "https://github.com/IronAdamant/stele-context"
+Repository = "https://github.com/IronAdamant/stele-context"
+Documentation = "https://github.com/IronAdamant/stele-context#readme"
 
 [tool.coverage.run]
 omit = [

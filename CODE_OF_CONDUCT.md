@@ -60,7 +60,7 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement via GitHub Issues
-on the [Stele repository](https://github.com/IronAdamant/Stele).
+on the [Stele repository](https://github.com/IronAdamant/stele-context).
 
 All complaints will be reviewed and investigated promptly and fairly.
 

@@ -5,8 +5,8 @@
 [![PyPI](https://img.shields.io/pypi/v/stele-context.svg)](https://pypi.org/project/stele-context/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/Stele)
-[![Tests](https://github.com/IronAdamant/Stele/actions/workflows/test.yml/badge.svg)](https://github.com/IronAdamant/Stele/actions)
+[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/stele-context)
+[![Tests](https://github.com/IronAdamant/stele-context/actions/workflows/test.yml/badge.svg)](https://github.com/IronAdamant/stele-context/actions)
 
 Stele helps LLM agents avoid re-reading unchanged files by caching chunk data with semantic search. Documents are routed through modality-specific chunkers, chunk content is stored in SQLite, and an HNSW vector index enables fast O(log n) retrieval. Only modified chunks trigger reprocessing.
 
@@ -94,12 +94,11 @@ pip install stele-context[all]            # everything
 ```
 
 > **Note:** The PyPI package is `stele-context` but the import name is `stele`.
-> A [transfer request](https://github.com/pypi/support/issues/9865) for the `stele` name is pending.
 
 ```bash
 # From source
-git clone https://github.com/IronAdamant/Stele.git
-cd Stele
+git clone https://github.com/IronAdamant/stele-context.git
+cd stele-context
 pip install -e .
 
 # With dev dependencies
