@@ -597,6 +597,43 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
                 },
             ),
             Tool(
+                name="store_semantic_summary",
+                description="Store agent's semantic summary for a chunk — improves search using agent's understanding",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "chunk_id": {
+                            "type": "string",
+                            "description": "Chunk ID to annotate",
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "Semantic description (e.g. 'JWT middleware that validates tokens')",
+                        },
+                    },
+                    "required": ["chunk_id", "summary"],
+                },
+            ),
+            Tool(
+                name="store_embedding",
+                description="Store a raw embedding vector for a chunk — for agents with embedding API access",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "chunk_id": {
+                            "type": "string",
+                            "description": "Chunk ID to update",
+                        },
+                        "vector": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "description": "Embedding vector (normalized to unit length)",
+                        },
+                    },
+                    "required": ["chunk_id", "vector"],
+                },
+            ),
+            Tool(
                 name="get_chunk_history",
                 description="Get chunk version history — shows how chunks changed over time",
                 inputSchema={
@@ -788,6 +825,16 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
                 result = engine.check_environment()
             elif name == "clean_bytecache":
                 result = engine.clean_bytecache()
+            elif name == "store_semantic_summary":
+                result = engine.store_semantic_summary(
+                    chunk_id=arguments["chunk_id"],
+                    summary=arguments["summary"],
+                )
+            elif name == "store_embedding":
+                result = engine.store_embedding(
+                    chunk_id=arguments["chunk_id"],
+                    vector=arguments["vector"],
+                )
             elif name == "get_chunk_history":
                 result = engine.get_chunk_history(
                     chunk_id=arguments.get("chunk_id"),

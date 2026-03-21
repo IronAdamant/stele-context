@@ -460,6 +460,41 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "required": [],
         },
     },
+    "store_semantic_summary": {
+        "description": "Store an agent-supplied semantic summary for a chunk. Improves search by using the agent's understanding.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "chunk_id": {
+                    "type": "string",
+                    "description": "Chunk ID to annotate with semantic summary",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Agent's semantic description of the chunk (e.g. 'JWT middleware that validates tokens')",
+                },
+            },
+            "required": ["chunk_id", "summary"],
+        },
+    },
+    "store_embedding": {
+        "description": "Store a raw embedding vector for a chunk. For agents with access to embedding APIs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "chunk_id": {
+                    "type": "string",
+                    "description": "Chunk ID to update",
+                },
+                "vector": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "Embedding vector (will be normalized to unit length)",
+                },
+            },
+            "required": ["chunk_id", "vector"],
+        },
+    },
     "get_chunk_history": {
         "description": "Get chunk version history. Shows how chunks changed over time.",
         "parameters": {
@@ -606,6 +641,8 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "list_agents": self.stele.list_agents,
             "environment_check": self.stele.check_environment,
             "clean_bytecache": self.stele.clean_bytecache,
+            "store_semantic_summary": self.stele.store_semantic_summary,
+            "store_embedding": self.stele.store_embedding,
             "get_chunk_history": self.stele.get_chunk_history,
             "get_notifications": self.stele.get_notifications,
         }

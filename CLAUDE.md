@@ -22,8 +22,8 @@ Stele (engine.py) -- main orchestrator
 
 APIs:
   |-- CLI (cli.py + cli_metadata.py)
-  |-- HTTP REST (mcp_server.py, 28 tools, threaded, dynamic discovery)
-  \-- MCP stdio (mcp_stdio.py, 30 tools, JSON-RPC for Claude Desktop)
+  |-- HTTP REST (mcp_server.py, 30 tools, threaded, dynamic discovery)
+  \-- MCP stdio (mcp_stdio.py, 32 tools, JSON-RPC for Claude Desktop)
 
 Concurrency:
   |-- RWLock (rwlock.py) -- read-write lock for engine thread safety
@@ -97,9 +97,11 @@ Backward compat: core.py re-exports Stele + Chunk
 - **Tree-sitter code chunking**: `CodeChunker` tries tree-sitter for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP when installed (`pip install stele[tree-sitter]`). Falls back to regex if not available. Uses `_DEFINITION_TYPES` dict to identify top-level node types per language. Grammar packages are lazy-loaded and cached.
 - **Chunk history query**: `get_chunk_history(chunk_id=, document_path=, limit=)` exposes the `chunk_history` table via engine and both MCP servers. History tracks previous versions when the same chunk_id is updated in-place.
 - **Performance benchmarks**: `benchmarks/` directory with `bench_chunking.py`, `bench_storage.py`, `bench_search.py`, and `run_all.py` runner. Zero deps, standalone-runnable, `--quick` mode for CI.
+- **Agent-supplied semantic embeddings**: Two-tier signature system. Tier 1 (always): 128-dim statistical signatures for change detection. Tier 2 (optional): agent-supplied semantic summaries or raw vectors for search quality. `store_semantic_summary(chunk_id, summary)` computes signature from agent's description; `store_embedding(chunk_id, vector)` stores raw vectors. HNSW index uses agent signature when available, falls back to statistical. Zero new dependencies — the agent IS the embedding model.
 
 ## SQLite Tables
 
+`chunks` columns include: `semantic_summary TEXT`, `agent_signature BLOB` (agent-supplied)
 `chunks`, `chunk_history`, `documents` -- core storage
 `sessions` (+ `agent_id`), `session_chunks` -- session lifecycle (SessionStorage)
 `annotations`, `change_history` -- metadata (MetadataStorage)
@@ -126,7 +128,7 @@ Coordination DB (`<git-common-dir>/stele/coordination.db`):
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 400 tests (399 pass, 1 skipped without mcp SDK)
+pytest                    # 412 tests (411 pass, 1 skipped without mcp SDK)
 mypy stele/
 ruff check stele/
 ```

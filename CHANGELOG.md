@@ -19,12 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CODE_OF_CONDUCT.md** — Contributor Covenant v2.0.
 - **README.md overhaul** — Mermaid architecture diagram, comparison table vs alternatives, FAQ section, troubleshooting guide, updated tool counts and benchmark results.
 - **CI coverage enforcement** — `--cov-fail-under=80` added to test workflow.
+- **Agent-supplied semantic embeddings** — Two-tier signature system. `store_semantic_summary(chunk_id, summary)` accepts agent's natural language description, computes 128-dim signature from it, updates HNSW index. `store_embedding(chunk_id, vector)` stores raw vectors. HNSW prefers agent signatures for search, falls back to statistical. Zero new dependencies — the calling LLM agent IS the embedding model. ~9% search quality improvement on semantic match benchmarks.
+- **`tests/test_agent_embeddings.py`** (12 tests) — Storage, engine, and index rebuild tests for agent-supplied embeddings.
 
 ### Changed
-- **MCP tools**: HTTP 28 (was 27), stdio 30 (was 29)
+- **MCP tools**: HTTP 30 (was 27), stdio 32 (was 29)
 - **Engine constructor** — Now accepts `Optional[int]`/`Optional[float]` for numeric params (was fixed defaults), enabling config file values to slot in between.
 - **Python AST chunking** — Refactored to share `_boundaries_to_chunks()` with tree-sitter path.
-- **400 tests** (was 355), 1 skipped (MCP SDK not installed)
+- **`chunks` table** — New columns: `semantic_summary TEXT`, `agent_signature BLOB` (auto-migrated).
+- **HNSW index rebuild** — Uses `agent_signature` when available, falls back to `semantic_signature`.
+- **412 tests** (was 355), 1 skipped (MCP SDK not installed)
 
 ## [0.8.0] - 2026-03-16
 

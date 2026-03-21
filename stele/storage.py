@@ -22,7 +22,7 @@ from stele.metadata_storage import MetadataStorage
 from stele.session_storage import SessionStorage
 from stele.symbol_storage import SymbolStorage
 
-from stele.chunkers.numpy_compat import sig_to_bytes
+from stele.chunkers.numpy_compat import sig_to_bytes, sig_from_bytes
 
 
 class StorageBackend:
@@ -191,6 +191,16 @@ class StorageBackend:
             if "staleness_score" not in columns:
                 conn.execute(
                     "ALTER TABLE chunks ADD COLUMN staleness_score REAL DEFAULT 0.0"
+                )
+                changed = True
+            if "semantic_summary" not in columns:
+                conn.execute(
+                    "ALTER TABLE chunks ADD COLUMN semantic_summary TEXT"
+                )
+                changed = True
+            if "agent_signature" not in columns:
+                conn.execute(
+                    "ALTER TABLE chunks ADD COLUMN agent_signature BLOB"
                 )
                 changed = True
 
@@ -577,6 +587,69 @@ class StorageBackend:
     def get_symbol_stats(self) -> Dict[str, Any]:
         """Get symbol and edge statistics."""
         return self._symbol_storage.get_symbol_stats()
+
+    # Agent-supplied semantic embedding methods
+
+    def store_semantic_summary(
+        self,
+        chunk_id: str,
+        summary: str,
+        agent_signature: Any,
+    ) -> bool:
+        """Store an agent-supplied semantic summary and its computed signature.
+
+        Args:
+            chunk_id: Chunk to annotate with semantic summary
+            summary: Agent's semantic description of the chunk
+            agent_signature: 128-dim signature computed from the summary
+
+        Returns:
+            True if chunk was found and updated, False otherwise.
+        """
+        sig_bytes = sig_to_bytes(agent_signature)
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE chunks SET semantic_summary = ?, agent_signature = ? "
+                "WHERE chunk_id = ?",
+                (summary, sig_bytes, chunk_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def store_agent_signature(
+        self,
+        chunk_id: str,
+        agent_signature: Any,
+    ) -> bool:
+        """Store a raw agent-supplied embedding vector.
+
+        Args:
+            chunk_id: Chunk to update
+            agent_signature: 128-dim vector from agent
+
+        Returns:
+            True if chunk was found and updated, False otherwise.
+        """
+        sig_bytes = sig_to_bytes(agent_signature)
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "UPDATE chunks SET agent_signature = ? WHERE chunk_id = ?",
+                (sig_bytes, chunk_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_agent_signature(self, chunk_id: str) -> Optional[Any]:
+        """Get agent-supplied signature for a chunk, if any."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT agent_signature FROM chunks WHERE chunk_id = ?",
+                (chunk_id,),
+            )
+            row = cursor.fetchone()
+            if row is None or row[0] is None:
+                return None
+            return sig_from_bytes(row[0])
 
     # Chunk history methods
 

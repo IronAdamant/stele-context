@@ -270,7 +270,9 @@ class Stele:
         index = VectorIndex()
         for chunk in self.storage.search_chunks():
             try:
-                sig = sig_from_bytes(chunk["semantic_signature"])
+                # Prefer agent-supplied signature for search quality
+                raw_sig = chunk.get("agent_signature") or chunk["semantic_signature"]
+                sig = sig_from_bytes(raw_sig)
                 index.add_chunk(chunk["chunk_id"], sig_to_list(sig))
             except Exception:
                 continue
@@ -932,6 +934,86 @@ class Stele:
             if document_path is not None:
                 document_path = self._normalize_path(document_path)
             return self.storage.get_chunk_history(chunk_id, document_path, limit)
+
+    def store_semantic_summary(
+        self,
+        chunk_id: str,
+        summary: str,
+    ) -> Dict[str, Any]:
+        """Store an agent-supplied semantic summary for a chunk.
+
+        The agent provides a natural language description of what the chunk
+        does.  Stele computes a 128-dim signature from the summary and
+        updates the HNSW index with it, improving search quality.
+
+        The original statistical signature is preserved for change detection.
+
+        Args:
+            chunk_id: Chunk to annotate
+            summary: Agent's semantic description (e.g. "JWT middleware
+                that validates tokens and attaches user to request context")
+
+        Returns:
+            Dict with status and chunk_id.
+        """
+        with self._lock.write_lock():
+            # Compute signature from the summary text
+            summary_chunk = Chunk(
+                content=summary,
+                modality="text",
+                start_pos=0,
+                end_pos=len(summary),
+                document_path="<summary>",
+            )
+            agent_sig = sig_to_list(summary_chunk.semantic_signature)
+
+            ok = self.storage.store_semantic_summary(
+                chunk_id, summary, agent_sig,
+            )
+            if not ok:
+                return {"stored": False, "error": "chunk not found"}
+
+            # Update HNSW index with the agent-derived signature
+            self.vector_index.remove_chunk(chunk_id)
+            self.vector_index.add_chunk(chunk_id, agent_sig)
+            self._save_index()
+
+            return {"stored": True, "chunk_id": chunk_id}
+
+    def store_embedding(
+        self,
+        chunk_id: str,
+        vector: List[float],
+    ) -> Dict[str, Any]:
+        """Store a raw embedding vector for a chunk.
+
+        For agents that have direct access to embedding APIs.
+        The vector replaces the statistical signature in the HNSW
+        index for better search quality.
+
+        Args:
+            chunk_id: Chunk to update
+            vector: Embedding vector (will be normalized to unit length)
+
+        Returns:
+            Dict with status and chunk_id.
+        """
+        with self._lock.write_lock():
+            # Normalize to unit vector
+            norm = sum(x * x for x in vector) ** 0.5
+            if norm > 0:
+                vector = [x / norm for x in vector]
+
+            ok = self.storage.store_agent_signature(chunk_id, vector)
+            if not ok:
+                return {"stored": False, "error": "chunk not found"}
+
+            # Update HNSW index
+            self.vector_index.remove_chunk(chunk_id)
+            self.vector_index.add_chunk(chunk_id, vector)
+            self._save_index()
+
+            return {"stored": True, "chunk_id": chunk_id}
 
     def _classify_chunks_for_change(
         self, new_chunks: list, old_chunks_meta: list,
