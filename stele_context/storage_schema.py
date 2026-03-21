@@ -177,8 +177,6 @@ def init_database(db_path: Path) -> None:
 def migrate_database(db_path: Path) -> None:
     """Run database migrations for schema changes."""
     with connect(db_path) as conn:
-        changed = False
-
         # Chunks table migrations
         cursor = conn.execute("PRAGMA table_info(chunks)")
         columns = {row[1] for row in cursor.fetchall()}
@@ -194,7 +192,6 @@ def migrate_database(db_path: Path) -> None:
         ]:
             if col not in columns:
                 conn.execute(ddl)
-                changed = True
 
         # Sessions table: agent_id
         cursor = conn.execute("PRAGMA table_info(sessions)")
@@ -204,7 +201,6 @@ def migrate_database(db_path: Path) -> None:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id)"
             )
-            changed = True
 
         # Documents table: ownership + optimistic locking
         cursor = conn.execute("PRAGMA table_info(documents)")
@@ -213,12 +209,10 @@ def migrate_database(db_path: Path) -> None:
             conn.execute("ALTER TABLE documents ADD COLUMN locked_by TEXT")
             conn.execute("ALTER TABLE documents ADD COLUMN locked_at REAL")
             conn.execute("ALTER TABLE documents ADD COLUMN lock_ttl REAL DEFAULT 300.0")
-            changed = True
         if "doc_version" not in doc_columns:
             conn.execute(
                 "ALTER TABLE documents ADD COLUMN doc_version INTEGER DEFAULT 1"
             )
-            changed = True
 
         # Index on staleness_score for fast stale-chunk queries
         conn.execute(
@@ -248,6 +242,3 @@ def migrate_database(db_path: Path) -> None:
             "CREATE INDEX IF NOT EXISTS idx_conflicts_time "
             "ON document_conflicts(created_at)"
         )
-
-        if changed:
-            conn.commit()

@@ -1,5 +1,5 @@
 """
-Stele — Local context cache for LLM agents with semantic chunking
+Stele Context — Local context cache for LLM agents with semantic chunking
 and vector search.
 
 Smart context cache that avoids re-reading unchanged files by caching
@@ -18,8 +18,8 @@ Key Features:
 All operations are 100% offline and local-only. No internet access required.
 """
 
-__version__ = "0.10.3"
-__author__ = "Stele Contributors"
+__version__ = "0.10.4"
+__author__ = "Stele Context Contributors"
 __license__ = "MIT"
 
 from stele_context.engine import Stele

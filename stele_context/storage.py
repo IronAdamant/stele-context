@@ -14,17 +14,22 @@ All storage is local-only with zero network dependencies.
 
 from __future__ import annotations
 
+import re as _re
 import sqlite3
 import time
 from pathlib import Path
 from typing import Any
 
 from stele_context.document_lock_storage import DocumentLockStorage
-from stele_context.storage_schema import connect, init_pool
+from stele_context.storage_schema import (
+    connect,
+    init_pool,
+    init_database,
+    migrate_database,
+)
 from stele_context.metadata_storage import MetadataStorage
 from stele_context.session_storage import SessionStorage
 from stele_context.storage_delegates import StorageDelegatesMixin
-from stele_context.storage_schema import init_database, migrate_database
 from stele_context.symbol_storage import SymbolStorage
 
 from stele_context.chunkers.numpy_compat import sig_to_bytes, sig_from_bytes
@@ -229,8 +234,6 @@ class StorageBackend(StorageDelegatesMixin):
         Returns matching chunks with match details. Uses SQLite LIKE
         for substring mode, Python re for regex mode. Zero dependencies.
         """
-        import re as _re
-
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
@@ -547,10 +550,8 @@ class StorageBackend(StorageDelegatesMixin):
         chunks = self.get_document_chunks(document_path)
         chunk_ids = [c["chunk_id"] for c in chunks]
 
-        # Clean up symbols and edges
+        # Clean up document-level symbols (chunk symbols handled by delete_chunks)
         self._symbol_storage.clear_document_symbols(document_path)
-        if chunk_ids:
-            self._symbol_storage.clear_chunk_edges(chunk_ids)
 
         with connect(self.db_path) as conn:
             # Delete document-level annotations

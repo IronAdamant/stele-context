@@ -139,7 +139,6 @@ class CoordinationBackend:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sc_time ON shared_conflicts(created_at)"
             )
-            conn.commit()
 
     # -- Agent registry (delegated to stele_context.agent_registry) --------------------
 
@@ -197,7 +196,6 @@ class CoordinationBackend:
                         "WHERE document_path = ?",
                         (now, ttl, document_path),
                     )
-                    conn.commit()
                     return {"acquired": True}
 
                 if not expired and not force:
@@ -245,7 +243,6 @@ class CoordinationBackend:
                     ),
                 )
 
-            conn.commit()
             return {"acquired": True}
 
     def release_lock(self, document_path: str, agent_id: str) -> dict[str, Any]:
@@ -263,7 +260,6 @@ class CoordinationBackend:
                 "DELETE FROM shared_locks WHERE document_path = ?",
                 (document_path,),
             )
-            conn.commit()
             return {"released": True}
 
     def get_lock_status(self, document_path: str) -> dict[str, Any]:
@@ -284,7 +280,6 @@ class CoordinationBackend:
                     "DELETE FROM shared_locks WHERE document_path = ?",
                     (document_path,),
                 )
-                conn.commit()
                 return {"locked": False}
 
             return {
@@ -330,39 +325,6 @@ class CoordinationBackend:
 
     # -- Conflict log ---------------------------------------------------------
 
-    def _record_conflict(
-        self,
-        conn_or_none: sqlite3.Connection | None,
-        document_path: str,
-        agent_a: str,
-        agent_b: str,
-        conflict_type: str,
-        expected_version: int | None = None,
-        actual_version: int | None = None,
-        resolution: str = "rejected",
-        details: dict[str, Any] | None = None,
-    ) -> int | None:
-        conn = conn_or_none if conn_or_none is not None else self._connect()
-        try:
-            result = lock_ops.record_conflict(
-                conn,
-                "shared_conflicts",
-                document_path,
-                agent_a,
-                agent_b,
-                conflict_type,
-                expected_version,
-                actual_version,
-                resolution,
-                details,
-            )
-            if conn_or_none is None:
-                conn.commit()
-            return result
-        finally:
-            if conn_or_none is None:
-                conn.close()
-
     def record_conflict(
         self,
         document_path: str,
@@ -375,17 +337,19 @@ class CoordinationBackend:
         details: dict[str, Any] | None = None,
     ) -> int | None:
         """Log a conflict event to the shared conflict table."""
-        return self._record_conflict(
-            None,
-            document_path,
-            agent_a,
-            agent_b,
-            conflict_type,
-            expected_version,
-            actual_version,
-            resolution,
-            details,
-        )
+        with self._connect() as conn:
+            return lock_ops.record_conflict(
+                conn,
+                "shared_conflicts",
+                document_path,
+                agent_a,
+                agent_b,
+                conflict_type,
+                expected_version,
+                actual_version,
+                resolution,
+                details,
+            )
 
     def get_conflicts(
         self,

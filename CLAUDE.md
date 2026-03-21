@@ -31,7 +31,7 @@ Stele Context (engine.py) -- thin facade orchestrator
 
 APIs:
   |-- CLI (cli.py + cli_metadata.py)
-  |-- HTTP REST (mcp_server.py + mcp_handlers.py)
+  |-- HTTP REST (mcp_server.py, mcp_handlers.py is backward-compat shim)
   |-- MCP stdio (mcp_stdio.py)
   |-- Tool registry (tool_registry.py) -- shared dispatch + schemas
   \-- Tool definitions (mcp_tool_defs.py + mcp_tool_defs_ext.py)
@@ -116,7 +116,7 @@ Backward compat: core.py re-exports Stele + Chunk
 - **Staleness index**: `idx_chunks_staleness` on `chunks(staleness_score)` added during migration for fast stale-chunk queries.
 - **Text pattern search**: `search_text(pattern, regex=, document_path=, limit=)` provides perfect-recall exact/regex search across stored chunk content. Complements semantic (HNSW) and keyword (BM25) search. Uses `str.find()` for substring, stdlib `re` for regex. Zero dependencies. Key use case: verify all usages before renaming/removing symbols.
 - **Unified tool registry**: `tool_registry.py` is the single source of truth for tool dispatch (`build_tool_map`), write-tool sets (`WRITE_TOOLS`), and HTTP schema generation (`get_http_schemas`). Both servers expose identical 42-tool sets with modality_flags for utility tools. `mcp_schemas.py` was deleted; schemas generated from `mcp_tool_defs.py`. `WRITE_TOOLS` includes lock operations (`acquire_document_lock`, `release_document_lock`, `refresh_document_lock`, `release_agent_locks`) for auto agent_id injection.
-- **No redundant commits**: Storage modules (`storage.py`, `session_storage.py`, `metadata_storage.py`, `symbol_storage.py`, `document_lock_storage.py`) never call `conn.commit()` inside `connect()` context manager blocks — the context manager auto-commits on successful exit.
+- **No redundant commits**: All modules using `connect()` or `with self._connect() as conn:` context managers never call `conn.commit()` inside the block — the context manager auto-commits on successful exit. This applies to storage modules, coordination modules (`coordination.py`, `agent_registry.py`, `change_notifications.py`), and `storage_schema.py`.
 - **MCP stdio server bundle**: `_ServerBundle` dataclass holds server, engine, and agent_id together. Replaces monkey-patching `_stele_engine`/`_stele_agent_id` onto the MCP Server object.
 - **Index store context managers**: Lock file handles in `index_store.py` use `with` statements for guaranteed cleanup. Read path uses nested try/finally to ensure unlock before close.
 
@@ -150,7 +150,7 @@ Coordination DB (`<git-common-dir>/stele-context/coordination.db`):
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 574 tests (573 pass, 1 skipped without mcp SDK)
+pytest                    # 579 tests (579 pass, 1 skipped without mcp SDK)
 mypy stele_context/
 ruff check stele_context/
 ```

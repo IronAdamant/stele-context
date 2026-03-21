@@ -320,7 +320,6 @@ def index_documents_unlocked(
                     continue
 
             modality = detect_modality(str(abs_path))
-            file_content: Any
             file_content, content_hash = read_and_hash(abs_path, modality)
 
             if existing_doc and not force_reindex:
@@ -425,9 +424,8 @@ def expand_paths(
             expanded.append(normalize_path(str(p)))
         elif p.is_dir():
             for child in sorted(p.rglob("*")):
-                if any(part in skip_dirs for part in child.relative_to(p).parts):
-                    continue
-                if any(part.startswith(".") for part in child.relative_to(p).parts):
+                rel_parts = child.relative_to(p).parts
+                if any(part in skip_dirs or part.startswith(".") for part in rel_parts):
                     continue
                 if child.is_file() and child.suffix.lower() in supported:
                     expanded.append(normalize_path(str(child)))

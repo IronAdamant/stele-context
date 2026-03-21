@@ -427,15 +427,15 @@ def init_chunkers(chunk_size: int, max_chunk_size: int) -> dict[str, Any]:
         "text": TextChunker(chunk_size=chunk_size, max_chunk_size=max_chunk_size),
         "code": CodeChunker(chunk_size=chunk_size, max_chunk_size=max_chunk_size),
     }
-    if HAS_IMAGE_CHUNKER and ImageChunker is not None:
+    if HAS_IMAGE_CHUNKER:
         chunkers["image"] = ImageChunker()
-    if HAS_PDF_CHUNKER and PDFChunker is not None:
+    if HAS_PDF_CHUNKER:
         chunkers["pdf"] = PDFChunker(
             chunk_size=chunk_size, max_chunk_size=max_chunk_size
         )
-    if HAS_AUDIO_CHUNKER and AudioChunker is not None:
+    if HAS_AUDIO_CHUNKER:
         chunkers["audio"] = AudioChunker()
-    if HAS_VIDEO_CHUNKER and VideoChunker is not None:
+    if HAS_VIDEO_CHUNKER:
         chunkers["video"] = VideoChunker()
     return chunkers
 

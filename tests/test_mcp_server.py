@@ -57,7 +57,7 @@ class TestHTTPServer:
             status, data = self._get(f"{url}/tools")
             assert status == 200
             tool_names = {t["name"] for t in data["tools"]}
-            # Must contain all 15 tools
+            # Must contain all 42 tools
             assert "index" in tool_names
             assert "search" in tool_names
             assert "find_references" in tool_names

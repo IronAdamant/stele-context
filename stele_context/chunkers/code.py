@@ -313,11 +313,7 @@ class CodeChunker(BaseChunker):
         for node in ast.iter_child_nodes(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 start_line = node.lineno - 1
-                end_line = (
-                    node.end_lineno
-                    if hasattr(node, "end_lineno") and node.end_lineno
-                    else start_line + 1
-                )
+                end_line = node.end_lineno if node.end_lineno else start_line + 1
                 # Convert line ranges to byte offsets for shared boundary logic
                 start_byte = sum(len(ln) for ln in lines[:start_line])
                 end_byte = sum(len(ln) for ln in lines[:end_line])

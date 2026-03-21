@@ -34,7 +34,6 @@ def init_agents_table(connect: ConnectFn) -> None:
                 status TEXT DEFAULT 'active'
             )
         """)
-        conn.commit()
 
 
 def register_agent(
@@ -61,7 +60,6 @@ def register_agent(
             """,
             (agent_id, worktree_root, now, now, pid),
         )
-        conn.commit()
     return {"registered": True, "agent_id": agent_id}
 
 
@@ -74,7 +72,6 @@ def heartbeat(connect: ConnectFn, agent_id: str) -> dict[str, Any]:
             "WHERE agent_id = ? AND status = 'active'",
             (now, agent_id),
         )
-        conn.commit()
         return {"updated": cursor.rowcount > 0}
 
 
@@ -89,7 +86,6 @@ def deregister_agent(connect: ConnectFn, agent_id: str) -> dict[str, Any]:
             "DELETE FROM shared_locks WHERE locked_by = ?",
             (agent_id,),
         )
-        conn.commit()
         return {"deregistered": True, "locks_released": cursor.rowcount}
 
 
@@ -143,7 +139,6 @@ def reap_stale_agents(
                 f"UPDATE agents SET status = 'stopped' WHERE agent_id IN ({ph})",
                 stale_ids,
             )
-            conn.commit()
 
         return {"reaped_count": len(stale_ids), "agents": stale_ids}
 

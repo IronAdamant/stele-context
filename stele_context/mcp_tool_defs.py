@@ -360,6 +360,7 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                     "description": "Chunk ID",
                 },
                 "kv_data": {
+                    "type": "object",
                     "description": "KV-cache data to save",
                 },
             },

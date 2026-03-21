@@ -30,18 +30,41 @@ from stele_context.chunkers import (
     HAS_AUDIO_CHUNKER,
     HAS_VIDEO_CHUNKER,
 )
-from stele_context.mcp_handlers import (
-    _TOOL_SCHEMAS,
+from stele_context.tool_registry import (
+    WRITE_TOOLS,
     build_tool_map,
-    execute_tool,
+    get_http_schemas,
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
 logger = logging.getLogger(__name__)
+
+_TOOL_SCHEMAS = get_http_schemas()
+
+
+def execute_tool(
+    tool_name: str,
+    parameters: dict[str, Any],
+    tool_map: dict[str, Any],
+    server_agent_id: str = "",
+) -> dict[str, Any]:
+    """Execute a tool by name, returning a JSON-serialisable result dict."""
+    if tool_name in WRITE_TOOLS and "agent_id" not in parameters and server_agent_id:
+        parameters = {**parameters, "agent_id": server_agent_id}
+
+    if tool_name not in tool_map:
+        return {
+            "error": f"Unknown tool: {tool_name}",
+            "available_tools": list(tool_map.keys()),
+        }
+
+    try:
+        result = tool_map[tool_name](**parameters)
+        return {"success": True, "result": result}
+    except TypeError as e:
+        return {"error": f"Invalid parameters for {tool_name}: {e}"}
+    except Exception as e:
+        return {"error": f"Tool execution failed: {e}"}
+
 
 DEFAULT_MCP_PORT = 9876
 HEARTBEAT_INTERVAL = 30
@@ -211,6 +234,10 @@ class MCPServer:
 
         self.server = ThreadedHTTPServer((self.host, self.port), handler_factory)
 
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(message)s",
+        )
         logger.info(f"Stele MCP server starting on http://{self.host}:{self.port}")
         logger.info("Available endpoints:")
         logger.info("  GET  /tools   - Discover available tools")

@@ -7,7 +7,6 @@ Implements the standard 5-step Porter stemming algorithm as described in:
 Public API
 ----------
 stem(word)              -- stem a single word
-stem_tokens(tokens)     -- stem a list of words
 split_identifier(name)  -- split camelCase / snake_case into component words
 """
 
@@ -82,11 +81,6 @@ def _ends_cvc(word: str) -> bool:
         and not _is_vowel(word, len(word) - 3)
         and word[-1] not in "wxy"
     )
-
-
-def _replace_suffix(word: str, suffix: str, replacement: str) -> str:
-    """Replace *suffix* at the end of *word* with *replacement*."""
-    return word[: -len(suffix)] + replacement
 
 
 # ---------------------------------------------------------------------------
@@ -285,15 +279,6 @@ def stem(word: str) -> str:
     word = _step5a(word)
     word = _step5b(word)
     return word
-
-
-def stem_tokens(tokens: list[str]) -> list[str]:
-    """Stem each token in *tokens* and return the list of stems.
-
-    >>> stem_tokens(["running", "dogs", "happily"])
-    ['run', 'dog', 'happili']
-    """
-    return [stem(t) for t in tokens]
 
 
 # ---------------------------------------------------------------------------

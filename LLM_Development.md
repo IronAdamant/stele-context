@@ -2,6 +2,43 @@
 
 Chronological record of development activity on Stele Context, maintained for LLM agent context.
 
+## 2026-03-22 - v0.10.4 Comprehensive Codebase Cleanup
+
+### Dead code removed
+- Removed `_replace_suffix()` from `stemmer.py` (defined but never called)
+- Removed `stem_tokens()` from `stemmer.py` (defined but never imported/called)
+- Removed redundant `changed` tracking variable from `storage_schema.migrate_database()`
+- Removed duplicate `clear_chunk_edges()` call in `storage.remove_document()` (already handled by `delete_chunks()`)
+- Removed unreachable `if not lines` guard in `text_chunker._calculate_density()` (`str.split()` never returns empty list)
+- Removed unnecessary `hasattr(node, "end_lineno")` guard in `code_chunker.py` (Python 3.9+ guarantees the attribute)
+
+### Redundant code eliminated
+- Removed 15+ redundant `conn.commit()` calls inside `with connect() as conn:` / `with self._connect() as conn:` context manager blocks across coordination.py, agent_registry.py, change_notifications.py, storage_schema.py (context manager auto-commits on success)
+- Removed 4 redundant `is not None` checks in `search_engine.init_chunkers()` (`HAS_*_CHUNKER` flags already imply non-None)
+- Removed unnecessary `content: Any` / `file_content: Any` forward-declarations that were immediately assigned on the next line (indexing.py, change_detection.py)
+- Inlined two thin one-line wrapper methods (`_chunk_paragraphs`, `_chunk_adaptive`) in `text_chunker.py` — callers now call `_chunk_by_paragraphs()` directly
+- Consolidated duplicate `from stele_context.storage_schema import ...` lines in `storage.py` into single import
+
+### Code simplification
+- Simplified `coordination._record_conflict()`: collapsed the `conn_or_none` pattern (only ever called with None) into a direct `with self._connect() as conn:` block, removing 20+ lines of boilerplate
+- Merged two separate `child.relative_to(p).parts` iterations in `indexing.expand_paths()` into a single pass
+- Inlined `mcp_handlers.py` logic into `mcp_server.py` (module was 56 lines, mcp_server was 262 — combined 300, well under 500 LOC limit). `mcp_handlers.py` reduced to backward-compat re-export shim
+- Moved deferred `import re` in `storage.search_text()` to module-level (was re-importing on every call)
+
+### Bug fixes
+- Added missing `"type": "object"` to `kv_data` property in `mcp_tool_defs.py` `save_kv_state` schema (was the only property without a type)
+- Fixed stale comment in `test_mcp_server.py` ("Must contain all 15 tools" updated to 42)
+- Moved `logging.basicConfig()` from module-level import side-effect in `mcp_server.py` to `MCPServer.start()` (prevents global logger reconfiguration on any import of the module)
+
+### Modernization
+- Added `from __future__ import annotations` to `cli_metadata.py` (was the only module missing it)
+- Updated `__author__` from "Stele Contributors" to "Stele Context Contributors" to match pyproject.toml
+- Updated `__init__.py` module docstring to "Stele Context" (rebranding was incomplete)
+
+### Version
+- Bumped to 0.10.4 in pyproject.toml and __init__.py
+- Updated COMPLETE_PROJECT_DOCUMENTATION.md test count to 579
+
 ## 2026-03-21 - v0.10.3 Codebase Audit & Cleanup
 
 ### Bug fixes

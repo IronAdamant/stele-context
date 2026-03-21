@@ -32,7 +32,6 @@ def init_notifications_table(connect: ConnectFn) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_cn_time ON change_notifications(created_at)"
         )
-        conn.commit()
 
 
 def notify_change(
@@ -52,7 +51,6 @@ def notify_change(
     with connect() as conn:
         worktree = get_worktree(conn, agent_id)
         conn.execute(_sql, (document_path, change_type, agent_id, worktree, now))
-        conn.commit()
 
 
 def notify_changes_batch(
@@ -76,7 +74,6 @@ def notify_changes_batch(
             _sql,
             [(p, ct, agent_id, worktree, now) for p, ct in changes],
         )
-        conn.commit()
     return len(changes)
 
 
@@ -154,5 +151,4 @@ def prune_notifications(
             )
             deleted += cursor.rowcount
 
-        conn.commit()
     return deleted

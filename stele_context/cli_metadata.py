@@ -5,6 +5,8 @@ Provides handler functions for annotate, get-annotations,
 delete-annotation, update-annotation, map, and history subcommands.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys

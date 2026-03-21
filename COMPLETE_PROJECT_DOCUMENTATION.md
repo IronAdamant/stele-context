@@ -45,8 +45,8 @@
 | `stele_context/chunkers/video.py` | `VideoChunker` - OpenCV-based (optional) | chunkers.base | (requires opencv) |
 | `stele_context/cli.py` | CLI entry point (`stele-context` command) | engine | (manual testing) |
 | `stele_context/cli_metadata.py` | CLI metadata/annotation subcommands | engine | (manual testing) |
-| `stele_context/mcp_server.py` | HTTP REST server (42 tools, threaded) | mcp_handlers, tool_registry | test_mcp_server.py |
-| `stele_context/mcp_handlers.py` | HTTP tool dispatch and agent_id injection | tool_registry | test_mcp_server.py |
+| `stele_context/mcp_server.py` | HTTP REST server (42 tools, threaded) + tool dispatch | tool_registry | test_mcp_server.py |
+| `stele_context/mcp_handlers.py` | Backward-compat shim (re-exports from mcp_server) | mcp_server, tool_registry | test_mcp_server.py |
 | `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas | mcp_tool_defs | (via test_mcp_server.py, test_mcp_stdio.py) |
 | `stele_context/mcp_stdio.py` | MCP stdio server (JSON-RPC for Claude Desktop) | mcp_tool_defs, tool_registry | test_mcp_stdio.py |
 | `stele_context/mcp_tool_defs.py` | MCP stdio tool definitions (core, 15 tools) | mcp_tool_defs_ext | (via test_mcp_stdio.py) |
@@ -80,4 +80,4 @@
 | `tests/test_chunk_history.py` | Chunk version history | ~10 |
 | `tests/test_env_checks.py` | Pycache scanning, editable installs | ~32 |
 
-**Total: 574 tests (1 skipped without MCP SDK)**
+**Total: 579 tests (1 skipped without MCP SDK)**

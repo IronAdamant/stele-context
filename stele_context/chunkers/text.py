@@ -82,20 +82,9 @@ class TextChunker(BaseChunker):
         if self.overlap > 0:
             return self._chunk_sliding_window(content, document_path)
 
-        # Use adaptive chunking if enabled
-        if self.adaptive:
-            return self._chunk_adaptive(content, document_path)
+        return self._chunk_by_paragraphs(content, document_path, adaptive=self.adaptive)
 
-        # Standard paragraph-based chunking
-        return self._chunk_paragraphs(content, document_path)
-
-    def _chunk_paragraphs(self, content: str, document_path: str) -> list[Chunk]:
-        """Standard paragraph-based chunking."""
-        return self._chunk_by_paragraphs(content, document_path, adaptive=False)
-
-    def _chunk_adaptive(self, content: str, document_path: str) -> list[Chunk]:
-        """Adaptive chunking that adjusts size based on content density."""
-        return self._chunk_by_paragraphs(content, document_path, adaptive=True)
+    # _chunk_paragraphs and _chunk_adaptive inlined into chunk() above
 
     def _chunk_by_paragraphs(
         self, content: str, document_path: str, adaptive: bool
@@ -290,8 +279,6 @@ class TextChunker(BaseChunker):
             return 0.0
 
         lines = text.split("\n")
-        if not lines:
-            return 0.0
 
         # Average line length (shorter = denser)
         avg_line_length = sum(len(line) for line in lines) / len(lines)
