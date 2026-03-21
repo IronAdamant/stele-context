@@ -84,7 +84,7 @@ graph TB
 ## Installation
 
 ```bash
-# From PyPI
+# From PyPI (import as: import stele)
 pip install stele-context
 
 # With optional extras
@@ -92,6 +92,9 @@ pip install stele-context[performance]    # faster vector math
 pip install stele-context[tree-sitter]    # AST-aware code chunking
 pip install stele-context[all]            # everything
 ```
+
+> **Note:** The PyPI package is `stele-context` but the import name is `stele`.
+> A [transfer request](https://github.com/pypi/support/issues/9865) for the `stele` name is pending.
 
 ```bash
 # From source

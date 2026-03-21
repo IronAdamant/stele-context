@@ -9,7 +9,6 @@ import hashlib
 import os
 import random
 import statistics
-import sys
 import tempfile
 import time
 
@@ -21,6 +20,7 @@ _QUICK = os.environ.get("STELE_BENCH_QUICK") == "1"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_signature():
     """Generate a realistic 128-dim signature (unit-normalized floats)."""
@@ -60,9 +60,12 @@ def _format_row(op, count, ms, throughput):
 # Benchmark runner
 # ---------------------------------------------------------------------------
 
+
 def run(iterations=ITERATIONS):
     """Run all storage benchmarks and print results."""
-    header = f"  {'Operation':<30s} {'Count':<10s} {'Time (ms)':>10s} {'Throughput':>15s}"
+    header = (
+        f"  {'Operation':<30s} {'Count':<10s} {'Time (ms)':>10s} {'Throughput':>15s}"
+    )
     sep = "  " + "-" * 69
 
     print("\n=== Storage Benchmarks ===\n")
@@ -78,7 +81,14 @@ def run(iterations=ITERATIONS):
         chash = _make_content_hash(0)
         t, _ = _bench(
             lambda: storage.store_chunk(
-                cid, "doc.txt", chash, sig, 0, 100, 25, content="hello world",
+                cid,
+                "doc.txt",
+                chash,
+                sig,
+                0,
+                100,
+                25,
+                content="hello world",
             ),
             iterations,
         )
@@ -95,12 +105,16 @@ def run(iterations=ITERATIONS):
                     f"doc_{idx}.txt",
                     _make_content_hash(idx + 1000),
                     sigs_100[i % len(sigs_100)],
-                    0, 500, 50,
+                    0,
+                    500,
+                    50,
                     content=f"chunk content {idx}",
                 )
 
         t, _ = _bench(lambda: _store_batch(100, 0), iterations)
-        print(_format_row("store_chunk (batch)", "100", t * 1000, f"{100 / t:.0f} ops/s"))
+        print(
+            _format_row("store_chunk (batch)", "100", t * 1000, f"{100 / t:.0f} ops/s")
+        )
 
         # -- store_chunk: batch large --------------------------------------
         sigs_extra = [_make_signature() for _ in range(100)]
@@ -113,12 +127,16 @@ def run(iterations=ITERATIONS):
                     f"doc_{i}.txt",
                     _make_content_hash(i + 10000),
                     sigs_extra[i % len(sigs_extra)],
-                    0, 500, 50,
+                    0,
+                    500,
+                    50,
                     content=f"chunk content large {i}",
                 )
 
         t, _ = _bench(_store_batch_large, iterations)
-        print(_format_row("store_chunk (batch)", str(bl), t * 1000, f"{bl / t:.0f} ops/s"))
+        print(
+            _format_row("store_chunk (batch)", str(bl), t * 1000, f"{bl / t:.0f} ops/s")
+        )
 
         print(sep)
 
@@ -128,7 +146,9 @@ def run(iterations=ITERATIONS):
 
         # -- search_chunks: by document_path -------------------------------
         t, _ = _bench(lambda: storage.search_chunks("doc_0.txt"), iterations)
-        print(_format_row("search_chunks (by path)", "1", t * 1000, f"{1 / t:.0f} ops/s"))
+        print(
+            _format_row("search_chunks (by path)", "1", t * 1000, f"{1 / t:.0f} ops/s")
+        )
 
         print(sep)
 
@@ -149,8 +169,10 @@ def run(iterations=ITERATIONS):
         print(_format_row("get_storage_stats", "1", t * 1000, f"{1 / t:.0f} ops/s"))
 
         print(sep)
-        print(f"\n  DB contains: {stats.get('chunk_count', '?')} chunks, "
-              f"{stats.get('document_count', '?')} documents")
+        print(
+            f"\n  DB contains: {stats.get('chunk_count', '?')} chunks, "
+            f"{stats.get('document_count', '?')} documents"
+        )
 
     print()
 

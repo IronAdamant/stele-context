@@ -6,7 +6,6 @@ of various sizes (1KB to 1MB). Reports median time over 3 iterations.
 
 import os
 import statistics
-import sys
 import time
 
 from stele.chunkers.text import TextChunker
@@ -18,6 +17,7 @@ _QUICK = os.environ.get("STELE_BENCH_QUICK") == "1"
 # ---------------------------------------------------------------------------
 # Synthetic content generators
 # ---------------------------------------------------------------------------
+
 
 def _make_prose(size_bytes: int) -> str:
     """Generate synthetic prose text of approximately the given size."""
@@ -35,7 +35,7 @@ def _make_python(size_bytes: int) -> str:
     """Generate synthetic Python code of approximately the given size."""
     func_template = (
         "def function_{i}(x, y):\n"
-        "    \"\"\"Compute result for case {i}.\"\"\"\n"
+        '    """Compute result for case {i}."""\n'
         "    result = x + y * {i}\n"
         "    if result > 100:\n"
         "        return result - 50\n"
@@ -109,7 +109,9 @@ def run(iterations=ITERATIONS):
     text_chunker = TextChunker(chunk_size=256, max_chunk_size=4096)
     code_chunker = CodeChunker(chunk_size=256, max_chunk_size=4096)
 
-    header = f"  {'Operation':<30s} {'Size':<10s} {'Time (ms)':>10s} {'Throughput':>15s}"
+    header = (
+        f"  {'Operation':<30s} {'Size':<10s} {'Time (ms)':>10s} {'Throughput':>15s}"
+    )
     sep = "  " + "-" * 69
 
     print("\n=== Chunking Benchmarks ===\n")

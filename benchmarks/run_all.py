@@ -21,6 +21,7 @@ BENCHMARKS = [
     ("Chunking", "bench_chunking.py"),
     ("Storage", "bench_storage.py"),
     ("Search", "bench_search.py"),
+    ("Scale", "bench_scale.py"),
 ]
 
 

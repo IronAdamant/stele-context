@@ -3,12 +3,18 @@ BM25 keyword index for Stele.
 
 Provides term-frequency based scoring to complement HNSW vector search
 for hybrid retrieval. Pure Python implementation with zero dependencies.
+
+Tokenization applies Porter stemming and camelCase/snake_case splitting
+so that "authentication" matches "authent*" and "loginHandler" matches
+queries for "login" or "handler".
 """
 
 import math
 import re
 from collections import Counter
 from typing import Dict, List
+
+from stele.stemmer import stem, split_identifier
 
 _WORD_RE = re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b")
 
@@ -89,8 +95,20 @@ class BM25Index:
         return {doc_id: self._score_terms(terms, doc_id) for doc_id in doc_ids}
 
     def _tokenize(self, text: str) -> List[str]:
-        """Tokenize text into lowercase word terms (len > 1)."""
-        return [w.lower() for w in _WORD_RE.findall(text) if len(w) > 1]
+        """Tokenize text into stemmed lowercase terms.
+
+        Splits camelCase/snake_case identifiers into components and
+        stems each token for better recall (e.g., "authentication"
+        and "authenticate" both stem to the same root).
+        """
+        raw = _WORD_RE.findall(text)
+        tokens: List[str] = []
+        for w in raw:
+            parts = split_identifier(w)
+            for part in parts:
+                if len(part) > 1:
+                    tokens.append(stem(part))
+        return tokens
 
     def _update_avg_dl(self) -> None:
         """Recompute average document length."""

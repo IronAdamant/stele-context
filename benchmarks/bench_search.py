@@ -10,7 +10,6 @@ import math
 import os
 import random
 import statistics
-import sys
 import tempfile
 import time
 
@@ -25,6 +24,7 @@ _QUICK = os.environ.get("STELE_BENCH_QUICK") == "1"
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _random_vector(dim=128):
     """Generate a unit-normalized random 128-dim vector."""
     raw = [random.gauss(0, 1) for _ in range(dim)]
@@ -35,10 +35,26 @@ def _random_vector(dim=128):
 def _make_text(i, length=200):
     """Generate synthetic document text."""
     words = [
-        "function", "variable", "loop", "condition", "return",
-        "import", "class", "method", "parameter", "result",
-        "data", "process", "handler", "request", "response",
-        "error", "cache", "index", "search", "query",
+        "function",
+        "variable",
+        "loop",
+        "condition",
+        "return",
+        "import",
+        "class",
+        "method",
+        "parameter",
+        "result",
+        "data",
+        "process",
+        "handler",
+        "request",
+        "response",
+        "error",
+        "cache",
+        "index",
+        "search",
+        "query",
     ]
     rng = random.Random(i)
     return " ".join(rng.choice(words) for _ in range(length))
@@ -68,12 +84,15 @@ def _format_row(op, size, ms, throughput):
 # Benchmark runner
 # ---------------------------------------------------------------------------
 
+
 def run(iterations=ITERATIONS, batch_sizes=None):
     """Run all search benchmarks and print results."""
     if batch_sizes is None:
         batch_sizes = BATCH_SIZES
 
-    header = f"  {'Operation':<30s} {'Size':<10s} {'Time (ms)':>10s} {'Throughput':>15s}"
+    header = (
+        f"  {'Operation':<30s} {'Size':<10s} {'Time (ms)':>10s} {'Throughput':>15s}"
+    )
     sep = "  " + "-" * 69
 
     # === VectorIndex benchmarks ============================================
@@ -99,7 +118,9 @@ def run(iterations=ITERATIONS, batch_sizes=None):
     # Search benchmarks on the largest index
     largest_n = batch_sizes[-1]
     vectors = [_random_vector() for _ in range(largest_n)]
-    ids = [hashlib.sha256(f"node-{i}".encode()).hexdigest()[:32] for i in range(largest_n)]
+    ids = [
+        hashlib.sha256(f"node-{i}".encode()).hexdigest()[:32] for i in range(largest_n)
+    ]
     vi = VectorIndex()
     for nid, vec in zip(ids, vectors):
         vi.add_chunk(nid, vec)
@@ -107,12 +128,14 @@ def run(iterations=ITERATIONS, batch_sizes=None):
     query = _random_vector()
     for k in K_VALUES:
         t, results = _bench(lambda kk=k: vi.search(query, k=kk), iterations)
-        print(_format_row(
-            f"VectorIndex.search (k={k})",
-            str(largest_n),
-            t * 1000,
-            f"{1 / t:.0f} qps",
-        ))
+        print(
+            _format_row(
+                f"VectorIndex.search (k={k})",
+                str(largest_n),
+                t * 1000,
+                f"{1 / t:.0f} qps",
+            )
+        )
 
     print(sep)
 
@@ -146,13 +169,17 @@ def run(iterations=ITERATIONS, batch_sizes=None):
         bm25.add_document(did, txt)
 
     sample_ids = doc_ids[:100]
-    t, _ = _bench(lambda: bm25.score_batch("function loop query", sample_ids), iterations)
-    print(_format_row(
-        "BM25.score_batch",
-        f"{len(sample_ids)} docs",
-        t * 1000,
-        f"{len(sample_ids) / t:.0f} docs/s",
-    ))
+    t, _ = _bench(
+        lambda: bm25.score_batch("function loop query", sample_ids), iterations
+    )
+    print(
+        _format_row(
+            "BM25.score_batch",
+            f"{len(sample_ids)} docs",
+            t * 1000,
+            f"{len(sample_ids) / t:.0f} docs/s",
+        )
+    )
 
     print(sep)
 
@@ -182,12 +209,14 @@ def run(iterations=ITERATIONS, batch_sizes=None):
                 lambda kk=k: engine.search("function loop variable result", top_k=kk),
                 iterations,
             )
-            print(_format_row(
-                f"engine.search (k={k})",
-                f"{n_docs} docs",
-                t * 1000,
-                f"{1 / t:.0f} qps",
-            ))
+            print(
+                _format_row(
+                    f"engine.search (k={k})",
+                    f"{n_docs} docs",
+                    t * 1000,
+                    f"{1 / t:.0f} qps",
+                )
+            )
 
     print(sep)
     print()
