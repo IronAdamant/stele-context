@@ -2,6 +2,7 @@
 
 **Local context cache for LLM agents with semantic chunking and vector search.**
 
+[![PyPI](https://img.shields.io/pypi/v/stele-context.svg)](https://pypi.org/project/stele-context/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/Stele)
@@ -83,9 +84,19 @@ graph TB
 ## Installation
 
 ```bash
+# From PyPI
+pip install stele-context
+
+# With optional extras
+pip install stele-context[performance]    # faster vector math
+pip install stele-context[tree-sitter]    # AST-aware code chunking
+pip install stele-context[all]            # everything
+```
+
+```bash
 # From source
 git clone https://github.com/IronAdamant/Stele.git
-cd stele
+cd Stele
 pip install -e .
 
 # With dev dependencies
