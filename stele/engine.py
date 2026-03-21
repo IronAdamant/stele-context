@@ -145,9 +145,6 @@ class Stele:
     def _resolve_path(self, normalized: str) -> Path:
         return _resolve(normalized, self._project_root)
 
-    def _load_or_rebuild_index(self) -> Any:
-        return _se.load_or_rebuild_index(self.storage)
-
     def _save_index(self) -> None:
         from stele.index_store import compute_chunk_ids_hash, save_index
 
@@ -158,16 +155,16 @@ class Stele:
         )
 
     def _ensure_bm25(self) -> None:
+        def _set(idx: Any, ready: bool) -> None:
+            self.bm25_index = idx
+            self._bm25_ready = ready
+
         _se.ensure_bm25(
             self.storage,
             self._bm25_init_lock,
             lambda: (self._bm25_ready, self.bm25_index),
-            self._set_bm25,
+            _set,
         )
-
-    def _set_bm25(self, idx: Any, ready: bool) -> None:
-        self.bm25_index = idx
-        self._bm25_ready = ready
 
     def _save_bm25(self) -> None:
         _se.save_bm25(self.bm25_index, self._bm25_ready, self.storage)

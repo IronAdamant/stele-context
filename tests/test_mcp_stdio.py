@@ -1,5 +1,8 @@
 """Tests for Stele MCP stdio server."""
 
+import json
+import threading
+
 import pytest
 
 from stele import __version__
@@ -234,3 +237,143 @@ class TestMCPStdioIntegration:
 
         # Verify it's gone
         assert engine.storage.get_document(str(test_file)) is None
+
+
+class TestMCPResourceLogic:
+    """Tests for MCP resource handler backing logic."""
+
+    def test_resource_documents_list(self, tmp_path):
+        """Test stele://documents resource returns indexed document data."""
+        f1 = tmp_path / "a.py"
+        f1.write_text("def a(): pass")
+        f2 = tmp_path / "b.py"
+        f2.write_text("def b(): pass")
+
+        engine = Stele(storage_dir=str(tmp_path / "storage"))
+        engine.index_documents([str(f1), str(f2)])
+
+        result = engine.get_map()
+        assert result["total_documents"] == 2
+        assert len(result["documents"]) == 2
+        # Verify JSON-serializable (resource handler does json.dumps)
+        json.dumps(result, default=str)
+
+    def test_resource_document_chunks(self, tmp_path):
+        """Test stele://document/{path} resource returns enriched chunks."""
+        test_file = tmp_path / "test.py"
+        test_file.write_text("def hello(): pass\ndef world(): pass")
+
+        engine = Stele(storage_dir=str(tmp_path / "storage"))
+        engine.index_documents([str(test_file)])
+
+        # Same logic as read_resource handler
+        chunks_meta = engine.storage.get_document_chunks(str(test_file))
+        assert len(chunks_meta) >= 1
+
+        enriched = []
+        for meta in chunks_meta:
+            chunk = engine.storage.get_chunk(meta["chunk_id"])
+            if chunk:
+                enriched.append(chunk)
+
+        assert len(enriched) >= 1
+        assert "content" in enriched[0]
+        assert "chunk_id" in enriched[0]
+        # Verify JSON-serializable
+        json.dumps(enriched, default=str)
+
+    def test_resource_unknown_document(self, tmp_path):
+        """Test reading chunks for nonexistent document returns empty."""
+        engine = Stele(storage_dir=str(tmp_path / "storage"))
+        chunks = engine.storage.get_document_chunks("nonexistent.py")
+        assert chunks == []
+
+    @pytest.mark.skipif(not HAS_MCP, reason="MCP SDK not installed")
+    def test_server_registers_resources(self, tmp_path):
+        """Test create_server registers resource and template handlers."""
+        from stele.mcp_stdio import create_server
+
+        bundle = create_server(str(tmp_path / "storage"))
+        assert bundle is not None
+        # Server should have resource handlers registered
+        assert bundle.server is not None
+
+
+class TestMCPConcurrency:
+    """Tests for concurrent access through the engine layer."""
+
+    def test_concurrent_reads(self, tmp_path):
+        """Test multiple threads can read simultaneously without errors."""
+        test_file = tmp_path / "test.py"
+        test_file.write_text("def hello(): pass\n" * 10)
+
+        engine = Stele(storage_dir=str(tmp_path / "storage"))
+        engine.index_documents([str(test_file)])
+
+        errors = []
+        results = []
+
+        def do_search(query):
+            try:
+                r = engine.search(query, top_k=3)
+                results.append(r)
+            except Exception as e:
+                errors.append(e)
+
+        def do_stats():
+            try:
+                r = engine.get_stats()
+                results.append(r)
+            except Exception as e:
+                errors.append(e)
+
+        threads = []
+        for q in ["hello", "function", "pass", "def"]:
+            threads.append(threading.Thread(target=do_search, args=(q,)))
+        for _ in range(4):
+            threads.append(threading.Thread(target=do_stats))
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors, f"Concurrent reads produced errors: {errors}"
+        assert len(results) == 8
+
+    def test_concurrent_read_write(self, tmp_path):
+        """Test readers don't block while writer holds lock."""
+        f1 = tmp_path / "a.py"
+        f1.write_text("def a(): pass")
+        f2 = tmp_path / "b.py"
+        f2.write_text("def b(): pass")
+
+        engine = Stele(storage_dir=str(tmp_path / "storage"))
+        engine.index_documents([str(f1)])
+
+        errors = []
+
+        def do_index():
+            try:
+                engine.index_documents([str(f2)])
+            except Exception as e:
+                errors.append(e)
+
+        def do_search():
+            try:
+                engine.search("function", top_k=3)
+            except Exception as e:
+                errors.append(e)
+
+        writer = threading.Thread(target=do_index)
+        readers = [threading.Thread(target=do_search) for _ in range(4)]
+
+        writer.start()
+        for r in readers:
+            r.start()
+
+        writer.join(timeout=10)
+        for r in readers:
+            r.join(timeout=10)
+
+        assert not errors, f"Concurrent read/write produced errors: {errors}"

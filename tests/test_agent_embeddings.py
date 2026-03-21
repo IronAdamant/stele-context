@@ -174,7 +174,9 @@ class TestIndexRebuildWithAgentSignatures:
         engine.store_semantic_summary(chunk_id, "Data processing pipeline entry point")
 
         # Force index rebuild
-        engine.vector_index = engine._load_or_rebuild_index()
+        from stele.search_engine import load_or_rebuild_index
+
+        engine.vector_index = load_or_rebuild_index(engine.storage)
 
         # Verify the rebuilt index uses agent signature
         results = engine.search("data processing pipeline", top_k=1)

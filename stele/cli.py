@@ -517,7 +517,9 @@ def cmd_clear(args: argparse.Namespace, stele: Stele) -> int:
         for idx_file in stele.storage.index_dir.glob("*"):
             idx_file.unlink()
         # Reset in-memory vector index
-        stele.vector_index = stele._load_or_rebuild_index()
+        from stele.search_engine import load_or_rebuild_index
+
+        stele.vector_index = load_or_rebuild_index(stele.storage)
     except OSError as e:
         print(f"Error clearing data: {e}", file=sys.stderr)
         return 1

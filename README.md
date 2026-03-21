@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/Stele)
-[![Tests](https://img.shields.io/badge/tests-573%20passed-brightgreen.svg)](https://github.com/IronAdamant/Stele/actions)
+[![Tests](https://github.com/IronAdamant/Stele/actions/workflows/test.yml/badge.svg)](https://github.com/IronAdamant/Stele/actions)
 
 Stele helps LLM agents avoid re-reading unchanged files by caching chunk data with semantic search. Documents are routed through modality-specific chunkers, chunk content is stored in SQLite, and an HNSW vector index enables fast O(log n) retrieval. Only modified chunks trigger reprocessing.
 
