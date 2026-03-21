@@ -193,6 +193,7 @@ async def _run_server(bundle: _ServerBundle) -> None:
             await bundle.server.run(read_stream, write_stream, init_options)
     finally:
         bundle.engine.deregister_agent(bundle.agent_id)
+        bundle.engine.storage.close()
 
 
 def run(storage_dir: str | None = None) -> None:

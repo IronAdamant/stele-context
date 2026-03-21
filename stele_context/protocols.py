@@ -1,12 +1,15 @@
 """
 Typing protocols for Stele engine delegation boundaries.
 
-These protocols replace ``Any`` in the delegation function signatures
-(indexing.py, search_engine.py, change_detection.py) to recover type
-safety at module boundaries without creating import cycles.
+These protocols document the structural contracts that delegation modules
+(indexing.py, search_engine.py, change_detection.py) expect from the
+objects they receive. The delegation modules use direct ``TYPE_CHECKING``
+imports of the concrete classes instead of these protocols, since no
+import cycles exist between the delegation and implementation modules.
 
-All protocols use ``runtime_checkable=False`` (the default) -- they
-exist only for static analysis via mypy, not for runtime isinstance.
+These protocols remain as API reference documentation and for potential
+use in tests or third-party integrations that need to satisfy the same
+interface without importing the concrete classes.
 """
 
 from __future__ import annotations

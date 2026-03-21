@@ -282,6 +282,7 @@ class MCPServer:
             self._thread = None
 
         self.stele.deregister_agent(self.agent_id)
+        self.stele.storage.close()
 
     def get_url(self) -> str:
         """Get the server URL."""
