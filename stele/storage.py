@@ -215,6 +215,82 @@ class StorageBackend(StorageDelegatesMixin):
 
             return [dict(row) for row in cursor.fetchall()]
 
+    def search_text(
+        self,
+        pattern: str,
+        *,
+        regex: bool = False,
+        document_path: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Search chunk content by exact substring or regex pattern.
+
+        Returns matching chunks with match details. Uses SQLite LIKE
+        for substring mode, Python re for regex mode. Zero dependencies.
+        """
+        import re as _re
+
+        with connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+
+            if document_path:
+                rows = conn.execute(
+                    "SELECT chunk_id, document_path, content, start_pos, "
+                    "end_pos, token_count FROM chunks "
+                    "WHERE document_path = ? AND content IS NOT NULL "
+                    "ORDER BY start_pos",
+                    (document_path,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT chunk_id, document_path, content, start_pos, "
+                    "end_pos, token_count FROM chunks "
+                    "WHERE content IS NOT NULL "
+                    "ORDER BY document_path, start_pos"
+                ).fetchall()
+
+            results: list[dict[str, Any]] = []
+            compiled = _re.compile(pattern) if regex else None
+
+            for row in rows:
+                content = row["content"] or ""
+                if regex:
+                    matches = [
+                        {"start": m.start(), "end": m.end(), "text": m.group()}
+                        for m in compiled.finditer(content)  # type: ignore[union-attr]
+                    ]
+                else:
+                    matches = []
+                    start = 0
+                    while True:
+                        idx = content.find(pattern, start)
+                        if idx == -1:
+                            break
+                        matches.append(
+                            {
+                                "start": idx,
+                                "end": idx + len(pattern),
+                                "text": pattern,
+                            }
+                        )
+                        start = idx + 1
+
+                if matches:
+                    results.append(
+                        {
+                            "chunk_id": row["chunk_id"],
+                            "document_path": row["document_path"],
+                            "match_count": len(matches),
+                            "matches": matches[:10],
+                            "content_preview": content[:200],
+                            "token_count": row["token_count"],
+                        }
+                    )
+                    if len(results) >= limit:
+                        break
+
+            return results
+
     def get_document_chunks(self, document_path: str) -> list[dict[str, Any]]:
         """Get all chunks for a document."""
         return self.search_chunks(document_path=document_path)

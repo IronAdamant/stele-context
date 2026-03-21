@@ -96,6 +96,8 @@ def build_tool_map(
         "store_embedding": engine.store_embedding,
         # Chunk history
         "get_chunk_history": engine.get_chunk_history,
+        # Text pattern search (perfect recall)
+        "search_text": engine.search_text,
     }
 
     # Utility tools backed by chunker metadata (not engine methods)

@@ -331,4 +331,34 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "search_text",
+        "description": "Search chunk content by exact substring or regex pattern. "
+        "Perfect recall for literal patterns — finds every occurrence across all "
+        "indexed chunks. Use before renaming/removing symbols to find all usages.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Text pattern to search for",
+                },
+                "regex": {
+                    "type": "boolean",
+                    "description": "Treat pattern as a regex (default: false)",
+                    "default": False,
+                },
+                "document_path": {
+                    "type": "string",
+                    "description": "Limit search to a specific document",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max chunks to return (default: 50)",
+                    "default": 50,
+                },
+            },
+            "required": ["pattern"],
+        },
+    },
 ]

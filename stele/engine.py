@@ -350,6 +350,33 @@ class Stele:
                 {k: getattr(self, k) for k in self._STAT_KEYS},
             )
 
+    def search_text(
+        self,
+        pattern: str,
+        regex: bool = False,
+        document_path: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Search chunk content by exact substring or regex pattern.
+
+        Perfect recall for literal patterns. Complements semantic search
+        for cases where exact text matching is needed (e.g., finding all
+        usages of a specific identifier before renaming).
+        """
+        with self._lock.read_lock():
+            if document_path is not None:
+                document_path = self._normalize_path(document_path)
+            matches = self.storage.search_text(
+                pattern, regex=regex, document_path=document_path, limit=limit
+            )
+            return {
+                "pattern": pattern,
+                "regex": regex,
+                "match_count": sum(m["match_count"] for m in matches),
+                "chunk_count": len(matches),
+                "results": matches,
+            }
+
     def list_sessions(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock.read_lock():
             return self.storage.list_sessions(agent_id=agent_id)

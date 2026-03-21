@@ -294,3 +294,52 @@ def multiply(a, b):
         for old_id in old_ids:
             if old_id not in new_ids:
                 assert cf.storage.get_chunk(old_id) is None
+
+    def test_search_text_exact(self, tmp_path):
+        """search_text finds exact substring matches across chunks."""
+        cf = Stele(storage_dir=str(tmp_path / "storage"))
+        f = tmp_path / "code.py"
+        f.write_text(
+            "from typing import Dict\n\ndef process(data: Dict[str, Any]):\n    pass\n"
+        )
+        cf.index_documents([str(f)])
+
+        result = cf.search_text("Dict[")
+        assert result["match_count"] >= 1
+        assert result["chunk_count"] >= 1
+        assert any("Dict[" in r["content_preview"] for r in result["results"])
+
+    def test_search_text_regex(self, tmp_path):
+        """search_text with regex=True supports pattern matching."""
+        cf = Stele(storage_dir=str(tmp_path / "storage"))
+        f = tmp_path / "code.py"
+        f.write_text("def foo_bar():\n    pass\n\ndef foo_baz():\n    pass\n")
+        cf.index_documents([str(f)])
+
+        result = cf.search_text(r"def foo_\w+", regex=True)
+        assert result["match_count"] >= 2
+
+    def test_search_text_no_match(self, tmp_path):
+        """search_text returns empty results when pattern not found."""
+        cf = Stele(storage_dir=str(tmp_path / "storage"))
+        f = tmp_path / "code.py"
+        f.write_text("def hello(): pass\n")
+        cf.index_documents([str(f)])
+
+        result = cf.search_text("NONEXISTENT_PATTERN_XYZ")
+        assert result["match_count"] == 0
+        assert result["chunk_count"] == 0
+
+    def test_search_text_scoped_to_document(self, tmp_path):
+        """search_text can be scoped to a single document."""
+        cf = Stele(storage_dir=str(tmp_path / "storage"))
+        f1 = tmp_path / "a.py"
+        f2 = tmp_path / "b.py"
+        f1.write_text("import os\n")
+        f2.write_text("import os\n")
+        cf.index_documents([str(f1), str(f2)])
+
+        all_results = cf.search_text("import os")
+        scoped = cf.search_text("import os", document_path=str(f1))
+        assert all_results["chunk_count"] >= 2
+        assert scoped["chunk_count"] == 1
