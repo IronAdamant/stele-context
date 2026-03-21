@@ -6,6 +6,10 @@ on the ``documents`` table) and ``CoordinationBackend`` (cross-worktree
 locks on the ``shared_locks`` table).  Each function accepts an open
 ``sqlite3.Connection`` and a table name, keeping callers simple.
 
+**Transaction policy:** These functions never call ``conn.commit()``.
+Callers are responsible for committing — typically via a context
+manager (``with connect(...) as conn:``).
+
 Follows the same zero-internal-deps pattern as ``agent_registry.py``
 and ``change_notifications.py``.
 """
@@ -56,7 +60,6 @@ def refresh_lock(
         f"UPDATE {table} SET locked_at = ?, lock_ttl = ? WHERE document_path = ?",
         (now, new_ttl, document_path),
     )
-    conn.commit()
     return {"refreshed": True, "expires_at": now + new_ttl}
 
 
@@ -93,7 +96,6 @@ def record_conflict(
             now,
         ),
     )
-    conn.commit()
     return cursor.lastrowid
 
 
@@ -148,7 +150,6 @@ def release_agent_locks(
                 "WHERE locked_by = ?",
                 (agent_id,),
             )
-        conn.commit()
     return {"released_count": len(docs), "documents": docs}
 
 
@@ -184,7 +185,6 @@ def reap_expired_locks(
                 f"WHERE document_path IN ({placeholders})",
                 expired_paths,
             )
-        conn.commit()
     return {
         "reaped_count": len(rows),
         "documents": [

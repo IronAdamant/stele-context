@@ -10,6 +10,7 @@ Shared lock primitives live in ``lock_ops.py``.
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -177,8 +178,6 @@ class CoordinationBackend:
         force: bool = False,
     ) -> dict[str, Any]:
         """Acquire a shared cross-worktree document lock."""
-        import time
-
         now = time.time()
         with self._connect() as conn:
             row = conn.execute(
@@ -269,8 +268,6 @@ class CoordinationBackend:
 
     def get_lock_status(self, document_path: str) -> dict[str, Any]:
         """Check shared lock status. Expired locks are cleaned up."""
-        import time
-
         now = time.time()
         with self._connect() as conn:
             row = conn.execute(
@@ -347,7 +344,7 @@ class CoordinationBackend:
     ) -> int | None:
         conn = conn_or_none if conn_or_none is not None else self._connect()
         try:
-            return lock_ops.record_conflict(
+            result = lock_ops.record_conflict(
                 conn,
                 "shared_conflicts",
                 document_path,
@@ -359,6 +356,9 @@ class CoordinationBackend:
                 resolution,
                 details,
             )
+            if conn_or_none is None:
+                conn.commit()
+            return result
         finally:
             if conn_or_none is None:
                 conn.close()
