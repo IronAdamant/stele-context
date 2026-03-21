@@ -171,11 +171,14 @@ class MetadataStorage:
             if document_path:
                 # SQL pre-filter narrows to rows containing the path string,
                 # then Python filters for exact structural match.
+                # Use JSON-escaped path so backslashes (Windows) match their
+                # escaped form in the stored JSON string.
+                json_escaped = json.dumps(document_path)[1:-1]  # strip quotes
                 cursor = conn.execute(
                     "SELECT * FROM change_history "
                     "WHERE summary_json LIKE ? "
                     "ORDER BY timestamp DESC LIMIT ?",
-                    (f"%{document_path}%", limit * 10),
+                    (f"%{json_escaped}%", limit * 10),
                 )
             else:
                 cursor = conn.execute(
