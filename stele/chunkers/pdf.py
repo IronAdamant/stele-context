@@ -7,7 +7,9 @@ Requires pymupdf for PDF parsing.
 Install: pip install stele[pdf]
 """
 
-from typing import Any, Dict, List
+from __future__ import annotations
+
+from typing import Any
 
 from stele.chunkers.base import BaseChunker, Chunk
 
@@ -57,7 +59,7 @@ class PDFChunker(BaseChunker):
         self.max_chunk_size = max_chunk_size
         self.pages_per_chunk = pages_per_chunk
 
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Return supported PDF file extensions."""
         return [".pdf"]
 
@@ -66,7 +68,7 @@ class PDFChunker(BaseChunker):
         content: Any,
         document_path: str,
         **kwargs: Any,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """
         Split PDF into chunks.
 
@@ -97,7 +99,7 @@ class PDFChunker(BaseChunker):
         finally:
             doc.close()
 
-    def _extract_metadata(self, doc: Any) -> Dict[str, Any]:
+    def _extract_metadata(self, doc: Any) -> dict[str, Any]:
         """Extract PDF metadata."""
         meta = doc.metadata or {}
 
@@ -113,10 +115,10 @@ class PDFChunker(BaseChunker):
         self,
         doc: Any,
         document_path: str,
-        metadata: Dict[str, Any],
-    ) -> List[Chunk]:
+        metadata: dict[str, Any],
+    ) -> list[Chunk]:
         """Create chunks from PDF pages."""
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
         chunk_index = 0
 
         for page_start in range(0, doc.page_count, self.pages_per_chunk):

@@ -10,10 +10,12 @@ keeps the module decoupled from ``CoordinationBackend`` while reusing
 its WAL-mode connection pool.
 """
 
+from __future__ import annotations
+
 import os
 import sqlite3
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 
 
 ConnectFn = Callable[[], sqlite3.Connection]
@@ -39,8 +41,8 @@ def register_agent(
     connect: ConnectFn,
     agent_id: str,
     worktree_root: str,
-    pid: Optional[int] = None,
-) -> Dict[str, Any]:
+    pid: int | None = None,
+) -> dict[str, Any]:
     """Register an agent with heartbeat."""
     now = time.time()
     if pid is None:
@@ -63,7 +65,7 @@ def register_agent(
     return {"registered": True, "agent_id": agent_id}
 
 
-def heartbeat(connect: ConnectFn, agent_id: str) -> Dict[str, Any]:
+def heartbeat(connect: ConnectFn, agent_id: str) -> dict[str, Any]:
     """Update heartbeat timestamp for a registered agent."""
     now = time.time()
     with connect() as conn:
@@ -76,7 +78,7 @@ def heartbeat(connect: ConnectFn, agent_id: str) -> Dict[str, Any]:
         return {"updated": cursor.rowcount > 0}
 
 
-def deregister_agent(connect: ConnectFn, agent_id: str) -> Dict[str, Any]:
+def deregister_agent(connect: ConnectFn, agent_id: str) -> dict[str, Any]:
     """Mark agent as stopped and release all its shared locks."""
     with connect() as conn:
         conn.execute(
@@ -95,7 +97,7 @@ def list_agents(
     connect: ConnectFn,
     active_only: bool = True,
     stale_timeout: float = 600.0,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """List registered agents with staleness detection."""
     now = time.time()
     with connect() as conn:
@@ -120,7 +122,7 @@ def list_agents(
 def reap_stale_agents(
     connect: ConnectFn,
     timeout: float = 600.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Mark agents with no heartbeat as stopped and release locks."""
     cutoff = time.time() - timeout
     with connect() as conn:
@@ -149,7 +151,7 @@ def reap_stale_agents(
 def agent_worktree(
     conn: sqlite3.Connection,
     agent_id: str,
-) -> Optional[str]:
+) -> str | None:
     """Look up the worktree root for a registered agent.
 
     Unlike the other functions in this module, this accepts an already-open

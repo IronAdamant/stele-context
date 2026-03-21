@@ -8,9 +8,10 @@ This module is standalone — zero internal Stele dependencies. The Symbol
 dataclass is defined here and re-exported by symbols.py.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
-from typing import List, Optional
 
 
 @dataclass
@@ -22,15 +23,15 @@ class Symbol:
     role: str  # definition, reference
     chunk_id: str
     document_path: str
-    line_number: Optional[int] = None
+    line_number: int | None = None
 
 
 # -- Python regex fallback ---------------------------------------------------
 
 
-def extract_python_regex(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_python_regex(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Regex fallback for Python when AST parsing fails."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
 
     for i, line in enumerate(content.splitlines(), 1):
         stripped = line.strip()
@@ -71,9 +72,9 @@ def extract_python_regex(content: str, doc_path: str, chunk_id: str) -> List[Sym
 # -- JavaScript / TypeScript -------------------------------------------------
 
 
-def extract_javascript(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Extract symbols from JavaScript/TypeScript."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
 
     for i, line in enumerate(content.splitlines(), 1):
         stripped = line.strip()
@@ -194,9 +195,9 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> List[Symbo
 # -- HTML --------------------------------------------------------------------
 
 
-def extract_html(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_html(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Extract symbols from HTML."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
 
     # CSS class references
     for m in re.finditer(r'class\s*=\s*["\']([^"\']+)["\']', content):
@@ -231,9 +232,9 @@ def extract_html(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
 # -- CSS / SCSS / LESS -------------------------------------------------------
 
 
-def extract_css(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_css(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Extract symbols from CSS/SCSS/LESS."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
 
     # Strip comments
     clean = re.sub(r"/\*.*?\*/", "", content, flags=re.DOTALL)
@@ -264,9 +265,9 @@ def extract_css(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
 # -- Java / Kotlin / Scala ---------------------------------------------------
 
 
-def extract_java(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_java(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Extract symbols from Java/Kotlin/Scala."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
     _skip = {"if", "while", "for", "switch", "catch", "return", "new", "throw"}
 
     for i, line in enumerate(content.splitlines(), 1):
@@ -311,9 +312,9 @@ def extract_java(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
 # -- Go ----------------------------------------------------------------------
 
 
-def extract_go(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_go(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Extract symbols from Go."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
 
     for i, line in enumerate(content.splitlines(), 1):
         stripped = line.strip()
@@ -342,9 +343,9 @@ def extract_go(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
 # -- Rust --------------------------------------------------------------------
 
 
-def extract_rust(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_rust(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Extract symbols from Rust."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
 
     for i, line in enumerate(content.splitlines(), 1):
         stripped = line.strip()
@@ -383,9 +384,9 @@ def extract_rust(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
 # -- C / C++ / C# -----------------------------------------------------------
 
 
-def extract_c(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_c(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Extract symbols from C/C++/C#."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
     _skip = {"if", "while", "for", "switch", "return", "sizeof", "typeof"}
 
     for i, line in enumerate(content.splitlines(), 1):
@@ -422,9 +423,9 @@ def extract_c(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
 # -- Ruby --------------------------------------------------------------------
 
 
-def extract_ruby(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_ruby(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Extract symbols from Ruby."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
 
     for i, line in enumerate(content.splitlines(), 1):
         stripped = line.strip()
@@ -456,9 +457,9 @@ def extract_ruby(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
 # -- PHP ---------------------------------------------------------------------
 
 
-def extract_php(content: str, doc_path: str, chunk_id: str) -> List[Symbol]:
+def extract_php(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     """Extract symbols from PHP."""
-    symbols: List[Symbol] = []
+    symbols: list[Symbol] = []
 
     for i, line in enumerate(content.splitlines(), 1):
         stripped = line.strip()

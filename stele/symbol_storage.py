@@ -6,10 +6,12 @@ edges in the SQLite database. Follows the same delegate pattern as
 MetadataStorage and SessionStorage.
 """
 
+from __future__ import annotations
+
 import sqlite3
 from pathlib import Path
 from stele.storage_schema import connect
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 
 class SymbolStorage:
@@ -71,7 +73,7 @@ class SymbolStorage:
 
     # -- Bulk operations -----------------------------------------------------
 
-    def store_symbols(self, symbols: List[Any]) -> None:
+    def store_symbols(self, symbols: list[Any]) -> None:
         """Store a batch of Symbol objects."""
         if not symbols:
             return
@@ -86,7 +88,7 @@ class SymbolStorage:
             )
             conn.commit()
 
-    def store_edges(self, edges: List[Tuple[str, str, str, str]]) -> None:
+    def store_edges(self, edges: list[tuple[str, str, str, str]]) -> None:
         """Store a batch of edges.
 
         Each edge: (source_chunk_id, target_chunk_id, edge_type, symbol_name).
@@ -112,7 +114,7 @@ class SymbolStorage:
             )
             conn.commit()
 
-    def clear_chunk_edges(self, chunk_ids: List[str]) -> None:
+    def clear_chunk_edges(self, chunk_ids: list[str]) -> None:
         """Remove all edges involving the given chunk IDs."""
         if not chunk_ids:
             return
@@ -125,7 +127,7 @@ class SymbolStorage:
             )
             conn.commit()
 
-    def clear_chunk_symbols(self, chunk_ids: List[str]) -> None:
+    def clear_chunk_symbols(self, chunk_ids: list[str]) -> None:
         """Remove all symbols for the given chunk IDs."""
         if not chunk_ids:
             return
@@ -151,13 +153,13 @@ class SymbolStorage:
 
     # -- Query operations ----------------------------------------------------
 
-    def get_all_symbols(self) -> List[Dict[str, Any]]:
+    def get_all_symbols(self) -> list[dict[str, Any]]:
         """Get all symbols (for resolution)."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             return [dict(r) for r in conn.execute("SELECT * FROM symbols").fetchall()]
 
-    def find_definitions(self, name: str) -> List[Dict[str, Any]]:
+    def find_definitions(self, name: str) -> list[dict[str, Any]]:
         """Find all definitions for a symbol name."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -169,7 +171,7 @@ class SymbolStorage:
                 ).fetchall()
             ]
 
-    def find_references_by_name(self, name: str) -> List[Dict[str, Any]]:
+    def find_references_by_name(self, name: str) -> list[dict[str, Any]]:
         """Find all references to a symbol name."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -181,7 +183,7 @@ class SymbolStorage:
                 ).fetchall()
             ]
 
-    def get_edges_for_chunk(self, chunk_id: str) -> List[Dict[str, Any]]:
+    def get_edges_for_chunk(self, chunk_id: str) -> list[dict[str, Any]]:
         """Get all edges involving a chunk (as source or target)."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -194,7 +196,7 @@ class SymbolStorage:
                 ).fetchall()
             ]
 
-    def get_incoming_edges(self, chunk_id: str) -> List[Dict[str, Any]]:
+    def get_incoming_edges(self, chunk_id: str) -> list[dict[str, Any]]:
         """Get edges where other chunks reference this chunk (dependents)."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -206,7 +208,7 @@ class SymbolStorage:
                 ).fetchall()
             ]
 
-    def get_outgoing_edges(self, chunk_id: str) -> List[Dict[str, Any]]:
+    def get_outgoing_edges(self, chunk_id: str) -> list[dict[str, Any]]:
         """Get edges where this chunk references other chunks (dependencies)."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -218,7 +220,7 @@ class SymbolStorage:
                 ).fetchall()
             ]
 
-    def search_symbol_names(self, tokens: List[str]) -> List[Dict[str, Any]]:
+    def search_symbol_names(self, tokens: list[str]) -> list[dict[str, Any]]:
         """Find definition symbols whose names match any of the given tokens.
 
         Uses case-insensitive exact match on symbol names.
@@ -238,7 +240,7 @@ class SymbolStorage:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def get_symbol_stats(self) -> Dict[str, Any]:
+    def get_symbol_stats(self) -> dict[str, Any]:
         """Get symbol and edge counts."""
         with connect(self.db_path) as conn:
             sym_count = conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]

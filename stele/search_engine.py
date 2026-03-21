@@ -5,9 +5,11 @@ All functions receive engine state as explicit parameters -- no imports
 back to engine.py, no circular dependencies.
 """
 
+from __future__ import annotations
+
 import re
 import threading
-from typing import Any, Dict, List
+from typing import Any
 
 from stele.chunkers.base import Chunk
 from stele.chunkers.numpy_compat import sig_to_list
@@ -39,7 +41,7 @@ _QUERY_STOP_WORDS = frozenset(
 )
 
 
-def _text_signature(text: str) -> List[float]:
+def _text_signature(text: str) -> list[float]:
     """Compute a semantic signature from a text string."""
     return sig_to_list(
         Chunk(
@@ -52,7 +54,7 @@ def _text_signature(text: str) -> List[float]:
     )
 
 
-def extract_query_identifiers(query: str) -> List[str]:
+def extract_query_identifiers(query: str) -> list[str]:
     """Extract identifier-like tokens from a search query.
 
     Splits on whitespace, underscores, and camelCase boundaries.
@@ -156,7 +158,7 @@ def search_unlocked(
     search_alpha: float,
     symbol_manager: Any,
     do_ensure_bm25: Any,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Core hybrid semantic + keyword search logic."""
     query_sig = _text_signature(query)
 
@@ -200,7 +202,7 @@ def search_unlocked(
 
         content = storage.get_chunk_content(chunk_id)
 
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "chunk_id": chunk_id,
             "content": content,
             "document_path": chunk_meta["document_path"],
@@ -250,18 +252,18 @@ def search_unlocked(
 
 
 def get_context_unlocked(
-    document_paths: List[str],
+    document_paths: list[str],
     *,
     normalize_path: Any,
     resolve_path: Any,
     detect_modality: Any,
     read_and_hash: Any,
     storage: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Core get_context logic."""
     document_paths = [normalize_path(p) for p in document_paths]
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "unchanged": [],
         "changed": [],
         "new": [],
@@ -317,7 +319,7 @@ def get_context_unlocked(
     return result
 
 
-def get_map_unlocked(storage: Any) -> Dict[str, Any]:
+def get_map_unlocked(storage: Any) -> dict[str, Any]:
     """Build project overview: all documents with chunk counts and annotations."""
     documents = storage.get_all_documents()
     result, total_tokens = [], 0
@@ -353,7 +355,7 @@ def store_semantic_summary_unlocked(
     storage: Any,
     vector_index: Any,
     save_index: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute signature from agent summary, update HNSW index."""
     sig = _text_signature(summary)
     ok = storage.store_semantic_summary(chunk_id, summary, sig)
@@ -367,11 +369,11 @@ def store_semantic_summary_unlocked(
 
 def store_embedding_unlocked(
     chunk_id: str,
-    vector: List[float],
+    vector: list[float],
     storage: Any,
     vector_index: Any,
     save_index: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Normalize and store raw embedding vector, update HNSW index."""
     norm = sum(x * x for x in vector) ** 0.5
     if norm > 0:
@@ -406,7 +408,7 @@ def load_or_rebuild_index(storage: Any) -> VectorIndex:
     return index
 
 
-def init_chunkers(chunk_size: int, max_chunk_size: int) -> Dict[str, Any]:
+def init_chunkers(chunk_size: int, max_chunk_size: int) -> dict[str, Any]:
     """Initialize modality-specific chunkers."""
     from stele.chunkers import (
         TextChunker,
@@ -421,7 +423,7 @@ def init_chunkers(chunk_size: int, max_chunk_size: int) -> Dict[str, Any]:
         HAS_VIDEO_CHUNKER,
     )
 
-    chunkers: Dict[str, Any] = {
+    chunkers: dict[str, Any] = {
         "text": TextChunker(chunk_size=chunk_size, max_chunk_size=max_chunk_size),
         "code": CodeChunker(chunk_size=chunk_size, max_chunk_size=max_chunk_size),
     }
@@ -438,7 +440,7 @@ def init_chunkers(chunk_size: int, max_chunk_size: int) -> Dict[str, Any]:
     return chunkers
 
 
-def get_stats_unlocked(storage: Any, vector_index: Any, config: Dict) -> Dict[str, Any]:
+def get_stats_unlocked(storage: Any, vector_index: Any, config: dict) -> dict[str, Any]:
     """Build stats dict."""
     from stele import __version__
 

@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from stele.engine import Stele
+from stele.search_engine import extract_query_identifiers
 from stele.symbols import (
     SymbolExtractor,
     Symbol,
@@ -802,11 +803,11 @@ class TestSymbolBoostedSearch:
         self.src.mkdir()
 
     def test_query_identifier_extraction(self):
-        idents = Stele._extract_query_identifiers("StorageBackend")
+        idents = extract_query_identifiers("StorageBackend")
         assert "StorageBackend" in idents or "Storage" in idents
 
     def test_query_identifier_filters_stopwords(self):
-        idents = Stele._extract_query_identifiers("the and for")
+        idents = extract_query_identifiers("the and for")
         assert len(idents) == 0
 
     def test_symbol_match_in_results(self):

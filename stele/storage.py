@@ -12,10 +12,12 @@ Uses SQLite for metadata and filesystem for KV-cache blobs.
 All storage is local-only with zero network dependencies.
 """
 
+from __future__ import annotations
+
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from stele.document_lock_storage import DocumentLockStorage
 from stele.storage_schema import connect
@@ -37,7 +39,7 @@ class StorageBackend(StorageDelegatesMixin):
     StorageDelegatesMixin.
     """
 
-    def __init__(self, base_dir: Optional[str] = None):
+    def __init__(self, base_dir: str | None = None):
         """
         Initialize storage backend.
 
@@ -86,7 +88,7 @@ class StorageBackend(StorageDelegatesMixin):
         start_pos: int,
         end_pos: int,
         token_count: int,
-        content: Optional[str] = None,
+        content: str | None = None,
     ) -> None:
         """Store chunk metadata (and optionally content) in database."""
         now = time.time()
@@ -161,7 +163,7 @@ class StorageBackend(StorageDelegatesMixin):
                 )
             conn.commit()
 
-    def get_chunk(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+    def get_chunk(self, chunk_id: str) -> dict[str, Any] | None:
         """Retrieve chunk metadata by ID."""
         now = time.time()
         with connect(self.db_path) as conn:
@@ -182,7 +184,7 @@ class StorageBackend(StorageDelegatesMixin):
 
             return dict(row) if row else None
 
-    def get_chunk_content(self, chunk_id: str) -> Optional[str]:
+    def get_chunk_content(self, chunk_id: str) -> str | None:
         """Retrieve chunk text content by ID."""
         with connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -195,8 +197,8 @@ class StorageBackend(StorageDelegatesMixin):
 
     def search_chunks(
         self,
-        document_path: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        document_path: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Search chunks, returning metadata and content."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -213,7 +215,7 @@ class StorageBackend(StorageDelegatesMixin):
 
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_document_chunks(self, document_path: str) -> List[Dict[str, Any]]:
+    def get_document_chunks(self, document_path: str) -> list[dict[str, Any]]:
         """Get all chunks for a document."""
         return self.search_chunks(document_path=document_path)
 
@@ -248,7 +250,7 @@ class StorageBackend(StorageDelegatesMixin):
             )
             conn.commit()
 
-    def get_document(self, document_path: str) -> Optional[Dict[str, Any]]:
+    def get_document(self, document_path: str) -> dict[str, Any] | None:
         """Get document indexing information."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -258,7 +260,7 @@ class StorageBackend(StorageDelegatesMixin):
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def get_all_documents(self) -> List[Dict[str, Any]]:
+    def get_all_documents(self) -> list[dict[str, Any]]:
         """Get all indexed documents."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -299,7 +301,7 @@ class StorageBackend(StorageDelegatesMixin):
             conn.commit()
             return cursor.rowcount > 0
 
-    def get_agent_signature(self, chunk_id: str) -> Optional[Any]:
+    def get_agent_signature(self, chunk_id: str) -> Any | None:
         """Get agent-supplied signature for a chunk, if any."""
         with connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -315,16 +317,16 @@ class StorageBackend(StorageDelegatesMixin):
 
     def get_chunk_history(
         self,
-        chunk_id: Optional[str] = None,
-        document_path: Optional[str] = None,
+        chunk_id: str | None = None,
+        document_path: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Query chunk version history."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
 
-            conditions: List[str] = []
-            params: List[Any] = []
+            conditions: list[str] = []
+            params: list[Any] = []
 
             if chunk_id:
                 conditions.append("h.chunk_id = ?")
@@ -358,7 +360,7 @@ class StorageBackend(StorageDelegatesMixin):
             )
             conn.commit()
 
-    def set_staleness_batch(self, updates: List[tuple]) -> None:
+    def set_staleness_batch(self, updates: list[tuple]) -> None:
         """Set staleness for multiple chunks. Each: (score, chunk_id)."""
         if not updates:
             return
@@ -375,7 +377,7 @@ class StorageBackend(StorageDelegatesMixin):
             conn.execute("UPDATE chunks SET staleness_score = 0.0")
             conn.commit()
 
-    def get_stale_chunks(self, threshold: float = 0.3) -> List[Dict[str, Any]]:
+    def get_stale_chunks(self, threshold: float = 0.3) -> list[dict[str, Any]]:
         """Get chunks with staleness_score >= threshold."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -389,7 +391,7 @@ class StorageBackend(StorageDelegatesMixin):
 
     # -- Aggregate stats ------------------------------------------------------
 
-    def get_storage_stats(self) -> Dict[str, Any]:
+    def get_storage_stats(self) -> dict[str, Any]:
         """Get storage statistics."""
         with connect(self.db_path) as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM chunks")
@@ -435,7 +437,7 @@ class StorageBackend(StorageDelegatesMixin):
 
     # -- Deletion / cleanup ---------------------------------------------------
 
-    def delete_chunks(self, chunk_ids: List[str]) -> int:
+    def delete_chunks(self, chunk_ids: list[str]) -> int:
         """Delete chunks and their related data. Returns count deleted."""
         if not chunk_ids:
             return 0
@@ -465,7 +467,7 @@ class StorageBackend(StorageDelegatesMixin):
             conn.commit()
             return cursor.rowcount
 
-    def remove_document(self, document_path: str) -> Dict[str, Any]:
+    def remove_document(self, document_path: str) -> dict[str, Any]:
         """Remove a document and all its chunks, annotations, and history."""
         doc = self.get_document(document_path)
         if doc is None:

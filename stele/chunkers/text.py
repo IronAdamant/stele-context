@@ -6,8 +6,10 @@ paragraph boundaries and token-based splitting. Supports adaptive
 chunk sizing and sliding window for overlapping chunks. Zero dependencies.
 """
 
+from __future__ import annotations
+
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 from stele.chunkers.base import BaseChunker, Chunk, estimate_tokens
 
@@ -43,7 +45,7 @@ class TextChunker(BaseChunker):
         self.overlap = overlap
         self.adaptive = adaptive
 
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Return supported text file extensions."""
         return [
             ".txt",
@@ -61,7 +63,7 @@ class TextChunker(BaseChunker):
         content: Any,
         document_path: str,
         **kwargs: Any,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """
         Split text content into chunks.
 
@@ -87,17 +89,17 @@ class TextChunker(BaseChunker):
         # Standard paragraph-based chunking
         return self._chunk_paragraphs(content, document_path)
 
-    def _chunk_paragraphs(self, content: str, document_path: str) -> List[Chunk]:
+    def _chunk_paragraphs(self, content: str, document_path: str) -> list[Chunk]:
         """Standard paragraph-based chunking."""
         return self._chunk_by_paragraphs(content, document_path, adaptive=False)
 
-    def _chunk_adaptive(self, content: str, document_path: str) -> List[Chunk]:
+    def _chunk_adaptive(self, content: str, document_path: str) -> list[Chunk]:
         """Adaptive chunking that adjusts size based on content density."""
         return self._chunk_by_paragraphs(content, document_path, adaptive=True)
 
     def _chunk_by_paragraphs(
         self, content: str, document_path: str, adaptive: bool
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """
         Paragraph-based chunking with optional adaptive sizing.
 
@@ -107,7 +109,7 @@ class TextChunker(BaseChunker):
         """
         paragraphs = re.split(r"\n\s*\n", content)
 
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
         current_text = ""
         current_tokens = 0
         current_start = 0
@@ -119,7 +121,7 @@ class TextChunker(BaseChunker):
                 continue
 
             # Determine target size for this paragraph
-            metadata: Dict[str, Any] = {}
+            metadata: dict[str, Any] = {}
             if adaptive:
                 density = self._content_density(para)
                 target_size = int(self.chunk_size * (1.0 - density * 0.5))
@@ -181,7 +183,7 @@ class TextChunker(BaseChunker):
 
         return chunks
 
-    def _chunk_sliding_window(self, content: str, document_path: str) -> List[Chunk]:
+    def _chunk_sliding_window(self, content: str, document_path: str) -> list[Chunk]:
         """
         Sliding window chunking with overlap.
 
@@ -190,7 +192,7 @@ class TextChunker(BaseChunker):
         # Split into sentences for better boundaries
         sentences = re.split(r"(?<=[.!?])\s+", content)
 
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
         chunk_index = 0
 
         # Build chunks with sliding window

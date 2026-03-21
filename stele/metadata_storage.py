@@ -5,12 +5,14 @@ Handles persistent storage of annotations and change history.
 Follows the delegate pattern used by SessionStorage.
 """
 
+from __future__ import annotations
+
 import json
 import sqlite3
 import time
 from pathlib import Path
 from stele.storage_schema import connect
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class MetadataStorage:
@@ -28,7 +30,7 @@ class MetadataStorage:
         target: str,
         target_type: str,
         content: str,
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
     ) -> int:
         """Store an annotation. Returns the annotation ID."""
         now = time.time()
@@ -48,13 +50,13 @@ class MetadataStorage:
 
     def get_annotations(
         self,
-        target: Optional[str] = None,
-        target_type: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        target: str | None = None,
+        target_type: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Retrieve annotations with optional filters."""
         query = "SELECT * FROM annotations WHERE 1=1"
-        params: List[Any] = []
+        params: list[Any] = []
 
         if target is not None:
             query += " AND target = ?"
@@ -91,13 +93,13 @@ class MetadataStorage:
     def update_annotation(
         self,
         annotation_id: int,
-        content: Optional[str] = None,
-        tags: Optional[List[str]] = None,
+        content: str | None = None,
+        tags: list[str] | None = None,
     ) -> bool:
         """Update an annotation's content and/or tags. Returns True if found."""
         now = time.time()
-        sets: List[str] = ["updated_at = ?"]
-        params: List[Any] = [now]
+        sets: list[str] = ["updated_at = ?"]
+        params: list[Any] = [now]
 
         if content is not None:
             sets.append("content = ?")
@@ -116,11 +118,11 @@ class MetadataStorage:
             return cursor.rowcount > 0
 
     def search_annotations(
-        self, query: str, target_type: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, query: str, target_type: str | None = None
+    ) -> list[dict[str, Any]]:
         """Search annotations by content text (LIKE match)."""
         sql = "SELECT * FROM annotations WHERE content LIKE ?"
-        params: List[Any] = [f"%{query}%"]
+        params: list[Any] = [f"%{query}%"]
         if target_type:
             sql += " AND target_type = ?"
             params.append(target_type)
@@ -138,9 +140,9 @@ class MetadataStorage:
 
     def record_change(
         self,
-        summary: Dict[str, Any],
-        session_id: Optional[str] = None,
-        reason: Optional[str] = None,
+        summary: dict[str, Any],
+        session_id: str | None = None,
+        reason: str | None = None,
     ) -> int:
         """Record a change history entry. Returns the entry ID."""
         now = time.time()
@@ -161,8 +163,8 @@ class MetadataStorage:
     def get_change_history(
         self,
         limit: int = 20,
-        document_path: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        document_path: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Retrieve change history entries.
 
         When document_path is given, the limit is applied after filtering
@@ -197,8 +199,8 @@ class MetadataStorage:
 
     def prune_history(
         self,
-        max_age_seconds: Optional[float] = None,
-        max_entries: Optional[int] = None,
+        max_age_seconds: float | None = None,
+        max_entries: int | None = None,
     ) -> int:
         """Prune change history by age and/or max entry count. Returns deleted count."""
         deleted = 0
@@ -220,7 +222,7 @@ class MetadataStorage:
         return deleted
 
     @staticmethod
-    def _summary_mentions_document(summary: Dict[str, Any], document_path: str) -> bool:
+    def _summary_mentions_document(summary: dict[str, Any], document_path: str) -> bool:
         """Check if a change summary mentions a specific document."""
         for key in ("unchanged", "removed"):
             if document_path in summary.get(key, []):

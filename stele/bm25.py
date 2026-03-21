@@ -9,10 +9,11 @@ so that "authentication" matches "authent*" and "loginHandler" matches
 queries for "login" or "handler".
 """
 
+from __future__ import annotations
+
 import math
 import re
 from collections import Counter
-from typing import Dict, List
 
 from stele.stemmer import stem, split_identifier
 
@@ -33,8 +34,8 @@ class BM25Index:
         self.k1 = k1
         self.b = b
         self.doc_freqs: Counter = Counter()
-        self.doc_lengths: Dict[str, int] = {}
-        self.term_freqs: Dict[str, Counter] = {}
+        self.doc_lengths: dict[str, int] = {}
+        self.term_freqs: dict[str, Counter] = {}
         self.avg_dl: float = 0.0
         self.n_docs: int = 0
 
@@ -68,7 +69,7 @@ class BM25Index:
         """Compute BM25 score for a query against a single document."""
         return self._score_terms(self._tokenize(query), doc_id)
 
-    def _score_terms(self, query_terms: List[str], doc_id: str) -> float:
+    def _score_terms(self, query_terms: list[str], doc_id: str) -> float:
         """Compute BM25 score from pre-tokenized query terms."""
         if doc_id not in self.term_freqs or self.avg_dl == 0:
             return 0.0
@@ -89,12 +90,12 @@ class BM25Index:
 
         return total
 
-    def score_batch(self, query: str, doc_ids: List[str]) -> Dict[str, float]:
+    def score_batch(self, query: str, doc_ids: list[str]) -> dict[str, float]:
         """Score multiple documents against a query (tokenizes once)."""
         terms = self._tokenize(query)
         return {doc_id: self._score_terms(terms, doc_id) for doc_id in doc_ids}
 
-    def _tokenize(self, text: str) -> List[str]:
+    def _tokenize(self, text: str) -> list[str]:
         """Tokenize text into stemmed lowercase terms.
 
         Splits camelCase/snake_case identifiers into components and
@@ -102,7 +103,7 @@ class BM25Index:
         and "authenticate" both stem to the same root).
         """
         raw = _WORD_RE.findall(text)
-        tokens: List[str] = []
+        tokens: list[str] = []
         for w in raw:
             parts = split_identifier(w)
             for part in parts:
@@ -117,7 +118,7 @@ class BM25Index:
         else:
             self.avg_dl = 0.0
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize to a plain dict for persistence."""
         return {
             "k1": self.k1,
@@ -130,7 +131,7 @@ class BM25Index:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "BM25Index":
+    def from_dict(cls, data: dict) -> "BM25Index":
         """Reconstruct from serialized dict."""
         idx = cls(k1=data["k1"], b=data["b"])
         idx.doc_freqs = Counter(data["doc_freqs"])

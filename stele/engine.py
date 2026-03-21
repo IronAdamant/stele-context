@@ -2,11 +2,13 @@
 Stele engine -- smart context cache with semantic chunking and vector search.
 """
 
+from __future__ import annotations
+
 import hashlib
 import os
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from stele.config import load_config, apply_config
 from stele.engine_utils import (
@@ -71,15 +73,15 @@ class Stele:
 
     def __init__(
         self,
-        storage_dir: Optional[str] = None,
-        project_root: Optional[str] = None,
+        storage_dir: str | None = None,
+        project_root: str | None = None,
         enable_coordination: bool = True,
-        chunk_size: Optional[int] = None,
-        max_chunk_size: Optional[int] = None,
-        merge_threshold: Optional[float] = None,
-        change_threshold: Optional[float] = None,
-        search_alpha: Optional[float] = None,
-        skip_dirs: Optional[set] = None,
+        chunk_size: int | None = None,
+        max_chunk_size: int | None = None,
+        merge_threshold: float | None = None,
+        change_threshold: float | None = None,
+        search_alpha: float | None = None,
+        skip_dirs: set | None = None,
     ):
         self._project_root = detect_project_root(project_root)
         file_cfg = load_config(self._project_root)
@@ -111,7 +113,7 @@ class Stele:
         self.vector_index = _se.load_or_rebuild_index(self.storage)
         self.session_manager = SessionManager(self.storage, self.vector_index)
         self.symbol_manager = SymbolGraphManager(self.storage)
-        self.bm25_index: Optional[Any] = None
+        self.bm25_index: Any | None = None
         self._bm25_ready = False
         self._lock = RWLock()
         self._bm25_init_lock = threading.Lock()
@@ -123,23 +125,19 @@ class Stele:
 
     def _do_acquire_lock(
         self, p: str, a: str, ttl: float = 300.0, force: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return do_acquire_lock(p, a, self._coordination, self.storage, ttl, force)
 
-    def _do_get_lock_status(self, p: str) -> Dict[str, Any]:
+    def _do_get_lock_status(self, p: str) -> dict[str, Any]:
         return do_get_lock_status(p, self._coordination, self.storage)
 
-    def _do_release_lock(self, p: str, a: str) -> Dict[str, Any]:
+    def _do_release_lock(self, p: str, a: str) -> dict[str, Any]:
         return do_release_lock(p, a, self._coordination, self.storage)
 
-    def _do_record_conflict(self, **kw: Any) -> Optional[int]:
+    def _do_record_conflict(self, **kw: Any) -> int | None:
         return do_record_conflict(
             coordination=self._coordination, storage=self.storage, **kw
         )
-
-    @staticmethod
-    def _detect_project_root(explicit: Optional[str] = None) -> Optional[Path]:
-        return detect_project_root(explicit)
 
     def _normalize_path(self, path: str) -> str:
         return _norm(path, self._project_root)
@@ -174,15 +172,6 @@ class Stele:
     def _save_bm25(self) -> None:
         _se.save_bm25(self.bm25_index, self._bm25_ready, self.storage)
 
-    @staticmethod
-    def _extract_query_identifiers(query: str) -> List[str]:
-        return _se.extract_query_identifiers(query)
-
-    def _merge_similar_chunks(self, chunks: list) -> list:
-        return _ix.merge_similar_chunks(
-            chunks, self.merge_threshold, self.max_chunk_size, self.MODALITY_THRESHOLDS
-        )
-
     def detect_modality(self, file_path: str) -> str:
         return _ix.detect_modality(file_path, self.chunkers)
 
@@ -190,11 +179,11 @@ class Stele:
 
     def index_documents(
         self,
-        paths: List[str],
+        paths: list[str],
         force_reindex: bool = False,
-        agent_id: Optional[str] = None,
-        expected_versions: Optional[Dict[str, int]] = None,
-    ) -> Dict[str, Any]:
+        agent_id: str | None = None,
+        expected_versions: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
         """Index documents through modality-specific chunkers."""
         with self._lock.write_lock():
             return _ix.index_documents_unlocked(
@@ -227,8 +216,8 @@ class Stele:
             )
 
     def remove_document(
-        self, document_path: str, agent_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, document_path: str, agent_id: str | None = None
+    ) -> dict[str, Any]:
         """Remove a document and its chunks, annotations, and index entries."""
         with self._lock.write_lock():
             return _ix.remove_document_unlocked(
@@ -253,8 +242,8 @@ class Stele:
         target: str,
         target_type: str,
         content: str,
-        tags: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
         with self._lock.write_lock():
             return _ix.annotate_unlocked(
                 target, target_type, content, tags, self.storage, self._normalize_path
@@ -262,16 +251,16 @@ class Stele:
 
     def get_annotations(
         self,
-        target: Optional[str] = None,
-        target_type: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        target: str | None = None,
+        target_type: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         with self._lock.read_lock():
             if target is not None and target_type == "document":
                 target = self._normalize_path(target)
             return self.storage.get_annotations(target, target_type, tags)
 
-    def delete_annotation(self, annotation_id: int) -> Dict[str, Any]:
+    def delete_annotation(self, annotation_id: int) -> dict[str, Any]:
         with self._lock.write_lock():
             return {
                 "deleted": self.storage.delete_annotation(annotation_id),
@@ -281,9 +270,9 @@ class Stele:
     def update_annotation(
         self,
         annotation_id: int,
-        content: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        content: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
         with self._lock.write_lock():
             return {
                 "updated": self.storage.update_annotation(annotation_id, content, tags),
@@ -291,15 +280,15 @@ class Stele:
             }
 
     def search_annotations(
-        self, query: str, target_type: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, query: str, target_type: str | None = None
+    ) -> list[dict[str, Any]]:
         with self._lock.read_lock():
             return self.storage.search_annotations(query, target_type)
 
-    def bulk_annotate(self, annotations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def bulk_annotate(self, annotations: list[dict[str, Any]]) -> dict[str, Any]:
         with self._lock.write_lock():
-            results: List[Dict[str, Any]] = []
-            errors: List[Dict[str, Any]] = []
+            results: list[dict[str, Any]] = []
+            errors: list[dict[str, Any]] = []
             for e in annotations:
                 r = _ix.annotate_unlocked(
                     e["target"],
@@ -317,18 +306,18 @@ class Stele:
     # -- History, map, stats ---------------------------------------------------
 
     def prune_history(
-        self, max_age_seconds: Optional[float] = None, max_entries: Optional[int] = None
-    ) -> Dict[str, Any]:
+        self, max_age_seconds: float | None = None, max_entries: int | None = None
+    ) -> dict[str, Any]:
         with self._lock.write_lock():
             return {"pruned": self.storage.prune_history(max_age_seconds, max_entries)}
 
-    def get_map(self) -> Dict[str, Any]:
+    def get_map(self) -> dict[str, Any]:
         with self._lock.read_lock():
             return _se.get_map_unlocked(self.storage)
 
     def get_history(
-        self, limit: int = 20, document_path: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, limit: int = 20, document_path: str | None = None
+    ) -> list[dict[str, Any]]:
         with self._lock.read_lock():
             if document_path is not None:
                 document_path = self._normalize_path(document_path)
@@ -336,10 +325,10 @@ class Stele:
 
     def get_chunk_history(
         self,
-        chunk_id: Optional[str] = None,
-        document_path: Optional[str] = None,
+        chunk_id: str | None = None,
+        document_path: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         with self._lock.read_lock():
             if document_path is not None:
                 document_path = self._normalize_path(document_path)
@@ -353,7 +342,7 @@ class Stele:
         "search_alpha",
     )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         with self._lock.read_lock():
             return _se.get_stats_unlocked(
                 self.storage,
@@ -361,19 +350,19 @@ class Stele:
                 {k: getattr(self, k) for k in self._STAT_KEYS},
             )
 
-    def list_sessions(self, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_sessions(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock.read_lock():
             return self.storage.list_sessions(agent_id=agent_id)
 
     # -- Agent embeddings ------------------------------------------------------
 
-    def store_semantic_summary(self, chunk_id: str, summary: str) -> Dict[str, Any]:
+    def store_semantic_summary(self, chunk_id: str, summary: str) -> dict[str, Any]:
         with self._lock.write_lock():
             return _se.store_semantic_summary_unlocked(
                 chunk_id, summary, self.storage, self.vector_index, self._save_index
             )
 
-    def store_embedding(self, chunk_id: str, vector: List[float]) -> Dict[str, Any]:
+    def store_embedding(self, chunk_id: str, vector: list[float]) -> dict[str, Any]:
         with self._lock.write_lock():
             return _se.store_embedding_unlocked(
                 chunk_id, vector, self.storage, self.vector_index, self._save_index
@@ -384,10 +373,10 @@ class Stele:
     def detect_changes_and_update(
         self,
         session_id: str,
-        document_paths: Optional[List[str]] = None,
-        reason: Optional[str] = None,
-        agent_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        document_paths: list[str] | None = None,
+        reason: str | None = None,
+        agent_id: str | None = None,
+    ) -> dict[str, Any]:
         with self._lock.write_lock():
             return _cd.detect_changes_unlocked(
                 session_id,
@@ -417,7 +406,7 @@ class Stele:
 
     # -- Search (delegated to stele.search_engine) ----------------------------
 
-    def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 10) -> list[dict[str, Any]]:
         with self._lock.read_lock():
             return _se.search_unlocked(
                 query,
@@ -430,7 +419,7 @@ class Stele:
                 do_ensure_bm25=self._ensure_bm25,
             )
 
-    def get_context(self, document_paths: List[str]) -> Dict[str, Any]:
+    def get_context(self, document_paths: list[str]) -> dict[str, Any]:
         with self._lock.read_lock():
             return _se.get_context_unlocked(
                 document_paths,
@@ -445,17 +434,17 @@ class Stele:
 
     def get_relevant_kv(
         self, session_id: str, query: str, top_k: int = 10
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         with self._lock.read_lock():
             return self.session_manager.get_relevant_chunks(session_id, query, top_k)
 
     def save_kv_state(
         self,
         session_id: str,
-        kv_data: Dict[str, Any],
-        chunk_ids: Optional[List[str]] = None,
-        agent_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        kv_data: dict[str, Any],
+        chunk_ids: list[str] | None = None,
+        agent_id: str | None = None,
+    ) -> dict[str, Any]:
         with self._lock.write_lock():
             if agent_id is not None:
                 self.storage.create_session(session_id, agent_id=agent_id)
@@ -463,33 +452,33 @@ class Stele:
 
     save_state = save_kv_state
 
-    def rollback(self, session_id: str, target_turn: int) -> Dict[str, Any]:
+    def rollback(self, session_id: str, target_turn: int) -> dict[str, Any]:
         with self._lock.write_lock():
             return self.session_manager.rollback(session_id, target_turn)
 
-    def prune_chunks(self, session_id: str, max_tokens: int) -> Dict[str, Any]:
+    def prune_chunks(self, session_id: str, max_tokens: int) -> dict[str, Any]:
         with self._lock.write_lock():
             return self.session_manager.prune(session_id, max_tokens)
 
     # -- Symbol graph (delegated to SymbolGraphManager) ----------------------
 
-    def stale_chunks(self, threshold: float = 0.3) -> Dict[str, Any]:
+    def stale_chunks(self, threshold: float = 0.3) -> dict[str, Any]:
         with self._lock.read_lock():
             return self.symbol_manager.stale_chunks(threshold)
 
-    def find_references(self, symbol: str) -> Dict[str, Any]:
+    def find_references(self, symbol: str) -> dict[str, Any]:
         with self._lock.read_lock():
             return self.symbol_manager.find_references(symbol)
 
-    def find_definition(self, symbol: str) -> Dict[str, Any]:
+    def find_definition(self, symbol: str) -> dict[str, Any]:
         with self._lock.read_lock():
             return self.symbol_manager.find_definition(symbol)
 
-    def impact_radius(self, chunk_id: str, depth: int = 2) -> Dict[str, Any]:
+    def impact_radius(self, chunk_id: str, depth: int = 2) -> dict[str, Any]:
         with self._lock.read_lock():
             return self.symbol_manager.impact_radius(chunk_id, depth)
 
-    def rebuild_symbol_graph(self) -> Dict[str, Any]:
+    def rebuild_symbol_graph(self) -> dict[str, Any]:
         with self._lock.write_lock():
             return self.symbol_manager.rebuild_graph()
 
@@ -497,15 +486,15 @@ class Stele:
 
     def acquire_document_lock(
         self, document_path: str, agent_id: str, ttl: float = 300.0, force: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         with self._lock.write_lock():
             return self._do_acquire_lock(
                 self._normalize_path(document_path), agent_id, ttl, force
             )
 
     def refresh_document_lock(
-        self, document_path: str, agent_id: str, ttl: Optional[float] = None
-    ) -> Dict[str, Any]:
+        self, document_path: str, agent_id: str, ttl: float | None = None
+    ) -> dict[str, Any]:
         with self._lock.write_lock():
             dp = self._normalize_path(document_path)
             if self._coordination:
@@ -514,21 +503,21 @@ class Stele:
 
     def release_document_lock(
         self, document_path: str, agent_id: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         with self._lock.write_lock():
             return self._do_release_lock(self._normalize_path(document_path), agent_id)
 
-    def get_document_lock_status(self, document_path: str) -> Dict[str, Any]:
+    def get_document_lock_status(self, document_path: str) -> dict[str, Any]:
         with self._lock.read_lock():
             return self._do_get_lock_status(self._normalize_path(document_path))
 
-    def release_agent_locks(self, agent_id: str) -> Dict[str, Any]:
+    def release_agent_locks(self, agent_id: str) -> dict[str, Any]:
         with self._lock.write_lock():
             if self._coordination:
                 return self._coordination.release_agent_locks(agent_id)
             return self.storage.release_agent_locks(agent_id)
 
-    def reap_expired_locks(self) -> Dict[str, Any]:
+    def reap_expired_locks(self) -> dict[str, Any]:
         with self._lock.write_lock():
             if self._coordination:
                 return self._coordination.reap_expired_locks()
@@ -536,10 +525,10 @@ class Stele:
 
     def get_conflicts(
         self,
-        document_path: Optional[str] = None,
-        agent_id: Optional[str] = None,
+        document_path: str | None = None,
+        agent_id: str | None = None,
         limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         with self._lock.read_lock():
             if document_path is not None:
                 document_path = self._normalize_path(document_path)
@@ -549,33 +538,33 @@ class Stele:
 
     # -- Agent coordination ---------------------------------------------------
 
-    def register_agent(self, agent_id: str) -> Dict[str, Any]:
+    def register_agent(self, agent_id: str) -> dict[str, Any]:
         if not self._coordination:
             return {"registered": False, "reason": "no_coordination"}
         root = str(self._project_root) if self._project_root else ""
         return self._coordination.register_agent(agent_id, root)
 
-    def deregister_agent(self, agent_id: str) -> Dict[str, Any]:
+    def deregister_agent(self, agent_id: str) -> dict[str, Any]:
         if not self._coordination:
             return {"deregistered": False, "reason": "no_coordination"}
         return self._coordination.deregister_agent(agent_id)
 
-    def heartbeat(self, agent_id: str) -> Dict[str, Any]:
+    def heartbeat(self, agent_id: str) -> dict[str, Any]:
         if not self._coordination:
             return {"updated": False}
         return self._coordination.heartbeat(agent_id)
 
-    def list_agents(self, active_only: bool = True) -> List[Dict[str, Any]]:
+    def list_agents(self, active_only: bool = True) -> list[dict[str, Any]]:
         if not self._coordination:
             return []
         return self._coordination.list_agents(active_only=active_only)
 
     def get_notifications(
         self,
-        since: Optional[float] = None,
-        exclude_self: Optional[str] = None,
+        since: float | None = None,
+        exclude_self: str | None = None,
         limit: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if not self._coordination:
             return {"notifications": [], "count": 0, "latest_timestamp": 0.0}
         return self._coordination.get_notifications(
@@ -584,10 +573,10 @@ class Stele:
 
     # -- Environment checks ---------------------------------------------------
 
-    def check_environment(self) -> Dict[str, Any]:
+    def check_environment(self) -> dict[str, Any]:
         return check_environment_impl(self._project_root, self.skip_dirs)
 
-    def clean_bytecache(self) -> Dict[str, Any]:
+    def clean_bytecache(self) -> dict[str, Any]:
         if not self._project_root:
             return {"cleaned": 0}
         from stele.env_checks import clean_stale_pycache

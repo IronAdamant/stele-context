@@ -5,16 +5,19 @@ agent registration, and conflict logging across worktrees.  Falls back
 transparently when no git common directory is available.
 """
 
+from __future__ import annotations
+
 import json
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from stele import agent_registry
+from stele import change_notifications as _cn
 
 
-def detect_git_common_dir(project_root: Optional[Path]) -> Optional[Path]:
+def detect_git_common_dir(project_root: Path | None) -> Path | None:
     """Find the git common directory shared across all worktrees.
 
     For normal repos: returns the ``.git/`` directory.
@@ -92,6 +95,7 @@ class CoordinationBackend:
 
     def _init_database(self) -> None:
         agent_registry.init_agents_table(self._connect)
+        _cn.init_notifications_table(self._connect)
         with self._connect() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS shared_locks (
@@ -126,16 +130,6 @@ class CoordinationBackend:
                 conn.execute(
                     "ALTER TABLE shared_conflicts ADD COLUMN actual_version INTEGER"
                 )
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS change_notifications (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    document_path TEXT NOT NULL,
-                    change_type TEXT NOT NULL,
-                    agent_id TEXT NOT NULL,
-                    worktree_root TEXT,
-                    created_at REAL NOT NULL
-                )
-            """)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sc_doc "
                 "ON shared_conflicts(document_path)"
@@ -143,44 +137,40 @@ class CoordinationBackend:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_sc_time ON shared_conflicts(created_at)"
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_cn_time "
-                "ON change_notifications(created_at)"
-            )
             conn.commit()
 
     # -- Agent registry (delegated to stele.agent_registry) --------------------
 
     def register_agent(
-        self, agent_id: str, worktree_root: str, pid: Optional[int] = None
-    ) -> Dict[str, Any]:
+        self, agent_id: str, worktree_root: str, pid: int | None = None
+    ) -> dict[str, Any]:
         """Register an agent with heartbeat."""
         return agent_registry.register_agent(
             self._connect, agent_id, worktree_root, pid
         )
 
-    def heartbeat(self, agent_id: str) -> Dict[str, Any]:
+    def heartbeat(self, agent_id: str) -> dict[str, Any]:
         """Update heartbeat timestamp for a registered agent."""
         return agent_registry.heartbeat(self._connect, agent_id)
 
-    def deregister_agent(self, agent_id: str) -> Dict[str, Any]:
+    def deregister_agent(self, agent_id: str) -> dict[str, Any]:
         """Mark agent as stopped and release all its shared locks."""
         return agent_registry.deregister_agent(self._connect, agent_id)
 
     def list_agents(
         self, active_only: bool = True, stale_timeout: float = 600.0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """List registered agents with staleness detection."""
         return agent_registry.list_agents(self._connect, active_only, stale_timeout)
 
-    def reap_stale_agents(self, timeout: float = 600.0) -> Dict[str, Any]:
+    def reap_stale_agents(self, timeout: float = 600.0) -> dict[str, Any]:
         """Mark agents with no heartbeat as stopped and release locks."""
         return agent_registry.reap_stale_agents(self._connect, timeout)
 
     # -- Shared document locks ------------------------------------------------
 
     @staticmethod
-    def _agent_worktree(conn: sqlite3.Connection, agent_id: str) -> Optional[str]:
+    def _agent_worktree(conn: sqlite3.Connection, agent_id: str) -> str | None:
         return agent_registry.agent_worktree(conn, agent_id)
 
     def acquire_lock(
@@ -189,7 +179,7 @@ class CoordinationBackend:
         agent_id: str,
         ttl: float = 300.0,
         force: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Acquire a shared cross-worktree document lock."""
         now = time.time()
         with self._connect() as conn:
@@ -261,7 +251,7 @@ class CoordinationBackend:
             conn.commit()
             return {"acquired": True}
 
-    def release_lock(self, document_path: str, agent_id: str) -> Dict[str, Any]:
+    def release_lock(self, document_path: str, agent_id: str) -> dict[str, Any]:
         """Release a shared document lock. Only the holder can release."""
         with self._connect() as conn:
             row = conn.execute(
@@ -279,7 +269,7 @@ class CoordinationBackend:
             conn.commit()
             return {"released": True}
 
-    def get_lock_status(self, document_path: str) -> Dict[str, Any]:
+    def get_lock_status(self, document_path: str) -> dict[str, Any]:
         """Check shared lock status. Expired locks are cleaned up."""
         now = time.time()
         with self._connect() as conn:
@@ -309,8 +299,8 @@ class CoordinationBackend:
             }
 
     def refresh_lock(
-        self, document_path: str, agent_id: str, ttl: Optional[float] = None
-    ) -> Dict[str, Any]:
+        self, document_path: str, agent_id: str, ttl: float | None = None
+    ) -> dict[str, Any]:
         """Refresh lock TTL without releasing."""
         now = time.time()
         with self._connect() as conn:
@@ -331,7 +321,7 @@ class CoordinationBackend:
             conn.commit()
             return {"refreshed": True, "expires_at": now + new_ttl}
 
-    def release_agent_locks(self, agent_id: str) -> Dict[str, Any]:
+    def release_agent_locks(self, agent_id: str) -> dict[str, Any]:
         """Release all shared locks held by an agent."""
         with self._connect() as conn:
             rows = conn.execute(
@@ -347,7 +337,7 @@ class CoordinationBackend:
                 conn.commit()
             return {"released_count": len(docs), "documents": docs}
 
-    def reap_expired_locks(self) -> Dict[str, Any]:
+    def reap_expired_locks(self) -> dict[str, Any]:
         """Clear all expired shared locks."""
         now = time.time()
         with self._connect() as conn:
@@ -377,16 +367,16 @@ class CoordinationBackend:
 
     def _record_conflict(
         self,
-        conn_or_none: Optional[sqlite3.Connection],
+        conn_or_none: sqlite3.Connection | None,
         document_path: str,
         agent_a: str,
         agent_b: str,
         conflict_type: str,
-        expected_version: Optional[int] = None,
-        actual_version: Optional[int] = None,
+        expected_version: int | None = None,
+        actual_version: int | None = None,
         resolution: str = "rejected",
-        details: Optional[Dict[str, Any]] = None,
-    ) -> Optional[int]:
+        details: dict[str, Any] | None = None,
+    ) -> int | None:
         now = time.time()
         details_json = json.dumps(details) if details else None
         conn = conn_or_none if conn_or_none is not None else self._connect()
@@ -421,11 +411,11 @@ class CoordinationBackend:
         agent_a: str,
         agent_b: str,
         conflict_type: str,
-        expected_version: Optional[int] = None,
-        actual_version: Optional[int] = None,
+        expected_version: int | None = None,
+        actual_version: int | None = None,
         resolution: str = "rejected",
-        details: Optional[Dict[str, Any]] = None,
-    ) -> Optional[int]:
+        details: dict[str, Any] | None = None,
+    ) -> int | None:
         """Log a conflict event to the shared conflict table."""
         return self._record_conflict(
             None,
@@ -441,14 +431,14 @@ class CoordinationBackend:
 
     def get_conflicts(
         self,
-        document_path: Optional[str] = None,
-        agent_id: Optional[str] = None,
+        document_path: str | None = None,
+        agent_id: str | None = None,
         limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Retrieve shared conflict history."""
         with self._connect() as conn:
-            conditions: List[str] = []
-            params: List[Any] = []
+            conditions: list[str] = []
+            params: list[Any] = []
             if document_path is not None:
                 conditions.append("document_path = ?")
                 params.append(document_path)
@@ -475,117 +465,35 @@ class CoordinationBackend:
                 results.append(d)
             return results
 
-    # -- Change notifications -------------------------------------------------
+    # -- Change notifications (delegated to stele.change_notifications) -------
 
     def notify_change(
-        self,
-        document_path: str,
-        change_type: str,
-        agent_id: str,
+        self, document_path: str, change_type: str, agent_id: str
     ) -> None:
         """Record a change notification visible to all worktrees."""
-        now = time.time()
-        _sql = (
-            "INSERT INTO change_notifications"
-            " (document_path, change_type, agent_id, worktree_root, created_at)"
-            " VALUES (?, ?, ?, ?, ?)"
+        _cn.notify_change(
+            self._connect, self._agent_worktree, document_path, change_type, agent_id
         )
-        with self._connect() as conn:
-            worktree = self._agent_worktree(conn, agent_id)
-            conn.execute(_sql, (document_path, change_type, agent_id, worktree, now))
-            conn.commit()
 
-    def notify_changes_batch(self, changes: List[tuple], agent_id: str) -> int:
-        """Batch-write change notifications (each: ``(path, type)``)."""
-        if not changes:
-            return 0
-        now = time.time()
-        _sql = (
-            "INSERT INTO change_notifications"
-            " (document_path, change_type, agent_id, worktree_root, created_at)"
-            " VALUES (?, ?, ?, ?, ?)"
+    def notify_changes_batch(self, changes: list[tuple], agent_id: str) -> int:
+        """Batch-write change notifications."""
+        return _cn.notify_changes_batch(
+            self._connect, self._agent_worktree, changes, agent_id
         )
-        with self._connect() as conn:
-            worktree = self._agent_worktree(conn, agent_id)
-            conn.executemany(
-                _sql,
-                [(p, ct, agent_id, worktree, now) for p, ct in changes],
-            )
-            conn.commit()
-        return len(changes)
 
     def get_notifications(
         self,
-        since: Optional[float] = None,
-        exclude_agent: Optional[str] = None,
+        since: float | None = None,
+        exclude_agent: str | None = None,
         limit: int = 100,
-    ) -> Dict[str, Any]:
-        """Get change notifications, optionally since a timestamp.
-
-        Auto-prunes entries older than 24 h.  Use ``exclude_agent``
-        to skip the caller's own notifications.
-        """
-        with self._connect() as conn:
-            # Lazy prune: remove notifications older than 24 hours
-            cutoff = time.time() - 86400
-            conn.execute(
-                "DELETE FROM change_notifications WHERE created_at < ?",
-                (cutoff,),
-            )
-            conditions: List[str] = []
-            params: List[Any] = []
-
-            if since is not None:
-                conditions.append("created_at > ?")
-                params.append(since)
-            if exclude_agent is not None:
-                conditions.append("agent_id != ?")
-                params.append(exclude_agent)
-
-            where = "WHERE " + " AND ".join(conditions) if conditions else ""
-            query = (
-                f"SELECT * FROM change_notifications {where} "
-                "ORDER BY created_at DESC LIMIT ?"
-            )
-            params.append(limit)
-            rows = conn.execute(query, params).fetchall()
-
-            notifications = [dict(r) for r in rows]
-            latest = max(
-                (n["created_at"] for n in notifications),
-                default=since or 0.0,
-            )
-
-            return {
-                "notifications": notifications,
-                "count": len(notifications),
-                "latest_timestamp": latest,
-            }
+    ) -> dict[str, Any]:
+        """Get change notifications, optionally since a timestamp."""
+        return _cn.get_notifications(self._connect, since, exclude_agent, limit)
 
     def prune_notifications(
         self,
-        max_age_seconds: Optional[float] = None,
-        max_entries: Optional[int] = None,
+        max_age_seconds: float | None = None,
+        max_entries: int | None = None,
     ) -> int:
         """Prune old change notifications. Returns deleted count."""
-        deleted = 0
-        with self._connect() as conn:
-            if max_age_seconds is not None:
-                cutoff = time.time() - max_age_seconds
-                cursor = conn.execute(
-                    "DELETE FROM change_notifications WHERE created_at < ?",
-                    (cutoff,),
-                )
-                deleted += cursor.rowcount
-
-            if max_entries is not None:
-                cursor = conn.execute(
-                    "DELETE FROM change_notifications WHERE id NOT IN "
-                    "(SELECT id FROM change_notifications "
-                    "ORDER BY created_at DESC LIMIT ?)",
-                    (max_entries,),
-                )
-                deleted += cursor.rowcount
-
-            conn.commit()
-        return deleted
+        return _cn.prune_notifications(self._connect, max_age_seconds, max_entries)

@@ -5,13 +5,15 @@ All modality-specific chunkers inherit from BaseChunker and implement
 the chunk() method to split content into semantically coherent units.
 """
 
+from __future__ import annotations
+
 import hashlib
 import re
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from stele.chunkers.numpy_compat import (
     np,
@@ -89,13 +91,13 @@ class Chunk:
     chunk_index: int = 0
 
     # Metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # Computed properties (lazy)
-    _content_hash: Optional[str] = field(default=None, repr=False)
-    _semantic_signature: Optional[Any] = field(default=None, repr=False)
-    _token_count: Optional[int] = field(default=None, repr=False)
-    _chunk_id: Optional[str] = field(default=None, repr=False)
+    _content_hash: str | None = field(default=None, repr=False)
+    _semantic_signature: Any | None = field(default=None, repr=False)
+    _token_count: int | None = field(default=None, repr=False)
+    _chunk_id: str | None = field(default=None, repr=False)
 
     @property
     def content_hash(self) -> str:
@@ -290,12 +292,12 @@ class BaseChunker(ABC):
         content: Any,
         document_path: str,
         **kwargs: Any,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """Split content into chunks."""
         pass
 
     @abstractmethod
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Return list of supported file extensions."""
         pass
 

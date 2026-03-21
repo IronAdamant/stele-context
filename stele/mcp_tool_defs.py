@@ -10,11 +10,13 @@ Extended tools (symbols, locking, agents, etc.) are in mcp_tool_defs_ext.py.
 The combined list is available as TOOL_DEFINITIONS.
 """
 
-from typing import Any, Dict, List
+from __future__ import annotations
+
+from typing import Any
 
 from stele.mcp_tool_defs_ext import TOOL_DEFINITIONS_EXT
 
-_TOOL_DEFINITIONS_CORE: List[Dict[str, Any]] = [
+_TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
     {
         "name": "index",
         "description": "Index documents for semantic chunking and caching",
@@ -403,4 +405,4 @@ _TOOL_DEFINITIONS_CORE: List[Dict[str, Any]] = [
 ]
 
 # Combined list: core + extended (symbols, locking, agents, env, embeddings)
-TOOL_DEFINITIONS: List[Dict[str, Any]] = _TOOL_DEFINITIONS_CORE + TOOL_DEFINITIONS_EXT
+TOOL_DEFINITIONS: list[dict[str, Any]] = _TOOL_DEFINITIONS_CORE + TOOL_DEFINITIONS_EXT

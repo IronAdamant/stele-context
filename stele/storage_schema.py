@@ -5,6 +5,8 @@ Contains all CREATE TABLE statements, indexes, and ALTER TABLE
 migrations.  Called from StorageBackend.__init__().
 """
 
+from __future__ import annotations
+
 import sqlite3
 from pathlib import Path
 

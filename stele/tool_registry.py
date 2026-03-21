@@ -11,7 +11,9 @@ tool maps and write-tool sets. Schemas remain in mcp_tool_defs.py
 (the canonical source for all tool definitions).
 """
 
-from typing import Any, Callable, Dict
+from __future__ import annotations
+
+from typing import Any, Callable
 
 from stele.mcp_tool_defs import TOOL_DEFINITIONS
 
@@ -30,8 +32,8 @@ WRITE_TOOLS = frozenset(
 
 def build_tool_map(
     engine: Any,
-    modality_flags: Dict[str, bool] | None = None,
-) -> Dict[str, Callable[..., Any]]:
+    modality_flags: dict[str, bool] | None = None,
+) -> dict[str, Callable[..., Any]]:
     """Build a {tool_name: callable} dispatch map from a Stele engine.
 
     Parameters
@@ -44,7 +46,7 @@ def build_tool_map(
         ``detect_modality`` and ``get_supported_formats`` utility
         tools are included.
     """
-    tool_map: Dict[str, Callable[..., Any]] = {
+    tool_map: dict[str, Callable[..., Any]] = {
         # Core operations
         "index": engine.index_documents,
         "remove": engine.remove_document,
@@ -99,10 +101,10 @@ def build_tool_map(
     # Utility tools backed by chunker metadata (not engine methods)
     if modality_flags is not None:
 
-        def _detect_modality(path: str = "", **_: Any) -> Dict[str, Any]:
+        def _detect_modality(path: str = "", **_: Any) -> dict[str, Any]:
             return {"path": path, "modality": engine.detect_modality(path)}
 
-        def _get_supported_formats(**_: Any) -> Dict[str, Any]:
+        def _get_supported_formats(**_: Any) -> dict[str, Any]:
             formats = {
                 "text": engine.chunkers["text"].supported_extensions(),
                 "code": engine.chunkers["code"].supported_extensions(),
@@ -118,7 +120,7 @@ def build_tool_map(
     return tool_map
 
 
-def get_http_schemas() -> Dict[str, Dict[str, Any]]:
+def get_http_schemas() -> dict[str, dict[str, Any]]:
     """Convert tool definitions to the HTTP server schema format.
 
     Transforms ``{"name": ..., "inputSchema": ...}`` into

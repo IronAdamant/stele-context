@@ -5,7 +5,9 @@ All functions receive engine state as explicit parameters — no imports
 back to engine.py, no circular dependencies.
 """
 
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+from typing import Any
 
 from stele.chunkers.numpy_compat import (
     cosine_similarity,
@@ -26,9 +28,9 @@ def classify_chunks_for_change(
     old_chunks_meta: list,
     modality: str,
     doc_path: str,
-    results: Dict[str, Any],
+    results: dict[str, Any],
     change_threshold: float,
-    modality_thresholds: Dict[str, Dict[str, float]],
+    modality_thresholds: dict[str, dict[str, float]],
     vector_index: Any,
 ) -> None:
     """Compare new chunks against old metadata; update results counters."""
@@ -36,7 +38,7 @@ def classify_chunks_for_change(
         "change", change_threshold
     )
 
-    old_by_pos: Dict = {}
+    old_by_pos: dict = {}
     for meta in old_chunks_meta:
         old_by_pos[(meta["start_pos"], meta["end_pos"])] = meta
 
@@ -71,16 +73,16 @@ def classify_chunks_for_change(
 
 def detect_changes_unlocked(
     session_id: str,
-    document_paths: Optional[List[str]],
-    reason: Optional[str],
-    agent_id: Optional[str],
+    document_paths: list[str] | None,
+    reason: str | None,
+    agent_id: str | None,
     *,
     normalize_path: Any,
     resolve_path: Any,
     detect_modality: Any,
     read_and_hash: Any,
     storage: Any,
-    chunkers: Dict[str, Any],
+    chunkers: dict[str, Any],
     vector_index: Any,
     bm25_index: Any,
     bm25_ready: bool,
@@ -88,17 +90,17 @@ def detect_changes_unlocked(
     merge_threshold: float,
     max_chunk_size: int,
     change_threshold: float,
-    modality_thresholds: Dict[str, Dict[str, float]],
+    modality_thresholds: dict[str, dict[str, float]],
     do_get_lock_status: Any,
     do_record_conflict: Any,
     save_index: Any,
     save_bm25: Any,
     coordination: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Core body of detect_changes_and_update, extracted for engine delegation."""
     storage.create_session(session_id, agent_id=agent_id)
 
-    results: Dict[str, Any] = {
+    results: dict[str, Any] = {
         "unchanged": [],
         "modified": [],
         "new": [],

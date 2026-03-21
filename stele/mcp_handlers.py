@@ -9,7 +9,9 @@ This module provides:
 Separated from mcp_server.py to keep each file under 500 LOC.
 """
 
-from typing import Any, Callable, Dict
+from __future__ import annotations
+
+from typing import Any, Callable
 
 from stele.tool_registry import (
     WRITE_TOOLS,
@@ -25,10 +27,10 @@ __all__ = ["_TOOL_SCHEMAS", "build_tool_map", "execute_tool", "WRITE_TOOLS"]
 
 def execute_tool(
     tool_name: str,
-    parameters: Dict[str, Any],
-    tool_map: Dict[str, Callable[..., Any]],
+    parameters: dict[str, Any],
+    tool_map: dict[str, Callable[..., Any]],
     server_agent_id: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Execute a tool by name, returning a JSON-serialisable result dict.
 
     Handles agent_id injection for write tools, unknown-tool errors,

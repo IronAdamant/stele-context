@@ -9,13 +9,13 @@ Contains:
 Only imports from stdlib; no internal Stele dependencies.
 """
 
-from typing import Dict, Tuple
+from __future__ import annotations
 
 # ---------------------------------------------------------------------------
 # Tree-sitter definition boundary types per language
 # ---------------------------------------------------------------------------
 
-DEFINITION_TYPES: Dict[str, frozenset] = {
+DEFINITION_TYPES: dict[str, frozenset] = {
     "javascript": frozenset(
         {
             "function_declaration",
@@ -119,7 +119,7 @@ DEFINITION_TYPES: Dict[str, frozenset] = {
 # Extension -> (grammar_module_name, language_key)
 # ---------------------------------------------------------------------------
 
-EXT_TO_GRAMMAR: Dict[str, Tuple[str, str]] = {
+EXT_TO_GRAMMAR: dict[str, tuple[str, str]] = {
     "js": ("tree_sitter_javascript", "javascript"),
     "jsx": ("tree_sitter_javascript", "javascript"),
     "mjs": ("tree_sitter_javascript", "javascript"),
@@ -159,7 +159,7 @@ _TS_PATTERN = (
 
 _SHELL_PATTERN = r"(?:^|\n)(?:function\s+)?\w+\s*\(\s*\)\s*\{"
 
-REGEX_PATTERNS: Dict[str, str] = {
+REGEX_PATTERNS: dict[str, str] = {
     "js": _JS_PATTERN,
     "jsx": _JS_PATTERN,
     "mjs": _JS_PATTERN,

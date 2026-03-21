@@ -14,6 +14,7 @@ import os
 import pytest
 
 from stele.engine import Stele
+from stele.engine_utils import detect_project_root
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +64,7 @@ class TestProjectRootDetection:
         orig = os.getcwd()
         try:
             os.chdir(isolated)
-            root = Stele._detect_project_root()
+            root = detect_project_root()
             assert root is None
         finally:
             os.chdir(orig)

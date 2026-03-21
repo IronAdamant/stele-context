@@ -11,6 +11,8 @@ to discover and call Stele tools naturally.
 Supports multi-modal content: text, code, images, PDFs, audio, video.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -18,7 +20,7 @@ import threading
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 from stele.engine import Stele
@@ -55,6 +57,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         """Initialize with Stele instance and server agent ID."""
         self.stele = stele
         self._server_agent_id = server_agent_id
+        self._tool_map = self._build_tool_map()
         super().__init__(*args, **kwargs)
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -81,7 +84,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         else:
             self._send_error(404, "Not found")
 
-    def _build_tool_map(self) -> Dict[str, Any]:
+    def _build_tool_map(self) -> dict[str, Any]:
         """Build tool name -> callable mapping via mcp_handlers."""
         modality_flags = {
             "image": HAS_IMAGE_CHUNKER,
@@ -98,9 +101,8 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         Tools added to the map but missing from schemas get a minimal entry,
         so they're always discoverable.
         """
-        tool_map = self._build_tool_map()
-        tools: List[Dict[str, Any]] = []
-        for name in tool_map:
+        tools: list[dict[str, Any]] = []
+        for name in self._tool_map:
             schema = _TOOL_SCHEMAS.get(
                 name,
                 {
@@ -136,9 +138,8 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                 self._send_error(400, "Missing 'tool' field")
                 return
 
-            tool_map = self._build_tool_map()
             result = execute_tool(
-                tool_name, parameters, tool_map, self._server_agent_id
+                tool_name, parameters, self._tool_map, self._server_agent_id
             )
             self._send_json_response(result)
 
@@ -148,7 +149,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             logger.exception("Error executing tool")
             self._send_error(500, str(e))
 
-    def _send_json_response(self, data: Dict[str, Any], status: int = 200) -> None:
+    def _send_json_response(self, data: dict[str, Any], status: int = 200) -> None:
         """Send JSON response."""
         response = json.dumps(data, indent=2).encode("utf-8")
 
@@ -184,15 +185,15 @@ class MCPServer:
         stele: Stele,
         host: str = "localhost",
         port: int = 9876,
-        agent_id: Optional[str] = None,
+        agent_id: str | None = None,
     ):
         self.stele = stele
         self.host = host
         self.port = port
         self.agent_id = agent_id or f"stele-http-{os.getpid()}"
-        self.server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
-        self._heartbeat_thread: Optional[threading.Thread] = None
+        self.server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self._heartbeat_thread: threading.Thread | None = None
 
     def start(self, blocking: bool = False) -> None:
         """Start the MCP server."""

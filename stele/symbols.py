@@ -10,8 +10,9 @@ re-exports the Symbol dataclass, owns the AST-based Python extractor,
 the dispatcher class, and the resolution algorithm.
 """
 
+from __future__ import annotations
+
 import ast
-from typing import Dict, List, Set, Tuple
 
 from stele.symbol_patterns import (
     Symbol,
@@ -216,7 +217,7 @@ class SymbolExtractor:
         document_path: str,
         chunk_id: str,
         language: str,
-    ) -> List[Symbol]:
+    ) -> list[Symbol]:
         """Extract symbols from a chunk's content.
 
         Args:
@@ -253,14 +254,14 @@ class SymbolExtractor:
 
     def _extract_python(
         self, content: str, doc_path: str, chunk_id: str
-    ) -> List[Symbol]:
+    ) -> list[Symbol]:
         """Extract symbols from Python using AST, with regex fallback."""
         try:
             tree = ast.parse(content)
         except SyntaxError:
             return extract_python_regex(content, doc_path, chunk_id)
 
-        symbols: List[Symbol] = []
+        symbols: list[Symbol] = []
 
         for node in ast.walk(tree):
             line = getattr(node, "lineno", None)
@@ -331,13 +332,13 @@ class SymbolExtractor:
 # -- Resolution --------------------------------------------------------------
 
 
-def _build_module_hints(symbols: List[Symbol]) -> Dict[str, Set[str]]:
+def _build_module_hints(symbols: list[Symbol]) -> dict[str, set[str]]:
     """Build chunk_id -> set of module paths referenced in that chunk.
 
     Used to prefer definitions from imported modules over unrelated
     files that happen to define a symbol with the same name.
     """
-    hints: Dict[str, Set[str]] = {}
+    hints: dict[str, set[str]] = {}
     for sym in symbols:
         if sym.role == "reference" and sym.kind == "module":
             hints.setdefault(sym.chunk_id, set()).add(sym.name)
@@ -359,7 +360,7 @@ def _module_matches_path(module_name: str, file_path: str) -> bool:
     return norm.endswith(f"/{parts}.py") or norm.endswith(f"/{parts}/__init__.py")
 
 
-def resolve_symbols(symbols: List[Symbol]) -> List[Tuple[str, str, str, str]]:
+def resolve_symbols(symbols: list[Symbol]) -> list[tuple[str, str, str, str]]:
     """Resolve references to definitions, producing edges.
 
     Returns list of (source_chunk_id, target_chunk_id, edge_type, symbol_name).
@@ -370,7 +371,7 @@ def resolve_symbols(symbols: List[Symbol]) -> List[Tuple[str, str, str, str]]:
     over an unrelated ``Baz`` in another file.
     """
     # Build definition index: name -> [(chunk_id, document_path)]
-    definitions: Dict[str, List[Tuple[str, str]]] = {}
+    definitions: dict[str, list[tuple[str, str]]] = {}
     for sym in symbols:
         if sym.role == "definition":
             definitions.setdefault(sym.name, []).append(
@@ -381,8 +382,8 @@ def resolve_symbols(symbols: List[Symbol]) -> List[Tuple[str, str, str, str]]:
     module_hints = _build_module_hints(symbols)
 
     # Match references to definitions
-    edges: List[Tuple[str, str, str, str]] = []
-    seen: Set[Tuple[str, str, str]] = set()
+    edges: list[tuple[str, str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
 
     for sym in symbols:
         if sym.role != "reference":

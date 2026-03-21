@@ -6,12 +6,14 @@ for multi-agent coordination. Follows the same delegate pattern as
 SessionStorage, MetadataStorage, and SymbolStorage.
 """
 
+from __future__ import annotations
+
 import json
 import sqlite3
 import time
 from pathlib import Path
 from stele.storage_schema import connect
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class DocumentLockStorage:
@@ -33,7 +35,7 @@ class DocumentLockStorage:
         agent_id: str,
         ttl: float = 300.0,
         force: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Acquire exclusive ownership of a document.
 
         Expired locks are transparently reclaimed.  If ``force=True``,
@@ -86,8 +88,8 @@ class DocumentLockStorage:
         self,
         document_path: str,
         agent_id: str,
-        ttl: Optional[float] = None,
-    ) -> Dict[str, Any]:
+        ttl: float | None = None,
+    ) -> dict[str, Any]:
         """Reset the TTL timer on an existing lock without releasing it.
 
         Only the lock holder can refresh.  Optionally sets a new TTL.
@@ -118,7 +120,7 @@ class DocumentLockStorage:
         self,
         document_path: str,
         agent_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Release ownership.  Only the holder can release."""
         with connect(self.db_path) as conn:
             row = conn.execute(
@@ -137,7 +139,7 @@ class DocumentLockStorage:
             conn.commit()
             return {"released": True}
 
-    def get_lock_status(self, document_path: str) -> Dict[str, Any]:
+    def get_lock_status(self, document_path: str) -> dict[str, Any]:
         """Check lock status.  Expired locks are reported as unlocked."""
         now = time.time()
         with connect(self.db_path) as conn:
@@ -164,7 +166,7 @@ class DocumentLockStorage:
                 "expires_at": locked_at + ttl,
             }
 
-    def release_agent_locks(self, agent_id: str) -> Dict[str, Any]:
+    def release_agent_locks(self, agent_id: str) -> dict[str, Any]:
         """Release all locks held by an agent (cleanup on disconnect)."""
         with connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -181,7 +183,7 @@ class DocumentLockStorage:
                 conn.commit()
             return {"released_count": len(docs), "documents": docs}
 
-    def reap_expired_locks(self) -> Dict[str, Any]:
+    def reap_expired_locks(self) -> dict[str, Any]:
         """Clear all expired locks.  Returns details of reaped locks."""
         now = time.time()
         with connect(self.db_path) as conn:
@@ -213,7 +215,7 @@ class DocumentLockStorage:
                 ],
             }
 
-    def get_lock_stats(self) -> Dict[str, Any]:
+    def get_lock_stats(self) -> dict[str, Any]:
         """Get aggregate lock and conflict statistics."""
         now = time.time()
         with connect(self.db_path) as conn:
@@ -254,7 +256,7 @@ class DocumentLockStorage:
 
     # -- Optimistic locking ---------------------------------------------------
 
-    def get_version(self, document_path: str) -> Optional[int]:
+    def get_version(self, document_path: str) -> int | None:
         """Get current version of a document."""
         with connect(self.db_path) as conn:
             row = conn.execute(
@@ -282,7 +284,7 @@ class DocumentLockStorage:
         self,
         document_path: str,
         expected_version: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Atomic compare-and-swap on doc_version.
 
         Returns ``{"success": True, "new_version": N}`` on match,
@@ -319,11 +321,11 @@ class DocumentLockStorage:
         agent_a: str,
         agent_b: str,
         conflict_type: str,
-        expected_version: Optional[int] = None,
-        actual_version: Optional[int] = None,
+        expected_version: int | None = None,
+        actual_version: int | None = None,
         resolution: str = "rejected",
-        details: Optional[Dict[str, Any]] = None,
-    ) -> Optional[int]:
+        details: dict[str, Any] | None = None,
+    ) -> int | None:
         """Log a conflict event.  Returns conflict ID."""
         with connect(self.db_path) as conn:
             return self._record_conflict(
@@ -345,11 +347,11 @@ class DocumentLockStorage:
         agent_a: str,
         agent_b: str,
         conflict_type: str,
-        expected_version: Optional[int] = None,
-        actual_version: Optional[int] = None,
+        expected_version: int | None = None,
+        actual_version: int | None = None,
         resolution: str = "rejected",
-        details: Optional[Dict[str, Any]] = None,
-    ) -> Optional[int]:
+        details: dict[str, Any] | None = None,
+    ) -> int | None:
         """Internal: log conflict within an existing connection."""
         now = time.time()
         details_json = json.dumps(details) if details else None
@@ -377,15 +379,15 @@ class DocumentLockStorage:
 
     def get_conflicts(
         self,
-        document_path: Optional[str] = None,
-        agent_id: Optional[str] = None,
+        document_path: str | None = None,
+        agent_id: str | None = None,
         limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Retrieve conflict history with optional filters."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             conditions = []
-            params: List[Any] = []
+            params: list[Any] = []
 
             if document_path is not None:
                 conditions.append("document_path = ?")
@@ -415,8 +417,8 @@ class DocumentLockStorage:
 
     def prune_conflicts(
         self,
-        max_age_seconds: Optional[float] = None,
-        max_entries: Optional[int] = None,
+        max_age_seconds: float | None = None,
+        max_entries: int | None = None,
     ) -> int:
         """Prune old conflict entries.  Returns deleted count."""
         deleted = 0

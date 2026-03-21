@@ -3,6 +3,7 @@
 from stele import __version__
 from stele.engine import Stele
 from stele.chunkers.base import Chunk
+from stele.indexing import merge_similar_chunks
 
 
 class TestSteleEngine:
@@ -230,7 +231,9 @@ def multiply(a, b):
             ),
         ]
 
-        merged = cf._merge_similar_chunks(chunks)
+        merged = merge_similar_chunks(
+            chunks, cf.merge_threshold, cf.max_chunk_size, cf.MODALITY_THRESHOLDS
+        )
         # High similarity chunks should merge
         assert len(merged) <= len(chunks)
 

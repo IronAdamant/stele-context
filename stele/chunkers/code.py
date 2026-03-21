@@ -9,9 +9,11 @@ Splits code files into semantically coherent chunks using:
 Tree-sitter is optional: pip install stele[tree-sitter]
 """
 
+from __future__ import annotations
+
 import ast
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from stele.chunkers.base import BaseChunker, Chunk, estimate_tokens
 from stele.chunkers.code_patterns import (
@@ -35,10 +37,10 @@ except ImportError:
 # Grammar loaders -- each returns a tree_sitter.Language or None.
 # We import individual grammar packages lazily so missing ones don't crash.
 
-_GRAMMAR_CACHE: Dict[str, Any] = {}
+_GRAMMAR_CACHE: dict[str, Any] = {}
 
 
-def _get_ts_parser(ext: str) -> Optional[Any]:
+def _get_ts_parser(ext: str) -> Any | None:
     """Get a tree-sitter parser for a file extension, or None."""
     if not HAS_TREE_SITTER:
         return None
@@ -92,7 +94,7 @@ class CodeChunker(BaseChunker):
         self.chunk_size = chunk_size
         self.max_chunk_size = max_chunk_size
 
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Return supported code file extensions."""
         return [
             ".py",
@@ -143,7 +145,7 @@ class CodeChunker(BaseChunker):
         content: Any,
         document_path: str,
         **kwargs: Any,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """Split code content into chunks."""
         if not isinstance(content, str):
             content = str(content)
@@ -173,7 +175,7 @@ class CodeChunker(BaseChunker):
         document_path: str,
         parser: Any,
         lang_key: str,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """Chunk code using tree-sitter AST."""
         try:
             tree = parser.parse(content.encode("utf-8"))
@@ -184,7 +186,7 @@ class CodeChunker(BaseChunker):
         def_types = DEFINITION_TYPES.get(lang_key, frozenset())
 
         # Collect top-level definition boundaries
-        definitions: List[Dict[str, Any]] = []
+        definitions: list[dict[str, Any]] = []
         for child in root.children:
             if child.type in def_types:
                 definitions.append(
@@ -209,17 +211,17 @@ class CodeChunker(BaseChunker):
         self,
         content: str,
         document_path: str,
-        definitions: List[Dict[str, Any]],
+        definitions: list[dict[str, Any]],
         language: str,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """Convert a list of definition boundaries into Chunk objects.
 
         Shared by tree-sitter and Python AST paths.  Accumulates
         definitions into chunks respecting chunk_size limits.
         """
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
         chunk_index = 0
-        current_parts: List[str] = []
+        current_parts: list[str] = []
         current_start = 0
         current_tokens = 0
         last_end = 0
@@ -297,7 +299,7 @@ class CodeChunker(BaseChunker):
 
     # -- Python AST chunking --------------------------------------------------
 
-    def _chunk_python(self, content: str, document_path: str) -> List[Chunk]:
+    def _chunk_python(self, content: str, document_path: str) -> list[Chunk]:
         """Chunk Python code using stdlib ast."""
         try:
             tree = ast.parse(content)
@@ -306,7 +308,7 @@ class CodeChunker(BaseChunker):
 
         lines = content.splitlines(keepends=True)
 
-        definitions: List[Dict[str, Any]] = []
+        definitions: list[dict[str, Any]] = []
         for node in ast.iter_child_nodes(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 start_line = node.lineno - 1
@@ -343,7 +345,7 @@ class CodeChunker(BaseChunker):
         content: str,
         document_path: str,
         language: str,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """Chunk code using regex patterns (fallback).
 
         Delegates to _boundaries_to_chunks so chunk_size limits are respected,
@@ -355,7 +357,7 @@ class CodeChunker(BaseChunker):
         if not matches:
             return self._chunk_by_lines(content, document_path, language)
 
-        definitions: List[Dict[str, Any]] = []
+        definitions: list[dict[str, Any]] = []
         for i, m in enumerate(matches):
             end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
             definitions.append(
@@ -373,10 +375,10 @@ class CodeChunker(BaseChunker):
         content: str,
         document_path: str,
         language: str,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """Fallback: chunk by line count."""
         lines = content.splitlines(keepends=True)
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
         chunk_index = 0
 
         total_tokens = estimate_tokens(content) if content else 1

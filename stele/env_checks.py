@@ -8,15 +8,17 @@ cause subtle bugs in multi-agent/worktree workflows:
 - Editable pip installs pointing to worktree paths
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 
 def scan_stale_pycache(
     root: Path,
-    skip_dirs: Optional[Set[str]] = None,
-) -> Dict[str, Any]:
+    skip_dirs: set[str] | None = None,
+) -> dict[str, Any]:
     """Find ``__pycache__`` directories containing orphaned ``.pyc`` files.
 
     A ``.pyc`` file is considered orphaned when its corresponding ``.py``
@@ -28,7 +30,7 @@ def scan_stale_pycache(
     if skip_dirs is None:
         skip_dirs = {".git", "node_modules", ".venv", "venv"}
 
-    stale_dirs: List[Dict[str, Any]] = []
+    stale_dirs: list[dict[str, Any]] = []
     total_stale = 0
 
     for cache_dir in root.rglob("__pycache__"):
@@ -69,8 +71,8 @@ def scan_stale_pycache(
 
 def clean_stale_pycache(
     root: Path,
-    skip_dirs: Optional[Set[str]] = None,
-) -> Dict[str, Any]:
+    skip_dirs: set[str] | None = None,
+) -> dict[str, Any]:
     """Remove orphaned ``.pyc`` files and empty ``__pycache__`` directories.
 
     Returns scan results plus a ``cleaned`` count.
@@ -94,8 +96,8 @@ def clean_stale_pycache(
 
 
 def check_editable_installs(
-    project_root: Optional[Path] = None,
-) -> Dict[str, Any]:
+    project_root: Path | None = None,
+) -> dict[str, Any]:
     """Check for editable pip installs pointing outside the project root.
 
     An editable install (``pip install -e .``) from a worktree redirects
@@ -105,7 +107,7 @@ def check_editable_installs(
     Uses ``importlib.metadata`` (stdlib) to inspect ``direct_url.json``
     (PEP 610) for editable installs.
     """
-    issues: List[Dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
 
     try:
         import importlib.metadata

@@ -8,8 +8,10 @@ Uses stdlib tomllib (Python 3.11+) with a minimal fallback parser
 for Python 3.9-3.10.  Zero external dependencies.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 # Prefer stdlib tomllib (3.11+), then tomli, then builtin fallback
 try:
@@ -21,7 +23,7 @@ except ModuleNotFoundError:
         tomllib = None  # type: ignore[assignment]
 
 
-def _parse_toml_minimal(text: str) -> Dict[str, Any]:
+def _parse_toml_minimal(text: str) -> dict[str, Any]:
     """Minimal TOML parser for flat config files.
 
     Handles:
@@ -35,8 +37,8 @@ def _parse_toml_minimal(text: str) -> Dict[str, Any]:
     Does NOT handle nested tables, inline tables, multi-line strings,
     or other advanced TOML features.  Sufficient for .stele.toml.
     """
-    result: Dict[str, Any] = {}
-    current_section: Optional[str] = None
+    result: dict[str, Any] = {}
+    current_section: str | None = None
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -118,7 +120,7 @@ def _parse_value(val: str) -> Any:
     return val
 
 
-def load_config(project_root: Optional[Path] = None) -> Dict[str, Any]:
+def load_config(project_root: Path | None = None) -> dict[str, Any]:
     """Load configuration from .stele.toml in the project root.
 
     Returns a flat dict of config values from the [stele] section.
@@ -149,22 +151,22 @@ def load_config(project_root: Optional[Path] = None) -> Dict[str, Any]:
 
 
 def apply_config(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     *,
-    storage_dir: Optional[str] = None,
-    chunk_size: Optional[int] = None,
-    max_chunk_size: Optional[int] = None,
-    merge_threshold: Optional[float] = None,
-    change_threshold: Optional[float] = None,
-    search_alpha: Optional[float] = None,
-    skip_dirs: Optional[set] = None,
-) -> Dict[str, Any]:
+    storage_dir: str | None = None,
+    chunk_size: int | None = None,
+    max_chunk_size: int | None = None,
+    merge_threshold: float | None = None,
+    change_threshold: float | None = None,
+    search_alpha: float | None = None,
+    skip_dirs: set | None = None,
+) -> dict[str, Any]:
     """Merge config file values with explicit constructor params.
 
     Explicit params always win.  Returns a dict with resolved values.
     Only keys present in either source are included.
     """
-    resolved: Dict[str, Any] = {}
+    resolved: dict[str, Any] = {}
 
     _FIELDS = {
         "storage_dir": (storage_dir, str),

@@ -7,7 +7,9 @@ Requires opencv-python for video processing.
 Install: pip install stele[video]
 """
 
-from typing import Any, List
+from __future__ import annotations
+
+from typing import Any
 
 from stele.chunkers.base import BaseChunker, Chunk
 
@@ -57,7 +59,7 @@ class VideoChunker(BaseChunker):
         self.keyframe_interval = keyframe_interval
         self.max_dimension = max_dimension
 
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Return supported video file extensions."""
         return [
             ".mp4",
@@ -74,7 +76,7 @@ class VideoChunker(BaseChunker):
         content: Any,
         document_path: str,
         **kwargs: Any,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """
         Split video into chunks.
 
@@ -123,7 +125,7 @@ class VideoChunker(BaseChunker):
             keyframe_interval_frames = max(1, int(self.keyframe_interval * fps))
 
             # Create chunks
-            chunks: List[Chunk] = []
+            chunks: list[Chunk] = []
             chunk_index = 0
 
             for start_frame in range(0, frame_count, frames_per_segment):
@@ -205,7 +207,7 @@ class VideoChunker(BaseChunker):
     @staticmethod
     def _empty_video_chunk(
         document_path: str, width: int = 0, height: int = 0, duration: float = 0
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """Create an empty fallback chunk for unreadable/empty videos."""
         return [
             Chunk(

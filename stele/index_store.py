@@ -6,12 +6,14 @@ to be rebuilt from SQLite on every startup.  Uses a chunk ID hash
 to detect staleness.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import tempfile
 import zlib
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 try:
     import fcntl
@@ -52,7 +54,7 @@ def _lock_path(index_dir: Path, filename: str) -> Path:
     return index_dir / (filename + ".lock")
 
 
-def _save_compressed_json(data: Dict[str, Any], filename: str, index_dir: Path) -> None:
+def _save_compressed_json(data: dict[str, Any], filename: str, index_dir: Path) -> None:
     """Serialize a dict to a compressed JSON file (atomic write).
 
     Uses fcntl.flock(LOCK_EX) on a sidecar .lock file to prevent
@@ -84,7 +86,7 @@ def _save_compressed_json(data: Dict[str, Any], filename: str, index_dir: Path) 
         lock_fd.close()
 
 
-def _load_compressed_json(filename: str, index_dir: Path) -> Optional[Dict[str, Any]]:
+def _load_compressed_json(filename: str, index_dir: Path) -> dict[str, Any] | None:
     """Load a compressed JSON file, returning None on any error.
 
     Uses fcntl.flock(LOCK_SH) to allow concurrent readers but
@@ -127,7 +129,7 @@ def save_index(index: VectorIndex, chunk_ids_hash: str, index_dir: Path) -> None
     _save_compressed_json(data, INDEX_FILENAME, index_dir)
 
 
-def load_index(index_dir: Path) -> Optional[Dict[str, Any]]:
+def load_index(index_dir: Path) -> dict[str, Any] | None:
     """Load a persisted index file, returning the raw dict or None."""
     return _load_compressed_json(INDEX_FILENAME, index_dir)
 
@@ -135,7 +137,7 @@ def load_index(index_dir: Path) -> Optional[Dict[str, Any]]:
 def load_if_fresh(
     index_dir: Path,
     current_hash: str,
-) -> Optional[VectorIndex]:
+) -> VectorIndex | None:
     """Load persisted index only if it matches the current chunk state."""
     data = load_index(index_dir)
     if data is None:
@@ -159,7 +161,7 @@ def save_bm25(bm25_index: Any, chunk_ids_hash: str, index_dir: Path) -> None:
     _save_compressed_json(data, BM25_FILENAME, index_dir)
 
 
-def load_bm25_if_fresh(index_dir: Path, current_hash: str) -> Optional[Any]:
+def load_bm25_if_fresh(index_dir: Path, current_hash: str) -> Any | None:
     """Load persisted BM25 index if it matches the current chunk state."""
     data = _load_compressed_json(BM25_FILENAME, index_dir)
     if data is None:

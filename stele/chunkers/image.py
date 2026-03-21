@@ -7,8 +7,10 @@ Requires Pillow (PIL) for image processing.
 Install: pip install stele[image]
 """
 
+from __future__ import annotations
+
 import io
-from typing import Any, List, Optional
+from typing import Any
 
 from stele.chunkers.base import BaseChunker, Chunk
 
@@ -37,7 +39,7 @@ class ImageChunker(BaseChunker):
 
     def __init__(
         self,
-        tile_size: Optional[int] = None,
+        tile_size: int | None = None,
         max_dimension: int = 2048,
     ):
         """
@@ -56,7 +58,7 @@ class ImageChunker(BaseChunker):
         self.tile_size = tile_size
         self.max_dimension = max_dimension
 
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Return supported image file extensions."""
         return [
             ".png",
@@ -75,7 +77,7 @@ class ImageChunker(BaseChunker):
         content: Any,
         document_path: str,
         **kwargs: Any,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """
         Split image into chunks.
 
@@ -124,7 +126,7 @@ class ImageChunker(BaseChunker):
 
         return img.resize(new_size, Image.LANCZOS)
 
-    def _chunk_whole_image(self, img: Any, document_path: str) -> List[Chunk]:
+    def _chunk_whole_image(self, img: Any, document_path: str) -> list[Chunk]:
         """Create a single chunk for the whole image."""
         # Convert image to bytes for storage
         img_bytes = io.BytesIO()
@@ -156,13 +158,13 @@ class ImageChunker(BaseChunker):
 
         return [chunk]
 
-    def _chunk_tiled(self, img: Any, document_path: str) -> List[Chunk]:
+    def _chunk_tiled(self, img: Any, document_path: str) -> list[Chunk]:
         """Create chunks from image tiles."""
         width, height = img.size
         assert self.tile_size is not None
         tile_size: int = self.tile_size
 
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
         chunk_index = 0
 
         for y in range(0, height, tile_size):
@@ -230,7 +232,7 @@ class ImageChunker(BaseChunker):
         # Convert to hex
         return hex(int(bits, 2))[2:].zfill(hash_size * hash_size // 4)
 
-    def _color_histogram(self, img: Any, bins: int = 8) -> List[float]:
+    def _color_histogram(self, img: Any, bins: int = 8) -> list[float]:
         """
         Compute color histogram of image.
 
@@ -253,7 +255,7 @@ class ImageChunker(BaseChunker):
             b_hist = b.histogram()
 
             # Normalize each channel
-            def normalize(h: List[int]) -> List[float]:
+            def normalize(h: list[int]) -> list[float]:
                 total = sum(h)
                 if total > 0:
                     return [x / total for x in h]

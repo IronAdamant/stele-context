@@ -5,8 +5,10 @@ All functions receive engine state as explicit parameters -- no imports
 back to engine.py, no circular dependencies.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from stele.chunkers.base import Chunk
 from stele.chunkers.numpy_compat import (
@@ -32,11 +34,11 @@ _DEF_STARTS = (
 
 
 def merge_similar_chunks(
-    chunks: List[Chunk],
+    chunks: list[Chunk],
     merge_threshold: float,
     max_chunk_size: int,
-    modality_thresholds: Dict[str, Dict[str, float]],
-) -> List[Chunk]:
+    modality_thresholds: dict[str, dict[str, float]],
+) -> list[Chunk]:
     """Merge adjacent chunks with high similarity (single-pass).
 
     Uses modality-specific merge thresholds: code chunks require
@@ -86,7 +88,7 @@ def merge_similar_chunks(
 
 
 def persist_chunks(
-    chunks: List[Chunk],
+    chunks: list[Chunk],
     doc_path: str,
     storage: Any,
     vector_index: Any,
@@ -134,7 +136,7 @@ def remove_stale_chunks(
 
 def check_document_ownership(
     document_path: str,
-    agent_id: Optional[str],
+    agent_id: str | None,
     do_get_lock_status: Any,
     do_record_conflict: Any,
 ) -> None:
@@ -171,14 +173,14 @@ def chunk_and_store(
     content_hash: str,
     modality: str,
     storage: Any,
-    chunkers: Dict[str, Any],
+    chunkers: dict[str, Any],
     vector_index: Any,
     bm25_index: Any,
     bm25_ready: bool,
     symbol_manager: Any,
     merge_threshold: float,
     max_chunk_size: int,
-    modality_thresholds: Dict[str, Dict[str, float]],
+    modality_thresholds: dict[str, dict[str, float]],
 ) -> list:
     """Chunk a single file, persist chunks, extract symbols, return Chunk list.
 
@@ -229,10 +231,10 @@ def chunk_and_store(
 
 
 def index_documents_unlocked(
-    paths: List[str],
+    paths: list[str],
     force_reindex: bool,
-    agent_id: Optional[str],
-    expected_versions: Optional[Dict[str, int]],
+    agent_id: str | None,
+    expected_versions: dict[str, int] | None,
     *,
     expand_paths: Any,
     normalize_path: Any,
@@ -240,28 +242,28 @@ def index_documents_unlocked(
     detect_modality: Any,
     read_and_hash: Any,
     storage: Any,
-    chunkers: Dict[str, Any],
+    chunkers: dict[str, Any],
     vector_index: Any,
     bm25_index: Any,
     bm25_ready: bool,
     symbol_manager: Any,
     merge_threshold: float,
     max_chunk_size: int,
-    modality_thresholds: Dict[str, Dict[str, float]],
+    modality_thresholds: dict[str, dict[str, float]],
     do_get_lock_status: Any,
     do_acquire_lock: Any,
     do_record_conflict: Any,
     save_index: Any,
     save_bm25: Any,
     coordination: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Core body of index_documents, extracted for engine delegation."""
     paths = expand_paths(paths)
 
     if expected_versions:
         expected_versions = {normalize_path(k): v for k, v in expected_versions.items()}
 
-    results: Dict[str, Any] = {
+    results: dict[str, Any] = {
         "indexed": [],
         "skipped": [],
         "errors": [],
@@ -393,7 +395,7 @@ def index_documents_unlocked(
     return results
 
 
-def detect_modality(file_path: str, chunkers: Dict[str, Any]) -> str:
+def detect_modality(file_path: str, chunkers: dict[str, Any]) -> str:
     """Detect file modality from extension (no lock needed)."""
     ext = Path(file_path).suffix.lower()
     if ext in chunkers["code"].supported_extensions():
@@ -407,16 +409,16 @@ def detect_modality(file_path: str, chunkers: Dict[str, Any]) -> str:
 
 
 def expand_paths(
-    paths: List[str],
-    chunkers: Dict[str, Any],
-    skip_dirs: Set[str],
+    paths: list[str],
+    chunkers: dict[str, Any],
+    skip_dirs: set[str],
     normalize_path: Any,
-) -> List[str]:
+) -> list[str]:
     """Expand directories and globs into individual file paths."""
     supported: set = set()
     for chunker in chunkers.values():
         supported.update(chunker.supported_extensions())
-    expanded: List[str] = []
+    expanded: list[str] = []
     for path_str in paths:
         p = Path(path_str)
         if p.is_file():
@@ -438,10 +440,10 @@ def annotate_unlocked(
     target: str,
     target_type: str,
     content: str,
-    tags: Optional[List[str]],
+    tags: list[str] | None,
     storage: Any,
     normalize_path: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Validate and store an annotation (no lock -- caller holds it)."""
     if target_type == "document":
         target = normalize_path(target)
@@ -458,7 +460,7 @@ def annotate_unlocked(
 
 def remove_document_unlocked(
     document_path: str,
-    agent_id: Optional[str],
+    agent_id: str | None,
     *,
     normalize_path: Any,
     do_get_lock_status: Any,
@@ -470,7 +472,7 @@ def remove_document_unlocked(
     save_index: Any,
     save_bm25: Any,
     coordination: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Remove a document and all its chunks, annotations, and index entries."""
     document_path = normalize_path(document_path)
     check_document_ownership(

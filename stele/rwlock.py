@@ -5,6 +5,8 @@ Allows multiple concurrent readers OR a single exclusive writer.
 Uses only stdlib (threading.Lock + threading.Condition).
 """
 
+from __future__ import annotations
+
 import threading
 from contextlib import contextmanager
 

@@ -5,7 +5,9 @@ Provides high-level session operations wrapping SessionStorage
 with HNSW-accelerated chunk retrieval.
 """
 
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+from typing import Any
 
 from stele.chunkers.base import Chunk
 from stele.chunkers.numpy_compat import (
@@ -38,7 +40,7 @@ class SessionManager:
         session_id: str,
         query: str,
         top_k: int = 10,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Get chunks most relevant to a query, returning content.
 
@@ -112,9 +114,9 @@ class SessionManager:
     def save_state(
         self,
         session_id: str,
-        kv_data: Dict[str, Any],
-        chunk_ids: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        kv_data: dict[str, Any],
+        chunk_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Save state for a session. Alias for save_kv_state."""
         self.storage.create_session(session_id)
         session = self.storage.get_session(session_id)
@@ -165,7 +167,7 @@ class SessionManager:
         self,
         session_id: str,
         target_turn: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Rollback session to a previous turn."""
         session = self.storage.get_session(session_id)
 
@@ -193,7 +195,7 @@ class SessionManager:
         self,
         session_id: str,
         max_tokens: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Prune low-relevance chunks to stay under token limit."""
         session = self.storage.get_session(session_id)
 

@@ -7,7 +7,9 @@ Requires librosa for audio processing.
 Install: pip install stele[audio]
 """
 
-from typing import Any, Dict, List
+from __future__ import annotations
+
+from typing import Any
 
 from stele.chunkers.base import BaseChunker, Chunk
 
@@ -59,7 +61,7 @@ class AudioChunker(BaseChunker):
         self.sample_rate = sample_rate
         self.n_mfcc = n_mfcc
 
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         """Return supported audio file extensions."""
         return [
             ".mp3",
@@ -76,7 +78,7 @@ class AudioChunker(BaseChunker):
         content: Any,
         document_path: str,
         **kwargs: Any,
-    ) -> List[Chunk]:
+    ) -> list[Chunk]:
         """
         Split audio into chunks.
 
@@ -112,7 +114,7 @@ class AudioChunker(BaseChunker):
         segment_samples = int(self.segment_duration * sr)
 
         # Create chunks
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
         chunk_index = 0
 
         for start_sample in range(0, len(y), segment_samples):
@@ -172,7 +174,7 @@ class AudioChunker(BaseChunker):
         # Return mean across time
         return mfcc.mean(axis=1)
 
-    def _compute_spectral_features(self, y: Any, sr: int) -> Dict[str, float]:
+    def _compute_spectral_features(self, y: Any, sr: int) -> dict[str, float]:
         """Compute spectral features."""
         # Spectral centroid
         spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr).mean()

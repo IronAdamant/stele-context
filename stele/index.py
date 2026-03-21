@@ -9,13 +9,15 @@ This enables O(log n) similarity search instead of O(n) scan,
 dramatically improving performance for large chunk collections.
 """
 
+from __future__ import annotations
+
 import array
 import heapq
 import math
 import random
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 
 def _to_float_array(vec: Any) -> array.array:
@@ -32,8 +34,8 @@ class IndexNode:
     node_id: str
     vector: Any  # array.array('f') for performance
     level: int = 0
-    connections: Dict[int, Set[str]] = field(default_factory=lambda: defaultdict(set))
-    _norm: Optional[float] = field(default=None, repr=False)
+    connections: dict[int, set[str]] = field(default_factory=lambda: defaultdict(set))
+    _norm: float | None = field(default=None, repr=False)
 
     @property
     def norm(self) -> float:
@@ -62,7 +64,7 @@ class HNSWIndex:
         M: int = 16,
         ef_construction: int = 200,
         ef_search: int = 50,
-        ml: Optional[float] = None,
+        ml: float | None = None,
     ):
         """
         Initialize HNSW index.
@@ -80,8 +82,8 @@ class HNSWIndex:
         self.ml = ml if ml is not None else 1.0 / math.log(M)
 
         # Storage
-        self.nodes: Dict[str, IndexNode] = {}
-        self.entry_point: Optional[str] = None
+        self.nodes: dict[str, IndexNode] = {}
+        self.entry_point: str | None = None
         self.max_level: int = 0
 
         # Statistics
@@ -117,8 +119,8 @@ class HNSWIndex:
         self,
         vec1: Any,
         vec2: Any,
-        norm1: Optional[float] = None,
-        norm2: Optional[float] = None,
+        norm1: float | None = None,
+        norm2: float | None = None,
     ) -> float:
         """Compute cosine similarity between vectors, using cached norms if provided."""
         dot = sum(a * b for a, b in zip(vec1, vec2))
@@ -132,11 +134,11 @@ class HNSWIndex:
 
     def _search_layer(
         self,
-        query: "List[float] | array.array[float]",
-        entry_points: Set[str],
+        query: list[float] | array.array,
+        entry_points: set[str],
         ef: int,
         level: int,
-    ) -> List[Tuple[float, str]]:
+    ) -> list[tuple[float, str]]:
         """
         Search for nearest neighbors in a single layer.
 
@@ -150,17 +152,17 @@ class HNSWIndex:
             List of (distance, node_id) tuples sorted by distance
         """
         # Visited set
-        visited: Set[str] = set(entry_points)
+        visited: set[str] = set(entry_points)
 
         # Candidates (min-heap by distance)
-        candidates: List[Tuple[float, str]] = []
+        candidates: list[tuple[float, str]] = []
         for ep in entry_points:
             if ep in self.nodes:
                 dist = self._distance(query, self.nodes[ep].vector)
                 heapq.heappush(candidates, (dist, ep))
 
         # Results (max-heap by distance, keep worst at top)
-        results: List[Tuple[float, str]] = []
+        results: list[tuple[float, str]] = []
         for dist, node_id in candidates:
             heapq.heappush(results, (-dist, node_id))
 
@@ -200,10 +202,10 @@ class HNSWIndex:
     def _select_neighbors(
         self,
         node_id: str,
-        candidates: List[Tuple[float, str]],
+        candidates: list[tuple[float, str]],
         M: int,
         level: int,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Select best neighbors for a node using simple heuristic.
 
@@ -220,7 +222,7 @@ class HNSWIndex:
         candidates.sort(key=lambda x: x[0])
 
         # Select closest M neighbors
-        selected: List[str] = []
+        selected: list[str] = []
         for dist, cand_id in candidates:
             if len(selected) >= M:
                 break
@@ -330,10 +332,10 @@ class HNSWIndex:
 
     def search(
         self,
-        query: List[float],
+        query: list[float],
         k: int = 10,
-        ef: Optional[int] = None,
-    ) -> List[Tuple[str, float]]:
+        ef: int | None = None,
+    ) -> list[tuple[str, float]]:
         """
         Search for k nearest neighbors.
 
@@ -452,7 +454,7 @@ class HNSWIndex:
 
         return True
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get index statistics."""
         if not self.nodes:
             return {
@@ -480,7 +482,7 @@ class HNSWIndex:
         self.max_level = 0
         self._insert_count = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize index state to a plain dict."""
         nodes = {}
         for nid, node in self.nodes.items():
@@ -501,7 +503,7 @@ class HNSWIndex:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "HNSWIndex":
+    def from_dict(cls, data: dict[str, Any]) -> "HNSWIndex":
         """Reconstruct index from serialized dict."""
         idx = cls(
             M=data["M"],
@@ -553,7 +555,7 @@ class VectorIndex:
             ef_search=ef_search,
         )
 
-    def add_chunk(self, chunk_id: str, vector: List[float]) -> None:
+    def add_chunk(self, chunk_id: str, vector: list[float]) -> None:
         """
         Add a chunk vector to the index.
 
@@ -565,9 +567,9 @@ class VectorIndex:
 
     def search(
         self,
-        query_vector: List[float],
+        query_vector: list[float],
         k: int = 10,
-    ) -> List[Tuple[str, float]]:
+    ) -> list[tuple[str, float]]:
         """
         Search for similar chunks.
 
@@ -592,7 +594,7 @@ class VectorIndex:
         """
         return self.index.remove(chunk_id)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get index statistics."""
         stats = self.index.get_stats()
         stats["chunk_count"] = len(self.index.nodes)
@@ -602,12 +604,12 @@ class VectorIndex:
         """Clear all chunks from the index."""
         self.index.clear()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dict (HNSW graph with embedded vectors)."""
         return {"hnsw": self.index.to_dict()}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "VectorIndex":
+    def from_dict(cls, data: dict[str, Any]) -> "VectorIndex":
         """Reconstruct from serialized dict (handles old and new format)."""
         vi = cls.__new__(cls)
         vi.index = HNSWIndex.from_dict(data["hnsw"])

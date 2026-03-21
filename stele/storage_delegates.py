@@ -6,7 +6,9 @@ SymbolStorage, and DocumentLockStorage.  Extracted from storage.py
 to keep that file under 500 LOC.
 """
 
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+from typing import Any
 
 
 class StorageDelegatesMixin:
@@ -31,7 +33,7 @@ class StorageDelegatesMixin:
         target: str,
         target_type: str,
         content: str,
-        tags: Optional[List[str]] = None,
+        tags: list[str] | None = None,
     ) -> int:
         """Store an annotation on a document or chunk."""
         return self._metadata_storage.store_annotation(
@@ -40,10 +42,10 @@ class StorageDelegatesMixin:
 
     def get_annotations(
         self,
-        target: Optional[str] = None,
-        target_type: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
+        target: str | None = None,
+        target_type: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Retrieve annotations with optional filters."""
         return self._metadata_storage.get_annotations(target, target_type, tags)
 
@@ -53,9 +55,9 @@ class StorageDelegatesMixin:
 
     def record_change(
         self,
-        summary: Dict[str, Any],
-        session_id: Optional[str] = None,
-        reason: Optional[str] = None,
+        summary: dict[str, Any],
+        session_id: str | None = None,
+        reason: str | None = None,
     ) -> int:
         """Record a change history entry."""
         return self._metadata_storage.record_change(summary, session_id, reason)
@@ -63,30 +65,30 @@ class StorageDelegatesMixin:
     def get_change_history(
         self,
         limit: int = 20,
-        document_path: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        document_path: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Retrieve change history entries."""
         return self._metadata_storage.get_change_history(limit, document_path)
 
     def update_annotation(
         self,
         annotation_id: int,
-        content: Optional[str] = None,
-        tags: Optional[List[str]] = None,
+        content: str | None = None,
+        tags: list[str] | None = None,
     ) -> bool:
         """Update an annotation's content and/or tags."""
         return self._metadata_storage.update_annotation(annotation_id, content, tags)
 
     def search_annotations(
-        self, query: str, target_type: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        self, query: str, target_type: str | None = None
+    ) -> list[dict[str, Any]]:
         """Search annotations by content text."""
         return self._metadata_storage.search_annotations(query, target_type)
 
     def prune_history(
         self,
-        max_age_seconds: Optional[float] = None,
-        max_entries: Optional[int] = None,
+        max_age_seconds: float | None = None,
+        max_entries: int | None = None,
     ) -> int:
         """Prune change history entries."""
         return self._metadata_storage.prune_history(max_age_seconds, max_entries)
@@ -105,11 +107,11 @@ class StorageDelegatesMixin:
         """Remove all symbols for a document."""
         self._symbol_storage.clear_document_symbols(document_path)
 
-    def clear_chunk_edges(self, chunk_ids: List[str]) -> None:
+    def clear_chunk_edges(self, chunk_ids: list[str]) -> None:
         """Remove all edges involving the given chunk IDs."""
         self._symbol_storage.clear_chunk_edges(chunk_ids)
 
-    def clear_chunk_symbols(self, chunk_ids: List[str]) -> None:
+    def clear_chunk_symbols(self, chunk_ids: list[str]) -> None:
         """Remove all symbols for the given chunk IDs."""
         self._symbol_storage.clear_chunk_symbols(chunk_ids)
 
@@ -121,57 +123,57 @@ class StorageDelegatesMixin:
         """Remove all edges."""
         self._symbol_storage.clear_all_edges()
 
-    def get_all_symbols(self) -> List[Dict[str, Any]]:
+    def get_all_symbols(self) -> list[dict[str, Any]]:
         """Get all symbols."""
         return self._symbol_storage.get_all_symbols()
 
-    def find_definitions(self, name: str) -> List[Dict[str, Any]]:
+    def find_definitions(self, name: str) -> list[dict[str, Any]]:
         """Find all definitions for a symbol name."""
         return self._symbol_storage.find_definitions(name)
 
-    def find_references_by_name(self, name: str) -> List[Dict[str, Any]]:
+    def find_references_by_name(self, name: str) -> list[dict[str, Any]]:
         """Find all references to a symbol name."""
         return self._symbol_storage.find_references_by_name(name)
 
-    def get_edges_for_chunk(self, chunk_id: str) -> List[Dict[str, Any]]:
+    def get_edges_for_chunk(self, chunk_id: str) -> list[dict[str, Any]]:
         """Get all edges involving a chunk."""
         return self._symbol_storage.get_edges_for_chunk(chunk_id)
 
-    def get_incoming_edges(self, chunk_id: str) -> List[Dict[str, Any]]:
+    def get_incoming_edges(self, chunk_id: str) -> list[dict[str, Any]]:
         """Get edges where other chunks reference this chunk."""
         return self._symbol_storage.get_incoming_edges(chunk_id)
 
-    def get_outgoing_edges(self, chunk_id: str) -> List[Dict[str, Any]]:
+    def get_outgoing_edges(self, chunk_id: str) -> list[dict[str, Any]]:
         """Get edges where this chunk references other chunks."""
         return self._symbol_storage.get_outgoing_edges(chunk_id)
 
-    def search_symbol_names(self, tokens: List[str]) -> List[Dict[str, Any]]:
+    def search_symbol_names(self, tokens: list[str]) -> list[dict[str, Any]]:
         """Find definition symbols whose names match query tokens."""
         return self._symbol_storage.search_symbol_names(tokens)
 
-    def get_symbol_stats(self) -> Dict[str, Any]:
+    def get_symbol_stats(self) -> dict[str, Any]:
         """Get symbol and edge statistics."""
         return self._symbol_storage.get_symbol_stats()
 
     # -- Session methods -- delegated to SessionStorage -----------------------
 
-    def create_session(self, session_id: str, agent_id: Optional[str] = None) -> None:
+    def create_session(self, session_id: str, agent_id: str | None = None) -> None:
         """Create a new KV-cache session."""
         self._session_storage.create_session(session_id, agent_id=agent_id)
 
-    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def get_session(self, session_id: str) -> dict[str, Any] | None:
         """Get session information."""
         return self._session_storage.get_session(session_id)
 
-    def list_sessions(self, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_sessions(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         """List sessions, optionally filtered by agent_id."""
         return self._session_storage.list_sessions(agent_id=agent_id)
 
     def update_session(
         self,
         session_id: str,
-        turn_count: Optional[int] = None,
-        total_tokens: Optional[int] = None,
+        turn_count: int | None = None,
+        total_tokens: int | None = None,
     ) -> None:
         """Update session metadata."""
         self._session_storage.update_session(session_id, turn_count, total_tokens)
@@ -194,15 +196,15 @@ class StorageDelegatesMixin:
         session_id: str,
         chunk_id: str,
         turn_number: int,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Load KV-cache state for a chunk in a session."""
         return self._session_storage.load_kv_state(session_id, chunk_id, turn_number)
 
     def get_session_chunks(
         self,
         session_id: str,
-        turn_number: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        turn_number: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Get all chunks associated with a session."""
         return self._session_storage.get_session_chunks(session_id, turn_number)
 
@@ -222,7 +224,7 @@ class StorageDelegatesMixin:
         agent_id: str,
         ttl: float = 300.0,
         force: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Acquire exclusive ownership of a document."""
         return self._document_lock_storage.acquire_lock(
             document_path, agent_id, ttl, force
@@ -232,28 +234,28 @@ class StorageDelegatesMixin:
         self,
         document_path: str,
         agent_id: str,
-        ttl: Optional[float] = None,
-    ) -> Dict[str, Any]:
+        ttl: float | None = None,
+    ) -> dict[str, Any]:
         """Refresh lock TTL without releasing."""
         return self._document_lock_storage.refresh_lock(document_path, agent_id, ttl)
 
     def release_document_lock(
         self, document_path: str, agent_id: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Release ownership of a document."""
         return self._document_lock_storage.release_lock(document_path, agent_id)
 
-    def get_document_lock_status(self, document_path: str) -> Dict[str, Any]:
+    def get_document_lock_status(self, document_path: str) -> dict[str, Any]:
         """Check lock status of a document."""
         return self._document_lock_storage.get_lock_status(document_path)
 
-    def release_agent_locks(self, agent_id: str) -> Dict[str, Any]:
+    def release_agent_locks(self, agent_id: str) -> dict[str, Any]:
         """Release all locks held by an agent."""
         return self._document_lock_storage.release_agent_locks(agent_id)
 
     def check_and_increment_doc_version(
         self, document_path: str, expected_version: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Atomic compare-and-swap on doc_version."""
         return self._document_lock_storage.check_and_increment_version(
             document_path, expected_version
@@ -263,7 +265,7 @@ class StorageDelegatesMixin:
         """Increment document version after write."""
         return self._document_lock_storage.increment_version(document_path)
 
-    def get_document_version(self, document_path: str) -> Optional[int]:
+    def get_document_version(self, document_path: str) -> int | None:
         """Get current document version."""
         return self._document_lock_storage.get_version(document_path)
 
@@ -274,7 +276,7 @@ class StorageDelegatesMixin:
         agent_b: str,
         conflict_type: str,
         **kwargs: Any,
-    ) -> Optional[int]:
+    ) -> int | None:
         """Log a conflict event."""
         return self._document_lock_storage.record_conflict(
             document_path, agent_a, agent_b, conflict_type, **kwargs
@@ -282,25 +284,25 @@ class StorageDelegatesMixin:
 
     def get_conflicts(
         self,
-        document_path: Optional[str] = None,
-        agent_id: Optional[str] = None,
+        document_path: str | None = None,
+        agent_id: str | None = None,
         limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Retrieve conflict history."""
         return self._document_lock_storage.get_conflicts(document_path, agent_id, limit)
 
     def prune_conflicts(
         self,
-        max_age_seconds: Optional[float] = None,
-        max_entries: Optional[int] = None,
+        max_age_seconds: float | None = None,
+        max_entries: int | None = None,
     ) -> int:
         """Prune old conflict entries."""
         return self._document_lock_storage.prune_conflicts(max_age_seconds, max_entries)
 
-    def reap_expired_locks(self) -> Dict[str, Any]:
+    def reap_expired_locks(self) -> dict[str, Any]:
         """Clear all expired document locks."""
         return self._document_lock_storage.reap_expired_locks()
 
-    def get_lock_stats(self) -> Dict[str, Any]:
+    def get_lock_stats(self) -> dict[str, Any]:
         """Get aggregate lock and conflict statistics."""
         return self._document_lock_storage.get_lock_stats()

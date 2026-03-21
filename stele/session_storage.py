@@ -7,13 +7,15 @@ session lifecycle operations (create, update, rollback, prune).
 Uses SQLite for metadata and filesystem for KV-cache blobs.
 """
 
+from __future__ import annotations
+
 import json
 import sqlite3
 import time
 import zlib
 from pathlib import Path
 from stele.storage_schema import connect
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import msgspec
@@ -44,7 +46,7 @@ class SessionStorage:
         self.kv_dir = kv_dir
         self.kv_dir.mkdir(parents=True, exist_ok=True)
 
-    def create_session(self, session_id: str, agent_id: Optional[str] = None) -> None:
+    def create_session(self, session_id: str, agent_id: str | None = None) -> None:
         """Create a new session (no-op if exists).
 
         If agent_id is provided and the session already exists, the
@@ -67,7 +69,7 @@ class SessionStorage:
                 )
             conn.commit()
 
-    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def get_session(self, session_id: str) -> dict[str, Any] | None:
         """Get session metadata."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -77,7 +79,7 @@ class SessionStorage:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def list_sessions(self, agent_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_sessions(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         """List sessions, optionally filtered by agent_id."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -96,13 +98,13 @@ class SessionStorage:
     def update_session(
         self,
         session_id: str,
-        turn_count: Optional[int] = None,
-        total_tokens: Optional[int] = None,
+        turn_count: int | None = None,
+        total_tokens: int | None = None,
     ) -> None:
         """Update session metadata."""
         now = time.time()
         updates = ["last_updated = ?"]
-        params: List[Any] = [now]
+        params: list[Any] = [now]
 
         if turn_count is not None:
             updates.append("turn_count = ?")
@@ -174,7 +176,7 @@ class SessionStorage:
         session_id: str,
         chunk_id: str,
         turn_number: int,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Load KV-cache state for a chunk in a session."""
         with connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -214,8 +216,8 @@ class SessionStorage:
     def get_session_chunks(
         self,
         session_id: str,
-        turn_number: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        turn_number: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Get all chunks associated with a session."""
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row

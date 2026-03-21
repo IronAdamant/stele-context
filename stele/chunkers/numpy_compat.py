@@ -5,9 +5,11 @@ Provides a pure-Python fallback for numpy operations when numpy
 is not installed. All modules import numpy support from here.
 """
 
+from __future__ import annotations
+
 import math
 import struct
-from typing import Any, List
+from typing import Any
 
 try:
     import numpy as np
@@ -25,22 +27,22 @@ except ImportError:
             """Linear algebra operations."""
 
             @staticmethod
-            def norm(a: List[float]) -> float:
+            def norm(a: list[float]) -> float:
                 """Compute L2 norm."""
                 return math.sqrt(sum(x * x for x in a))
 
         @staticmethod
-        def zeros(shape: int, dtype: Any = None) -> List[float]:
+        def zeros(shape: int, dtype: Any = None) -> list[float]:
             """Create array of zeros."""
             return [0.0] * shape
 
         @staticmethod
-        def dot(a: List[float], b: List[float]) -> float:
+        def dot(a: list[float], b: list[float]) -> float:
             """Compute dot product."""
             return sum(x * y for x, y in zip(a, b))
 
         @staticmethod
-        def frombuffer(data: bytes, dtype: Any = None) -> List[float]:
+        def frombuffer(data: bytes, dtype: Any = None) -> list[float]:
             """Convert bytes to array."""
             count = len(data) // 4  # float32 = 4 bytes
             return list(struct.unpack(f"{count}f", data))
@@ -70,7 +72,7 @@ def sig_from_bytes(data: bytes) -> Any:
     return np.frombuffer(data, dtype=np.float32)
 
 
-def sig_to_list(sig: Any) -> List[float]:
+def sig_to_list(sig: Any) -> list[float]:
     """Convert a semantic signature to a plain list."""
     if hasattr(sig, "tolist"):
         return sig.tolist()

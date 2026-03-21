@@ -15,13 +15,16 @@ Claude Desktop config:
     "stele": {"command": "stele", "args": ["serve-mcp"]}
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+from stele import __version__ as _version
 from stele.mcp_tool_defs import TOOL_DEFINITIONS
 from stele.tool_registry import WRITE_TOOLS, build_tool_map
 
@@ -46,14 +49,14 @@ except ImportError:
     HAS_MCP = False
 
 
-def _create_engine(storage_dir: Optional[str] = None):
+def _create_engine(storage_dir: str | None = None):
     """Create a Stele engine instance."""
     from stele.engine import Stele
 
     return Stele(storage_dir=storage_dir)
 
 
-def create_server(storage_dir: Optional[str] = None) -> Any:
+def create_server(storage_dir: str | None = None) -> Any:
     """
     Create and configure an MCP server with Stele tools.
 
@@ -74,7 +77,7 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
     tool_map = build_tool_map(engine)
 
     @server.list_tools()
-    async def list_tools() -> List[Tool]:
+    async def list_tools() -> list[Tool]:
         return [
             Tool(
                 name=td["name"],
@@ -85,7 +88,7 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         try:
             # Inject server agent_id for write operations when not provided
             if name in WRITE_TOOLS and "agent_id" not in arguments:
@@ -111,7 +114,7 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
             ]
 
     @server.list_resources()
-    async def list_resources() -> List[Resource]:
+    async def list_resources() -> list[Resource]:
         return [
             Resource(
                 uri="stele://documents",  # type: ignore[arg-type]
@@ -122,7 +125,7 @@ def create_server(storage_dir: Optional[str] = None) -> Any:
         ]
 
     @server.list_resource_templates()
-    async def list_resource_templates() -> List[ResourceTemplate]:
+    async def list_resource_templates() -> list[ResourceTemplate]:
         return [
             ResourceTemplate(
                 uriTemplate="stele://document/{path}",
@@ -162,7 +165,7 @@ async def _run_server(server: Any) -> None:
     try:
         init_options = InitializationOptions(
             server_name="stele",
-            server_version="0.9.2",
+            server_version=_version,
             capabilities=ServerCapabilities(
                 tools=ToolsCapability(listChanged=False),
                 resources=ResourcesCapability(subscribe=False, listChanged=False),
@@ -174,7 +177,7 @@ async def _run_server(server: Any) -> None:
         engine.deregister_agent(agent_id)
 
 
-def run(storage_dir: Optional[str] = None) -> None:
+def run(storage_dir: str | None = None) -> None:
     """Entry point for ``stele serve-mcp``."""
     if not HAS_MCP:
         print(

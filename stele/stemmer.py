@@ -14,7 +14,6 @@ split_identifier(name)  -- split camelCase / snake_case into component words
 from __future__ import annotations
 
 import re
-from typing import List
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +287,7 @@ def stem(word: str) -> str:
     return word
 
 
-def stem_tokens(tokens: List[str]) -> List[str]:
+def stem_tokens(tokens: list[str]) -> list[str]:
     """Stem each token in *tokens* and return the list of stems.
 
     >>> stem_tokens(["running", "dogs", "happily"])
@@ -305,7 +304,7 @@ _CAMEL_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\d|\b)|[A-Z]+|[a-z]+|\
 _SNAKE_SEP_RE = re.compile(r"[_\-]+")
 
 
-def split_identifier(name: str) -> List[str]:
+def split_identifier(name: str) -> list[str]:
     """Split a camelCase, PascalCase, or snake_case identifier into words.
 
     Returns lowercase component words.  Numbers are preserved as separate
@@ -326,7 +325,7 @@ def split_identifier(name: str) -> List[str]:
     # First split on underscores / hyphens.
     parts = _SNAKE_SEP_RE.split(name.strip())
 
-    words: List[str] = []
+    words: list[str] = []
     for part in parts:
         if not part:
             continue

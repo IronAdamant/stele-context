@@ -7,9 +7,11 @@ Each entry is a dict with name, description, and inputSchema.
 Standalone module with zero internal dependencies.
 """
 
-from typing import Any, Dict, List
+from __future__ import annotations
 
-TOOL_DEFINITIONS_EXT: List[Dict[str, Any]] = [
+from typing import Any
+
+TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
     {
         "name": "find_references",
         "description": "Find all definitions and references of a symbol across the codebase (LSP-style)",

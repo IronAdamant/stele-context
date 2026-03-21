@@ -6,9 +6,11 @@ Handles symbol extraction, edge resolution, staleness propagation,
 and symbol-based queries (find_references, find_definition, impact_radius).
 """
 
+from __future__ import annotations
+
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from stele.chunkers.base import Chunk
 from stele.symbols import SymbolExtractor, Symbol, resolve_symbols
@@ -30,7 +32,7 @@ class SymbolGraphManager:
     # -- Helpers --------------------------------------------------------------
 
     @staticmethod
-    def _dicts_to_symbols(raw: List[Dict]) -> List[Symbol]:
+    def _dicts_to_symbols(raw: list[dict]) -> list[Symbol]:
         """Convert raw symbol dicts from storage to Symbol dataclasses."""
         return [
             Symbol(
@@ -44,7 +46,7 @@ class SymbolGraphManager:
             for s in raw
         ]
 
-    def attach_edges(self, entry: Dict, chunk_id: str) -> None:
+    def attach_edges(self, entry: dict, chunk_id: str) -> None:
         """Attach symbol edges to a search result entry (in-place)."""
         outgoing = self.storage.get_outgoing_edges(chunk_id)
         incoming = self.storage.get_incoming_edges(chunk_id)
@@ -65,7 +67,7 @@ class SymbolGraphManager:
     def extract_document_symbols(
         self,
         doc_path: str,
-        chunks: List[Chunk],
+        chunks: list[Chunk],
     ) -> None:
         """Extract symbols from a document's chunks and store them."""
         self.storage.clear_document_symbols(doc_path)
@@ -85,7 +87,7 @@ class SymbolGraphManager:
 
     def rebuild_edges(
         self,
-        affected_chunk_ids: Optional[Set[str]] = None,
+        affected_chunk_ids: set[str] | None = None,
     ) -> None:
         """Rebuild symbol edges from current symbols.
 
@@ -116,7 +118,7 @@ class SymbolGraphManager:
 
     def propagate_staleness(
         self,
-        changed_chunk_ids: Set[str],
+        changed_chunk_ids: set[str],
         decay: float = 0.8,
         max_depth: int = 3,
     ) -> int:
@@ -128,7 +130,7 @@ class SymbolGraphManager:
         """
         self.storage.set_staleness_batch([(0.0, cid) for cid in changed_chunk_ids])
 
-        visited: Dict[str, float] = {}
+        visited: dict[str, float] = {}
         queue = deque((cid, 0) for cid in changed_chunk_ids)
 
         while queue:
@@ -155,11 +157,11 @@ class SymbolGraphManager:
 
     # -- Queries --------------------------------------------------------------
 
-    def stale_chunks(self, threshold: float = 0.3) -> Dict[str, Any]:
+    def stale_chunks(self, threshold: float = 0.3) -> dict[str, Any]:
         """Get chunks with staleness_score >= threshold, grouped by file."""
         stale = self.storage.get_stale_chunks(threshold)
 
-        by_doc: Dict[str, list] = {}
+        by_doc: dict[str, list] = {}
         for chunk in stale:
             by_doc.setdefault(chunk["document_path"], []).append(
                 {
@@ -184,12 +186,12 @@ class SymbolGraphManager:
             ],
         }
 
-    def find_references(self, symbol: str) -> Dict[str, Any]:
+    def find_references(self, symbol: str) -> dict[str, Any]:
         """Find all definitions and references for a symbol name."""
         definitions = self.storage.find_definitions(symbol)
         references = self.storage.find_references_by_name(symbol)
 
-        def _enrich(syms: List[Dict]) -> List[Dict]:
+        def _enrich(syms: list[dict]) -> list[dict]:
             results = []
             for sym in syms:
                 chunk = self.storage.get_chunk(sym["chunk_id"])
@@ -214,7 +216,7 @@ class SymbolGraphManager:
             "total": len(definitions) + len(references),
         }
 
-    def find_definition(self, symbol: str) -> Dict[str, Any]:
+    def find_definition(self, symbol: str) -> dict[str, Any]:
         """Find definition location(s) of a symbol."""
         definitions = self.storage.find_definitions(symbol)
 
@@ -243,11 +245,11 @@ class SymbolGraphManager:
         self,
         chunk_id: str,
         depth: int = 2,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Find all chunks affected by a change to this chunk (BFS)."""
         visited: set = set()
         queue = deque([(chunk_id, 0)])
-        layers: Dict[int, List[str]] = {}
+        layers: dict[int, list[str]] = {}
 
         while queue:
             current_id, current_depth = queue.popleft()
@@ -286,14 +288,14 @@ class SymbolGraphManager:
             "chunks": result_chunks,
         }
 
-    def rebuild_graph(self) -> Dict[str, Any]:
+    def rebuild_graph(self) -> dict[str, Any]:
         """Rebuild the entire symbol graph from stored chunk content."""
         all_chunks = self.storage.search_chunks()
 
         self.storage.clear_all_symbols()
         self.storage.clear_all_edges()
 
-        by_doc: Dict[str, list] = {}
+        by_doc: dict[str, list] = {}
         for chunk in all_chunks:
             by_doc.setdefault(chunk["document_path"], []).append(chunk)
 
