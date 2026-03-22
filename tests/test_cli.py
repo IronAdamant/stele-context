@@ -17,16 +17,12 @@ from stele_context.cli import (
     main,
 )
 from stele_context.cli_metadata import cmd_annotate, cmd_history, cmd_map
-from stele_context.engine import Stele
+from stele_context.engine import Stele  # noqa: F401 (used by stele_engine fixture)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_stele(tmp_path):
-    return Stele(storage_dir=str(tmp_path / "storage"))
 
 
 def _ns(**kwargs):
@@ -90,10 +86,10 @@ class TestHelp:
 
 
 class TestCmdIndex:
-    def test_index_single_text_file(self, tmp_path, capsys):
+    def test_index_single_text_file(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "doc.txt"
         doc.write_text("Hello world. This is a test document.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         args = _ns(paths=[str(doc)])
         rc = cmd_index(args, stele)
         assert rc == 0
@@ -101,17 +97,17 @@ class TestCmdIndex:
         assert "Indexed" in out
         assert str(doc) in out
 
-    def test_index_python_file(self, tmp_path, capsys):
+    def test_index_python_file(self, tmp_path, capsys, stele_engine):
         src = tmp_path / "sample.py"
         src.write_text("def foo():\n    return 42\n")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         rc = cmd_index(_ns(paths=[str(src)]), stele)
         assert rc == 0
         out = capsys.readouterr().out
         assert "chunks" in out
 
-    def test_index_nonexistent_file_returns_error(self, tmp_path, capsys):
-        stele = _make_stele(tmp_path)
+    def test_index_nonexistent_file_returns_error(self, tmp_path, capsys, stele_engine):
+        stele = stele_engine
         args = _ns(paths=[str(tmp_path / "missing.txt")])
         rc = cmd_index(args, stele)
         assert rc == 1
@@ -131,12 +127,12 @@ class TestCmdIndex:
 
 
 class TestCmdSearch:
-    def test_search_after_indexing(self, tmp_path, capsys):
+    def test_search_after_indexing(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "code.py"
         doc.write_text(
             "def authenticate(user, password):\n    return user == 'admin'\n"
         )
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()  # discard index output
 
@@ -147,18 +143,18 @@ class TestCmdSearch:
         # Either results found or "No results found" — both valid
         assert len(out) > 0
 
-    def test_search_empty_index(self, tmp_path, capsys):
-        stele = _make_stele(tmp_path)
+    def test_search_empty_index(self, tmp_path, capsys, stele_engine):
+        stele = stele_engine
         args = _ns(query="nothing here", top_k=3)
         rc = cmd_search(args, stele)
         assert rc == 0
         out = capsys.readouterr().out
         assert "No results" in out
 
-    def test_search_json_output(self, tmp_path, capsys):
+    def test_search_json_output(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "data.txt"
         doc.write_text("Some searchable text content for testing purposes.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()
 
@@ -176,8 +172,8 @@ class TestCmdSearch:
 
 
 class TestCmdStats:
-    def test_stats_empty_store(self, tmp_path, capsys):
-        stele = _make_stele(tmp_path)
+    def test_stats_empty_store(self, tmp_path, capsys, stele_engine):
+        stele = stele_engine
         rc = cmd_stats(_ns(), stele)
         assert rc == 0
         out = capsys.readouterr().out
@@ -185,10 +181,10 @@ class TestCmdStats:
         assert "Documents:" in out
         assert "Chunks:" in out
 
-    def test_stats_after_indexing(self, tmp_path, capsys):
+    def test_stats_after_indexing(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "file.txt"
         doc.write_text("Content for stats test.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()
 
@@ -210,10 +206,10 @@ class TestCmdStats:
 
 
 class TestCmdDetect:
-    def test_detect_no_changes(self, tmp_path, capsys):
+    def test_detect_no_changes(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "stable.txt"
         doc.write_text("Stable content that won't change.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()
 
@@ -223,10 +219,10 @@ class TestCmdDetect:
         out = capsys.readouterr().out
         assert "Detecting changes" in out
 
-    def test_detect_modified_file(self, tmp_path, capsys):
+    def test_detect_modified_file(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "changing.txt"
         doc.write_text("Original content.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()
 
@@ -244,17 +240,17 @@ class TestCmdDetect:
 
 
 class TestCmdMap:
-    def test_map_empty(self, tmp_path, capsys):
-        stele = _make_stele(tmp_path)
+    def test_map_empty(self, tmp_path, capsys, stele_engine):
+        stele = stele_engine
         rc = cmd_map(_ns(), stele)
         assert rc == 0
         out = capsys.readouterr().out
         assert "No indexed documents" in out
 
-    def test_map_with_indexed_files(self, tmp_path, capsys):
+    def test_map_with_indexed_files(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "mapped.txt"
         doc.write_text("Content for the project map.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()
 
@@ -263,10 +259,10 @@ class TestCmdMap:
         out = capsys.readouterr().out
         assert "Project Map" in out
 
-    def test_map_json_output(self, tmp_path, capsys):
+    def test_map_json_output(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "json_map.txt"
         doc.write_text("JSON map test content.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()
 
@@ -283,10 +279,10 @@ class TestCmdMap:
 
 
 class TestCmdClear:
-    def test_clear_removes_indexed_data(self, tmp_path, capsys):
+    def test_clear_removes_indexed_data(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "to_clear.txt"
         doc.write_text("Data that will be cleared.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()
 
@@ -309,10 +305,10 @@ class TestCmdClear:
 
 
 class TestCmdAnnotate:
-    def test_annotate_document(self, tmp_path, capsys):
+    def test_annotate_document(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "annotated.txt"
         doc.write_text("Document to annotate.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()
 
@@ -327,10 +323,10 @@ class TestCmdAnnotate:
         out = capsys.readouterr().out
         assert "Created annotation" in out
 
-    def test_annotate_json_output(self, tmp_path, capsys):
+    def test_annotate_json_output(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "ann_json.txt"
         doc.write_text("Annotate with JSON output.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         capsys.readouterr()
 
@@ -355,17 +351,17 @@ class TestCmdAnnotate:
 
 
 class TestCmdHistory:
-    def test_history_empty(self, tmp_path, capsys):
-        stele = _make_stele(tmp_path)
+    def test_history_empty(self, tmp_path, capsys, stele_engine):
+        stele = stele_engine
         rc = cmd_history(_ns(limit=20, document=None), stele)
         assert rc == 0
         out = capsys.readouterr().out
         assert "No change history" in out
 
-    def test_history_after_detect(self, tmp_path, capsys):
+    def test_history_after_detect(self, tmp_path, capsys, stele_engine):
         doc = tmp_path / "history_doc.txt"
         doc.write_text("Content for history test.")
-        stele = _make_stele(tmp_path)
+        stele = stele_engine
         cmd_index(_ns(paths=[str(doc)]), stele)
         cmd_detect(_ns(session="default", paths=[str(doc)]), stele)
         capsys.readouterr()
@@ -376,8 +372,8 @@ class TestCmdHistory:
         out = capsys.readouterr().out
         assert len(out) > 0
 
-    def test_history_json_output(self, tmp_path, capsys):
-        stele = _make_stele(tmp_path)
+    def test_history_json_output(self, tmp_path, capsys, stele_engine):
+        stele = stele_engine
         args = _ns(limit=20, document=None, output_json=True)
         rc = cmd_history(args, stele)
         assert rc == 0
@@ -447,8 +443,8 @@ class TestErrorCases:
             )
         assert exc_info.value.code != 0
 
-    def test_update_annotation_no_content_or_tags(self, tmp_path, capsys):
-        stele = _make_stele(tmp_path)
+    def test_update_annotation_no_content_or_tags(self, tmp_path, capsys, stele_engine):
+        stele = stele_engine
         from stele_context.cli_metadata import cmd_update_annotation
 
         args = _ns(annotation_id=1, content=None, tags=None)

@@ -58,6 +58,7 @@
 
 | Path | Covers | Count |
 |------|--------|-------|
+| `tests/conftest.py` | Shared fixtures: `stele_engine`, `stele_engine_with_file`, `stele_engine_with_data` | — |
 | `tests/test_core.py` | core.py re-exports | ~5 |
 | `tests/test_engine.py` | Engine integration | ~80 |
 | `tests/test_base_chunker.py` | Chunk dataclass, BaseChunker, estimate_tokens | ~64 |

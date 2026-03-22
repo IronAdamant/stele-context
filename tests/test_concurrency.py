@@ -13,8 +13,6 @@ import threading
 import time
 from pathlib import Path
 
-import pytest
-
 from stele_context.rwlock import RWLock
 
 
@@ -105,28 +103,10 @@ class TestRWLock:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def engine_with_data(tmp_path):
-    """Create a Stele engine with some indexed data."""
-    from stele_context.engine import Stele
-
-    engine = Stele(storage_dir=str(tmp_path / "stele_data"))
-
-    # Create test files
-    for i in range(3):
-        f = tmp_path / f"test_{i}.txt"
-        f.write_text(
-            f"This is test document number {i} with some unique content about topic_{i}."
-        )
-
-    engine.index_documents([str(tmp_path / f"test_{i}.txt") for i in range(3)])
-    return engine
-
-
 class TestEngineConcurrentReads:
-    def test_concurrent_searches(self, engine_with_data):
+    def test_concurrent_searches(self, stele_engine_with_data):
         """Multiple threads can search simultaneously."""
-        engine = engine_with_data
+        engine = stele_engine_with_data
         results = []
         errors = []
 
@@ -150,9 +130,9 @@ class TestEngineConcurrentReads:
         for r in results:
             assert isinstance(r, list)
 
-    def test_concurrent_stats(self, engine_with_data):
+    def test_concurrent_stats(self, stele_engine_with_data):
         """get_stats is safe under concurrent access."""
-        engine = engine_with_data
+        engine = stele_engine_with_data
         results = []
 
         def do_stats():
@@ -210,9 +190,9 @@ class TestWriteBlocksReads:
 
 
 class TestBM25LazyInitThreadSafe:
-    def test_multiple_threads_trigger_ensure_bm25(self, engine_with_data):
+    def test_multiple_threads_trigger_ensure_bm25(self, stele_engine_with_data):
         """Multiple threads calling search() trigger _ensure_bm25 safely."""
-        engine = engine_with_data
+        engine = stele_engine_with_data
         # Reset BM25 state to force re-init
         engine._bm25_ready = False
         engine.bm25_index = None

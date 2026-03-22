@@ -2,13 +2,6 @@
 
 import time
 
-from stele_context.engine import Stele
-
-
-def _make_engine(tmp_path):
-    """Shared helper to create a Stele engine in a temp directory."""
-    return Stele(storage_dir=str(tmp_path / "storage"))
-
 
 class TestAnnotations:
     """Tests for annotation storage and retrieval."""
@@ -21,9 +14,9 @@ class TestAnnotations:
         engine.index_documents([str(test_file)])
         return str(test_file)
 
-    def test_store_and_retrieve_annotation(self, tmp_path):
+    def test_store_and_retrieve_annotation(self, tmp_path, stele_engine):
         """Test basic annotation store and retrieve."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path = self._index_file(tmp_path, engine)
 
         result = engine.annotate(path, "document", "This is the main module")
@@ -34,9 +27,9 @@ class TestAnnotations:
         assert len(annotations) == 1
         assert annotations[0]["content"] == "This is the main module"
 
-    def test_annotate_with_tags(self, tmp_path):
+    def test_annotate_with_tags(self, tmp_path, stele_engine):
         """Test annotation with tags and tag filtering."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path = self._index_file(tmp_path, engine)
 
         engine.annotate(path, "document", "Architecture note", tags=["architecture"])
@@ -49,21 +42,21 @@ class TestAnnotations:
         assert len(arch) == 1
         assert arch[0]["content"] == "Architecture note"
 
-    def test_annotate_invalid_target_type(self, tmp_path):
+    def test_annotate_invalid_target_type(self, tmp_path, stele_engine):
         """Test annotation with invalid target_type returns error."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         result = engine.annotate("anything", "invalid", "content")
         assert "error" in result
 
-    def test_annotate_nonexistent_document(self, tmp_path):
+    def test_annotate_nonexistent_document(self, tmp_path, stele_engine):
         """Test annotation on nonexistent document returns error."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         result = engine.annotate("/no/such/file.py", "document", "note")
         assert "error" in result
 
-    def test_annotate_chunk(self, tmp_path):
+    def test_annotate_chunk(self, tmp_path, stele_engine):
         """Test annotation on a chunk."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path = self._index_file(tmp_path, engine)
 
         chunks = engine.storage.search_chunks(document_path=path)
@@ -77,9 +70,9 @@ class TestAnnotations:
         annotations = engine.get_annotations(target=chunk_id, target_type="chunk")
         assert len(annotations) == 1
 
-    def test_get_annotations_filter_by_target(self, tmp_path):
+    def test_get_annotations_filter_by_target(self, tmp_path, stele_engine):
         """Test filtering annotations by target."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path1 = self._index_file(tmp_path, engine, "a.py", "def a(): pass")
         path2 = self._index_file(tmp_path, engine, "b.py", "def b(): pass")
 
@@ -90,9 +83,9 @@ class TestAnnotations:
         assert len(a_annotations) == 1
         assert a_annotations[0]["content"] == "Note on A"
 
-    def test_delete_annotation(self, tmp_path):
+    def test_delete_annotation(self, tmp_path, stele_engine):
         """Test deleting an annotation."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path = self._index_file(tmp_path, engine)
 
         result = engine.annotate(path, "document", "To be deleted")
@@ -108,9 +101,9 @@ class TestAnnotations:
         delete_result2 = engine.delete_annotation(ann_id)
         assert delete_result2["deleted"] is False
 
-    def test_update_annotation_content(self, tmp_path):
+    def test_update_annotation_content(self, tmp_path, stele_engine):
         """Test updating annotation content."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path = self._index_file(tmp_path, engine)
 
         result = engine.annotate(path, "document", "Original note")
@@ -122,9 +115,9 @@ class TestAnnotations:
         annotations = engine.get_annotations(target=path)
         assert annotations[0]["content"] == "Updated note"
 
-    def test_update_annotation_tags(self, tmp_path):
+    def test_update_annotation_tags(self, tmp_path, stele_engine):
         """Test updating annotation tags only."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path = self._index_file(tmp_path, engine)
 
         result = engine.annotate(path, "document", "Note", tags=["old"])
@@ -136,15 +129,15 @@ class TestAnnotations:
         assert annotations[0]["tags"] == ["new", "updated"]
         assert annotations[0]["content"] == "Note"  # content unchanged
 
-    def test_update_nonexistent_annotation(self, tmp_path):
+    def test_update_nonexistent_annotation(self, tmp_path, stele_engine):
         """Test updating a nonexistent annotation."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         result = engine.update_annotation(99999, content="nope")
         assert result["updated"] is False
 
-    def test_search_annotations(self, tmp_path):
+    def test_search_annotations(self, tmp_path, stele_engine):
         """Test searching annotation content text."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path = self._index_file(tmp_path, engine)
 
         engine.annotate(path, "document", "Handles user authentication")
@@ -157,9 +150,9 @@ class TestAnnotations:
         results_all = engine.search_annotations("a")
         assert len(results_all) == 2
 
-    def test_bulk_annotate(self, tmp_path):
+    def test_bulk_annotate(self, tmp_path, stele_engine):
         """Test annotating multiple targets at once."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path1 = self._index_file(tmp_path, engine, "a.py", "def a(): pass")
         path2 = self._index_file(tmp_path, engine, "b.py", "def b(): pass")
 
@@ -177,9 +170,9 @@ class TestAnnotations:
         assert len(result["created"]) == 2
         assert len(result["errors"]) == 0
 
-    def test_bulk_annotate_with_errors(self, tmp_path):
+    def test_bulk_annotate_with_errors(self, tmp_path, stele_engine):
         """Test bulk annotate with mix of valid and invalid targets."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         path = self._index_file(tmp_path, engine)
 
         result = engine.bulk_annotate(
@@ -200,17 +193,17 @@ class TestAnnotations:
 class TestMap:
     """Tests for the map (project overview) tool."""
 
-    def test_map_empty(self, tmp_path):
+    def test_map_empty(self, tmp_path, stele_engine):
         """Test map with no indexed documents."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         result = engine.get_map()
         assert result["total_documents"] == 0
         assert result["total_tokens"] == 0
         assert result["documents"] == []
 
-    def test_map_with_documents(self, tmp_path):
+    def test_map_with_documents(self, tmp_path, stele_engine):
         """Test map with indexed documents."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
 
         f1 = tmp_path / "a.py"
         f1.write_text("def foo(): pass")
@@ -225,9 +218,9 @@ class TestMap:
         assert str(f1) in paths
         assert str(f2) in paths
 
-    def test_map_includes_annotations(self, tmp_path):
+    def test_map_includes_annotations(self, tmp_path, stele_engine):
         """Test that map includes document annotations."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
 
         f = tmp_path / "main.py"
         f.write_text("def main(): pass")
@@ -245,15 +238,15 @@ class TestMap:
 class TestHistory:
     """Tests for the history tool."""
 
-    def test_history_empty(self, tmp_path):
+    def test_history_empty(self, tmp_path, stele_engine):
         """Test history with no changes recorded."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
         result = engine.get_history()
         assert result == []
 
-    def test_history_recorded_on_detect_changes(self, tmp_path):
+    def test_history_recorded_on_detect_changes(self, tmp_path, stele_engine):
         """Test that detect_changes_and_update records history."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
 
         f = tmp_path / "test.py"
         f.write_text("def hello(): pass")
@@ -266,9 +259,9 @@ class TestHistory:
         assert history[0]["session_id"] == "session1"
         assert "summary" in history[0]
 
-    def test_history_with_reason(self, tmp_path):
+    def test_history_with_reason(self, tmp_path, stele_engine):
         """Test that reason is stored in history."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
 
         f = tmp_path / "test.py"
         f.write_text("def hello(): pass")
@@ -282,9 +275,9 @@ class TestHistory:
         assert len(history) == 1
         assert history[0]["reason"] == "Checking after refactor"
 
-    def test_history_filter_by_document(self, tmp_path):
+    def test_history_filter_by_document(self, tmp_path, stele_engine):
         """Test filtering history by document path."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
 
         f1 = tmp_path / "a.py"
         f1.write_text("def a(): pass")
@@ -298,9 +291,9 @@ class TestHistory:
         history_a = engine.get_history(document_path=str(f1))
         assert len(history_a) >= 1
 
-    def test_history_limit(self, tmp_path):
+    def test_history_limit(self, tmp_path, stele_engine):
         """Test limiting history results."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
 
         f = tmp_path / "test.py"
         f.write_text("def hello(): pass")
@@ -312,9 +305,9 @@ class TestHistory:
         history = engine.get_history(limit=3)
         assert len(history) == 3
 
-    def test_prune_history_by_max_entries(self, tmp_path):
+    def test_prune_history_by_max_entries(self, tmp_path, stele_engine):
         """Test pruning history to max entries."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
 
         f = tmp_path / "test.py"
         f.write_text("def hello(): pass")
@@ -329,9 +322,9 @@ class TestHistory:
         history = engine.get_history()
         assert len(history) == 2
 
-    def test_prune_history_by_age(self, tmp_path):
+    def test_prune_history_by_age(self, tmp_path, stele_engine):
         """Test pruning history by age."""
-        engine = _make_engine(tmp_path)
+        engine = stele_engine
 
         # Directly insert an old entry via storage
         engine.storage._metadata_storage.record_change(

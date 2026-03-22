@@ -16,6 +16,9 @@ Chronological record of development activity on Stele Context, maintained for LL
 - Kept `Optional[str]` in `change_notifications.py` `Callable` type alias — PEP 604 `str | None` in runtime type aliases (outside function annotations) is not supported on Python 3.9
 
 ### Code quality
+- Narrowed broad `except Exception` to specific exception types in `indexing.py`, `search_engine.py`, and `change_detection.py`
+- Created `tests/conftest.py` with shared fixtures (`stele_engine`, `stele_engine_with_file`, `stele_engine_with_data`)
+- Migrated `test_metadata.py`, `test_cli.py`, `test_concurrency.py` to use shared conftest fixtures
 - Completed generic type annotations in `symbol_graph.py`
 - Moved `os`/`tempfile` imports to module level in `audio.py` and `video.py`
 - Extracted `get_modality_flags()` helper in `tool_registry.py`, used by both MCP servers

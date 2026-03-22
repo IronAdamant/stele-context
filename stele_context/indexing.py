@@ -372,7 +372,7 @@ def index_documents_unlocked(
 
         except PermissionError as e:
             results["conflicts"].append({"path": norm_path, "error": str(e)})
-        except Exception as e:
+        except (OSError, UnicodeDecodeError, ValueError) as e:
             results["errors"].append({"path": norm_path, "error": str(e)})
 
     if results["indexed"]:

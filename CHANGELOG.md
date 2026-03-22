@@ -19,11 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **change_notifications.py**: Keep `Optional[str]` in `Callable` type alias (PEP 604 `str | None` in runtime type aliases fails on Python 3.9)
 
 ### Changed
+- **indexing.py**: Narrow `except Exception` to `(OSError, UnicodeDecodeError, ValueError)` in per-document processing
+- **search_engine.py**: Narrow `except Exception` to specific types in index rebuild (`TypeError, ValueError, KeyError, struct.error`) and file read (`OSError, UnicodeDecodeError, ValueError`)
+- **change_detection.py**: Narrow `except Exception` to `(OSError, UnicodeDecodeError, ValueError)` in file read path
 - **symbol_graph.py**: Complete generic type annotations (`set[str]`, `dict[str, list[dict[str, Any]]]`)
 - **audio.py / video.py**: Move `os` and `tempfile` imports to module level (were re-imported inside methods)
 - **tool_registry.py**: Extract `get_modality_flags()` helper to deduplicate modality flag construction from both MCP servers
 - **mcp_server.py / mcp_stdio.py**: Use shared `get_modality_flags()` instead of inline flag dicts
 - **text.py**: Remove stale comment claiming methods were inlined
+
+### Added
+- **tests/conftest.py**: Shared pytest fixtures (`stele_engine`, `stele_engine_with_file`, `stele_engine_with_data`) replacing duplicated helper functions across test files
+- **test_metadata.py, test_cli.py, test_concurrency.py**: Migrated to shared conftest fixtures
 
 ## [1.0.0] - 2026-03-22
 

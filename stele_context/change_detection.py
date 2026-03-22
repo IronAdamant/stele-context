@@ -143,7 +143,7 @@ def detect_changes_unlocked(
         try:
             modality = detect_modality(str(abs_path))
             content, content_hash = read_and_hash(abs_path, modality)
-        except Exception:
+        except (OSError, UnicodeDecodeError, ValueError):
             results["modified"].append({"path": doc_path, "reason": "Read error"})
             continue
 

@@ -8,6 +8,7 @@ back to engine.py, no circular dependencies.
 from __future__ import annotations
 
 import re
+import struct
 import threading
 from typing import Any
 
@@ -283,7 +284,7 @@ def get_context_unlocked(
         try:
             modality = detect_modality(str(abs_path))
             _, content_hash = read_and_hash(abs_path, modality)
-        except Exception:
+        except (OSError, UnicodeDecodeError, ValueError):
             result["changed"].append({"path": doc_path, "reason": "Read error"})
             continue
 
@@ -402,7 +403,7 @@ def load_or_rebuild_index(storage: Any) -> VectorIndex:
             raw_sig = chunk.get("agent_signature") or chunk["semantic_signature"]
             sig = sig_from_bytes(raw_sig)
             index.add_chunk(chunk["chunk_id"], sig_to_list(sig))
-        except Exception:
+        except (TypeError, ValueError, KeyError, struct.error):
             continue
     _save_idx(index, current_hash, storage.index_dir)
     return index
