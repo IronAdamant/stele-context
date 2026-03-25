@@ -50,7 +50,7 @@ class Stele:
     DEFAULT_MAX_CHUNK_SIZE = 4096
     DEFAULT_MERGE_THRESHOLD = 0.7
     DEFAULT_CHANGE_THRESHOLD = 0.85
-    DEFAULT_SEARCH_ALPHA = 0.7
+    DEFAULT_SEARCH_ALPHA = 0.5
     DEFAULT_SKIP_DIRS = {
         ".git",
         ".hg",
@@ -472,6 +472,70 @@ class Stele:
                 chunk_id, vector, self.storage, self.vector_index, self._save_index
             )
 
+    def llm_embed(
+        self,
+        text: str,
+        chunk_id: str,
+        fingerprint_values: list[float] | None = None,
+    ) -> dict[str, Any]:
+        """Generate and store a semantic embedding via LLM reasoning.
+
+        If ``fingerprint_values`` is provided (32 floats, -1.0 to 1.0), those are
+        used directly as the semantic fingerprint. Otherwise the statistical
+        fallback ``semantic_fingerprint()`` is used.
+
+        The fingerprint is converted to a 128-dim unit vector. If the chunk_id
+        already exists (e.g. an indexed file chunk), the signature is updated.
+        Otherwise a new memory chunk is created with the given content and vector.
+
+        Args:
+            text: Source text content (first 4000 chars are used).
+            chunk_id: Unique identifier for this embedded content.
+            fingerprint_values: Optional 32 semantic dimension scores from the
+                LLM. Each value should be in [-1.0, 1.0].
+
+        Returns:
+            {"stored": True, "chunk_id": str} on success.
+        """
+        from stele_context.llm_embedding import (
+            FINGERPRINT_NAMES,
+            fingerprint_to_vector,
+            semantic_fingerprint,
+        )
+
+        if fingerprint_values is not None:
+            if len(fingerprint_values) != len(FINGERPRINT_NAMES):
+                return {
+                    "stored": False,
+                    "error": f"Expected {len(FINGERPRINT_NAMES)} fingerprint values, "
+                    f"got {len(fingerprint_values)}",
+                }
+            fp = dict(zip(FINGERPRINT_NAMES, fingerprint_values))
+        else:
+            fp = semantic_fingerprint(text[:4000])
+
+        vector = fingerprint_to_vector(fp)
+        with self._lock.write_lock():
+            # Try existing chunk first (update signature in place)
+            result = _se.store_embedding_unlocked(
+                chunk_id, vector, self.storage, self.vector_index, self._save_index
+            )
+            if result.get("stored"):
+                return result
+            # Chunk doesn't exist — create a memory chunk with the content
+            ok = self.storage.create_memory_chunk(
+                chunk_id=chunk_id,
+                content=text[:4000],
+                agent_signature=vector,
+            )
+            if not ok:
+                return {"stored": False, "error": "failed to create memory chunk"}
+            # Add to HNSW index
+            self.vector_index.remove_chunk(chunk_id)
+            self.vector_index.add_chunk(chunk_id, vector)
+            self._save_index()
+            return {"stored": True, "chunk_id": chunk_id}
+
     def bulk_store_summaries(self, summaries: dict[str, str]) -> dict[str, Any]:
         """Batch-store per-chunk semantic summaries.
 
@@ -492,6 +556,8 @@ class Stele:
         document_paths: list[str] | None = None,
         reason: str | None = None,
         agent_id: str | None = None,
+        *,
+        scan_new: bool = False,
     ) -> dict[str, Any]:
         with self._lock.write_lock():
             return _cd.detect_changes_unlocked(
@@ -518,6 +584,9 @@ class Stele:
                 save_index=self._save_index,
                 save_bm25=self._save_bm25,
                 coordination=self._coordination,
+                scan_new=scan_new,
+                project_root=self._project_root,
+                skip_dirs=self.skip_dirs,
             )
 
     # -- Search (delegated to stele_context.search_engine) ----------------------------
@@ -593,11 +662,22 @@ class Stele:
         chunk_id: str | None = None,
         depth: int = 2,
         document_path: str | None = None,
+        *,
+        compact: bool = False,
+        include_content: bool = True,
+        path_filter: str | None = None,
     ) -> dict[str, Any]:
         if document_path:
             document_path = self._normalize_path(document_path)
         with self._lock.read_lock():
-            return self.symbol_manager.impact_radius(chunk_id, depth, document_path)
+            return self.symbol_manager.impact_radius(
+                chunk_id,
+                depth,
+                document_path,
+                compact=compact,
+                include_content=include_content,
+                path_filter=path_filter,
+            )
 
     def coupling(self, document_path: str) -> dict[str, Any]:
         document_path = self._normalize_path(document_path)

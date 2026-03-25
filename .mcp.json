@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "stele-context": {
-      "command": "/home/aron/Documents/coding_projects/Stele/.venv/bin/stele-context",
-      "args": ["serve-mcp"]
+      "command": "/home/aron/.local/bin/stele-context-mcp",
+      "args": []
     }
   }
 }

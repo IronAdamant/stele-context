@@ -70,7 +70,7 @@ class TestHTTPServer:
             assert "get_supported_formats" in tool_names
             assert "list_sessions" in tool_names
             assert "search_text" in tool_names
-            assert len(tool_names) == 45
+            assert len(tool_names) == 46
         finally:
             server.stop()
 

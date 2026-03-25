@@ -21,6 +21,7 @@ from stele_context.indexing import (
     persist_chunks,
     remove_stale_chunks,
     check_document_ownership,
+    expand_paths,
 )
 
 
@@ -97,6 +98,9 @@ def detect_changes_unlocked(
     save_index: Any,
     save_bm25: Any,
     coordination: Any,
+    scan_new: bool = False,
+    project_root: Any = None,
+    skip_dirs: set[str] | None = None,
 ) -> dict[str, Any]:
     """Core body of detect_changes_and_update, extracted for engine delegation."""
     storage.create_session(session_id, agent_id=agent_id)
@@ -114,6 +118,20 @@ def detect_changes_unlocked(
     if document_paths is None:
         all_chunks = storage.search_chunks()
         document_paths = list({c["document_path"] for c in all_chunks})
+        if scan_new and project_root is not None:
+            dirs = skip_dirs if skip_dirs is not None else set()
+            expanded = expand_paths(
+                [str(project_root)],
+                chunkers,
+                dirs,
+                normalize_path,
+            )
+            indexed_set = {d["document_path"] for d in storage.get_all_documents()}
+            for p in expanded:
+                if p not in indexed_set:
+                    results["new"].append(
+                        {"path": p, "reason": "New file (scan)"},
+                    )
     else:
         document_paths = [normalize_path(p) for p in document_paths]
 

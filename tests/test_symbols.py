@@ -453,6 +453,36 @@ class TestEngineSymbolIntegration:
         result = self.cf.impact_radius()
         assert "error" in result
 
+    def test_impact_radius_compact(self):
+        self._write_and_index("core.py", "def core_fn():\n    return 1\n")
+        self._write_and_index("user.py", "from core import core_fn\ncore_fn()\n")
+        core_path = str(Path(self.tmpdir) / "core.py")
+        impact = self.cf.impact_radius(document_path=core_path, depth=1, compact=True)
+        assert impact["chunks"] == []
+        assert "files" in impact
+        assert len(impact["files"]) >= 1
+        assert all("chunk_count" in f and "depth_min" in f for f in impact["files"])
+
+    def test_impact_radius_omit_content(self):
+        self._write_and_index("core.py", "def core_fn():\n    return 1\n")
+        self._write_and_index("user.py", "from core import core_fn\ncore_fn()\n")
+        core_path = str(Path(self.tmpdir) / "core.py")
+        impact = self.cf.impact_radius(
+            document_path=core_path, depth=1, include_content=False
+        )
+        for row in impact.get("chunks", []):
+            assert "content" not in row
+
+    def test_impact_radius_path_filter(self):
+        self._write_and_index("core.py", "def core_fn():\n    return 1\n")
+        self._write_and_index("user.py", "from core import core_fn\ncore_fn()\n")
+        core_path = str(Path(self.tmpdir) / "core.py")
+        impact = self.cf.impact_radius(
+            document_path=core_path, depth=2, path_filter="user"
+        )
+        for row in impact.get("chunks", []):
+            assert "user" in row["document_path"]
+
     def test_coupling(self):
         self._write_and_index("models.py", "class User:\n    pass\n")
         self._write_and_index(

@@ -411,6 +411,63 @@ class StorageBackend(StorageDelegatesMixin):
             )
             return cursor.rowcount > 0
 
+    def create_memory_chunk(
+        self,
+        chunk_id: str,
+        content: str,
+        agent_signature: Any,
+        document_path: str | None = None,
+    ) -> bool:
+        """Create a memory chunk and store its agent-supplied embedding.
+
+        Used by ``llm_embed`` to persist LLM-generated embeddings for
+        arbitrary text content (e.g. session state, project summaries)
+        that doesn't come from indexed files.
+
+        Args:
+            chunk_id: Unique identifier for this memory chunk.
+            content: The text content to store.
+            agent_signature: 128-dim unit vector from ``fingerprint_to_vector``.
+            document_path: Optional path override. Defaults to ``memory:<chunk_id>``.
+
+        Returns:
+            True if the chunk was created and the signature stored.
+        """
+        import hashlib
+        import time as _time
+
+        now = _time.time()
+        content_hash = hashlib.sha256(content.encode()).digest()
+        # Zero signature as placeholder (Tier 1 is not computed for memory chunks)
+        zero_sig = sig_to_bytes([0.0] * 128)
+        sig_bytes = sig_to_bytes(agent_signature)
+        token_count = len(content) // 4  # rough estimate
+        dp = document_path or f"memory:{chunk_id}"
+
+        with connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO chunks
+                (chunk_id, document_path, content_hash, semantic_signature,
+                 start_pos, end_pos, token_count, created_at, last_accessed,
+                 access_count, version, content, agent_signature)
+                VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, 0, 1, ?, ?)
+                """,
+                (
+                    chunk_id,
+                    dp,
+                    content_hash,
+                    zero_sig,
+                    len(content),
+                    token_count,
+                    now,
+                    now,
+                    content,
+                    sig_bytes,
+                ),
+            )
+            return cursor.rowcount > 0
+
     def get_agent_signature(self, chunk_id: str) -> Any | None:
         """Get agent-supplied signature for a chunk, if any."""
         with connect(self.db_path) as conn:

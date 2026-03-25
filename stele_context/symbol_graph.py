@@ -260,11 +260,19 @@ class SymbolGraphManager:
         chunk_id: str | None = None,
         depth: int = 2,
         document_path: str | None = None,
+        *,
+        compact: bool = False,
+        include_content: bool = True,
+        path_filter: str | None = None,
     ) -> dict[str, Any]:
         """Find all chunks affected by a change to a chunk or file (BFS).
 
         Accepts either ``chunk_id`` (single chunk) or ``document_path``
         (all chunks in a file).  At least one must be provided.
+
+        ``compact`` returns per-file summaries instead of per-chunk records.
+        ``include_content=False`` omits chunk text (smaller payloads).
+        ``path_filter`` keeps only results whose path contains the substring.
         """
         # Resolve seed chunk IDs
         if document_path and not chunk_id:
@@ -302,7 +310,7 @@ class SymbolGraphManager:
                     if edge["source_chunk_id"] not in visited:
                         queue.append((edge["source_chunk_id"], current_depth + 1))
 
-        result_chunks = []
+        result_chunks: list[dict[str, Any]] = []
         affected_files: set[str] = set()
         for d, chunk_ids_at_depth in sorted(layers.items()):
             for cid in chunk_ids_at_depth:
@@ -310,24 +318,47 @@ class SymbolGraphManager:
                     continue
                 meta = self.storage.get_chunk(cid)
                 if meta:
-                    affected_files.add(meta["document_path"])
-                    result_chunks.append(
-                        {
-                            "chunk_id": cid,
-                            "document_path": meta["document_path"],
-                            "depth": d,
-                            "content": meta.get("content"),
-                            "token_count": meta["token_count"],
-                        }
-                    )
+                    doc_p = meta["document_path"]
+                    if path_filter is not None and path_filter not in doc_p:
+                        continue
+                    affected_files.add(doc_p)
+                    row: dict[str, Any] = {
+                        "chunk_id": cid,
+                        "document_path": doc_p,
+                        "depth": d,
+                        "token_count": meta["token_count"],
+                    }
+                    if include_content:
+                        row["content"] = meta.get("content")
+                    result_chunks.append(row)
 
-        return {
+        out: dict[str, Any] = {
             "origin": origin,
             "max_depth": depth,
             "affected_chunks": len(result_chunks),
             "affected_files": len(affected_files),
-            "chunks": result_chunks,
         }
+        if compact:
+            by_file: dict[str, dict[str, Any]] = {}
+            for row in result_chunks:
+                p = row["document_path"]
+                dval = row["depth"]
+                if p not in by_file:
+                    by_file[p] = {
+                        "path": p,
+                        "chunk_count": 0,
+                        "depth_min": dval,
+                        "depth_max": dval,
+                    }
+                e = by_file[p]
+                e["chunk_count"] += 1
+                e["depth_min"] = min(e["depth_min"], dval)
+                e["depth_max"] = max(e["depth_max"], dval)
+            out["files"] = sorted(by_file.values(), key=lambda x: x["path"])
+            out["chunks"] = []
+        else:
+            out["chunks"] = result_chunks
+        return out
 
     def rebuild_graph(self) -> dict[str, Any]:
         """Rebuild the entire symbol graph from stored chunk content."""

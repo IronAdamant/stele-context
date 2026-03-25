@@ -223,6 +223,11 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Optional agent identifier for multi-agent tracking",
                 },
+                "scan_new": {
+                    "type": "boolean",
+                    "description": "When true and document_paths is omitted, scan project root for new files matching chunker extensions not yet in the index; reported under new with reason New file (scan)",
+                    "default": False,
+                },
             },
             "required": ["session_id"],
         },

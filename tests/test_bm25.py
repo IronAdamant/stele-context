@@ -32,6 +32,22 @@ class TestBM25Index:
         assert scores["d1"] > scores["d2"]
         assert scores["d3"] > scores["d2"]
 
+    def test_search_top_k(self):
+        """Independent search ranks all docs by query relevance."""
+        idx = BM25Index()
+        idx.add_document("c1", "allergen dietary compliance checking service")
+        idx.add_document("c2", "unrelated units test boilerplate")
+        idx.add_document("c3", "express route handler generic")
+
+        ranked = idx.search("allergen dietary compliance", top_k=2)
+        assert len(ranked) >= 1
+        assert ranked[0][0] == "c1"
+        if len(ranked) > 1:
+            assert ranked[0][1] >= ranked[1][1]
+
+    def test_search_empty_index(self):
+        assert BM25Index().search("hello", top_k=5) == []
+
     def test_remove_document(self):
         """Test document removal updates frequencies."""
         idx = BM25Index()

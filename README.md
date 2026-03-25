@@ -256,7 +256,7 @@ engine = Stele(
     max_chunk_size=4096,      # Maximum tokens per merged chunk
     merge_threshold=0.7,      # Similarity threshold for merging
     change_threshold=0.85,    # Similarity threshold for "unchanged"
-    search_alpha=0.7,         # Blend: 1.0 = pure vector, 0.0 = pure keyword
+    search_alpha=0.5,         # Blend: 1.0 = pure vector, 0.0 = pure keyword
 )
 ```
 
@@ -428,7 +428,7 @@ chunk_size = 256              # Target tokens per initial chunk
 max_chunk_size = 4096         # Maximum tokens per merged chunk
 merge_threshold = 0.7         # Similarity threshold for merging chunks
 change_threshold = 0.85       # Similarity threshold for "unchanged"
-search_alpha = 0.7            # Hybrid search blend (1.0=vector, 0.0=keyword)
+search_alpha = 0.5            # Hybrid search blend (1.0=vector, 0.0=keyword)
 skip_dirs = [".git", "node_modules", "__pycache__"]
 ```
 

@@ -30,6 +30,8 @@ from stele_context.tool_registry import WRITE_TOOLS, build_tool_map, get_modalit
 
 logger = logging.getLogger(__name__)
 
+HEARTBEAT_INTERVAL = 30  # seconds between heartbeats and lock reaping
+
 # Guard MCP SDK import
 try:
     from mcp.server import Server
@@ -167,6 +169,15 @@ async def _run_server(bundle: _ServerBundle) -> None:
     """Run the MCP server on stdio transport."""
     bundle.engine.register_agent(bundle.agent_id)
 
+    async def heartbeat_loop() -> None:
+        """Background heartbeat and lock cleanup for stdio transport."""
+        while True:
+            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            bundle.engine.heartbeat(bundle.agent_id)
+            bundle.engine.reap_expired_locks()
+
+    heartbeat_task = asyncio.ensure_future(heartbeat_loop())
+
     try:
         init_options = InitializationOptions(
             server_name="stele-context",
@@ -179,6 +190,7 @@ async def _run_server(bundle: _ServerBundle) -> None:
         async with stdio_server() as (read_stream, write_stream):
             await bundle.server.run(read_stream, write_stream, init_options)
     finally:
+        heartbeat_task.cancel()
         bundle.engine.deregister_agent(bundle.agent_id)
         bundle.engine.storage.close()
 

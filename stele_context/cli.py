@@ -258,6 +258,11 @@ Examples:
         nargs="*",
         help="Document paths to check (default: all indexed)",
     )
+    detect_parser.add_argument(
+        "--scan-new",
+        action="store_true",
+        help="When checking all indexed paths, also list new project files not yet indexed",
+    )
 
     # stats command
     subparsers.add_parser(
@@ -620,6 +625,7 @@ def cmd_detect(args: argparse.Namespace, stele: Stele) -> int:
     result = stele.detect_changes_and_update(
         session_id=args.session,
         document_paths=args.paths if args.paths else None,
+        scan_new=getattr(args, "scan_new", False),
     )
 
     _print_detect_section("Unchanged", result["unchanged"])

@@ -100,7 +100,8 @@ def compute_search_alpha(query: str, base_alpha: float) -> float:
         return max(0.3, base_alpha - 0.3)
     if signals >= 1:
         return max(0.4, base_alpha - 0.15)
-    return base_alpha
+    # Natural-language queries: statistical HNSW signal is weak; favor BM25.
+    return max(0.3, base_alpha - 0.2)
 
 
 def ensure_bm25(
@@ -174,16 +175,21 @@ def search_unlocked(
     # Widen HNSW candidate set for re-ranking
     hnsw_results = vector_index.search(query_sig, k=top_k * 3)
 
-    if not hnsw_results:
-        return []
-
     # BM25 re-ranking -- ensure_bm25 may initialize the index
     do_ensure_bm25()
     bm25_index = get_bm25()
-    hnsw_scores = dict(hnsw_results)
-    candidate_ids = list(hnsw_scores.keys())
     if bm25_index is None:
         raise RuntimeError("BM25 index not initialized")
+
+    hnsw_scores = dict(hnsw_results) if hnsw_results else {}
+    # Independent BM25 top-k so keyword-relevant chunks are not missed when
+    # HNSW (statistical signatures) returns unrelated neighbours.
+    bm25_ranked = bm25_index.search(query, top_k=max(1, top_k * 2))
+    bm25_only_ids = {cid for cid, _ in bm25_ranked}
+    candidate_ids = list(dict.fromkeys(list(hnsw_scores.keys()) + list(bm25_only_ids)))
+    if not candidate_ids:
+        return []
+
     bm25_scores = bm25_index.score_batch(query, candidate_ids)
 
     # Normalize HNSW cosine scores within candidate set.

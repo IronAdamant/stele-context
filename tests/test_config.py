@@ -180,4 +180,4 @@ class TestEngineConfigIntegration:
             enable_coordination=False,
         )
         assert engine.chunk_size == 256
-        assert engine.search_alpha == 0.7
+        assert engine.search_alpha == 0.5

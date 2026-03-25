@@ -54,6 +54,7 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
         "description": "Find all chunks affected by changing a chunk or file "
         "(transitive dependents via symbol graph). "
         "Accepts chunk_id or document_path (at least one required). "
+        "Use compact=true for file-level summaries (smaller payloads). "
         "USE WHEN: assessing blast radius before editing, prioritizing test "
         "coverage, understanding downstream effects of a change.",
         "inputSchema": {
@@ -71,6 +72,20 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
                     "type": "integer",
                     "description": "Max hops through dependency graph (default: 2)",
                     "default": 2,
+                },
+                "compact": {
+                    "type": "boolean",
+                    "description": "If true, return per-file summaries (path, chunk_count, depth range) instead of full chunk list",
+                    "default": False,
+                },
+                "include_content": {
+                    "type": "boolean",
+                    "description": "If false, omit chunk content from each record (default true)",
+                    "default": True,
+                },
+                "path_filter": {
+                    "type": "string",
+                    "description": "Only include results whose document path contains this substring (e.g. 'src/' to exclude tests)",
                 },
             },
         },
@@ -379,6 +394,41 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
                 },
             },
             "required": ["chunk_id", "vector"],
+        },
+    },
+    {
+        "name": "llm_embed",
+        "description": "Generate and store a semantic embedding using LLM reasoning. "
+        "The LLM analyzes text and produces a 128-dim semantic fingerprint which is "
+        "converted to a unit vector and stored, updating the HNSW index for Tier 2 "
+        "semantic search. "
+        "USE WHEN: storing important context, session state, or project knowledge "
+        "for later retrieval. The stored embedding enables semantic search that "
+        "actually understands content — not just statistical patterns. "
+        "The LLM (you) should reason about the text and produce a fingerprint dict "
+        "with 32 semantic dimension scores (each -1.0 to 1.0), then pass it as "
+        "fingerprint_values so the server can convert to a vector.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Text content to embed (first 4000 chars used)",
+                },
+                "chunk_id": {
+                    "type": "string",
+                    "description": "Unique chunk ID for this content (e.g. 'mem:<uuid>')",
+                },
+                "fingerprint_values": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "Optional: 32 fingerprint values (one per semantic "
+                    "dimension, -1.0 to 1.0). If omitted, statistical fallback is used. "
+                    "For best results, the LLM should reason about the text and provide "
+                    "these values.",
+                },
+            },
+            "required": ["text", "chunk_id"],
         },
     },
     # -- Secondary: Chunk History ---------------------------------------------

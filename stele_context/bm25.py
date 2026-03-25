@@ -95,6 +95,28 @@ class BM25Index:
         terms = self._tokenize(query)
         return {doc_id: self._score_terms(terms, doc_id) for doc_id in doc_ids}
 
+    def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
+        """Return top-k documents by BM25 score across the full index.
+
+        Collects documents that share at least one query term, scores them,
+        and returns the highest-scoring chunk_ids. Used to merge keyword
+        candidates with HNSW vector candidates for hybrid search.
+        """
+        if self.n_docs == 0 or self.avg_dl == 0:
+            return []
+        terms = self._tokenize(query)
+        if not terms:
+            return []
+        query_set = set(terms)
+        candidates = {
+            did for did, tf in self.term_freqs.items() if query_set & set(tf.keys())
+        }
+        if not candidates:
+            return []
+        scored = [(did, self._score_terms(terms, did)) for did in candidates]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k]
+
     def _tokenize(self, text: str) -> list[str]:
         """Tokenize text into stemmed lowercase terms.
 

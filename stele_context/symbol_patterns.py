@@ -73,12 +73,54 @@ def extract_python_regex(content: str, doc_path: str, chunk_id: str) -> list[Sym
 
 
 def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
-    """Extract symbols from JavaScript/TypeScript."""
+    """Extract symbols from JavaScript/TypeScript.
+
+    Handles multi-line ``const``/``let``/``var`` declarations (e.g.
+    ``const x = new Foo(...)\\n  arg)\\n;``) by deferring emission when the
+    RHS opens a paren or brace, then emitting once the expression is balanced.
+    This prevents continuation lines like ``  new Something(...)`` from being
+    falsely matched as class methods.
+    """
     symbols: list[Symbol] = []
+
+    # State for multi-line declaration accumulation.
+    # When a const/let/var starts but the RHS opens a paren/brace (e.g.
+    # ``const x = new Foo(`` or ``const x = {``), we defer the symbol emission
+    # until paren+brace depth returns to 0.
+    pending_name: str = ""
+    pending_line: int = 0
+    depth: int = 0
 
     for i, line in enumerate(content.splitlines(), 1):
         stripped = line.strip()
 
+        # -- Accumulation: inside a multi-line declaration --------------------
+        if pending_name:
+            # Count paren/brace changes in the full (unstripped) line.
+            for ch in line:
+                if ch == "(" or ch == "{":
+                    depth += 1
+                elif ch == ")" or ch == "}":
+                    depth -= 1
+
+            if depth <= 0:
+                # Balanced or closed — emit the pending variable symbol.
+                symbols.append(
+                    Symbol(
+                        pending_name,
+                        "variable",
+                        "definition",
+                        chunk_id,
+                        doc_path,
+                        pending_line,
+                    )
+                )
+                pending_name = ""
+                depth = 0
+                # Fall through so this line is also processed normally
+                # (e.g. the `}` of an object literal).
+
+        # -- Per-line pattern matching ----------------------------------------
         # Function definitions
         m = re.match(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)", stripped)
         if m:
@@ -111,21 +153,59 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbo
                     Symbol(m_req.group(1), "import", "reference", chunk_id, doc_path, i)
                 )
         else:
-            # Variable/const definitions (including arrow functions)
-            m = re.match(r"(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=", stripped)
-            if m:
-                symbols.append(
-                    Symbol(m.group(1), "variable", "definition", chunk_id, doc_path, i)
-                )
+            # Variable/const definitions (including arrow functions).
+            # If the RHS opens a paren/brace, defer emission until balanced.
+            m_var = re.match(r"(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=", stripped)
+            if m_var:
+                rhs = stripped[stripped.index("=") + 1 :]
+                if "(" in rhs or "{" in rhs:
+                    pending_name = m_var.group(1)
+                    pending_line = i
+                    # Count parens/braces in the current line.
+                    depth = 0
+                    for ch in line:
+                        if ch == "(" or ch == "{":
+                            depth += 1
+                        elif ch == ")" or ch == "}":
+                            depth -= 1
+                    # If depth already ≤ 0 (immediate closing), emit now.
+                    if depth <= 0:
+                        symbols.append(
+                            Symbol(
+                                pending_name,
+                                "variable",
+                                "definition",
+                                chunk_id,
+                                doc_path,
+                                pending_line,
+                            )
+                        )
+                        pending_name = ""
+                        depth = 0
+                else:
+                    symbols.append(
+                        Symbol(
+                            m_var.group(1),
+                            "variable",
+                            "definition",
+                            chunk_id,
+                            doc_path,
+                            i,
+                        )
+                    )
 
-        # Class method definitions (indented, no function keyword)
-        m = re.match(r"\s+(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{", line)
-        if m and not re.match(
-            r"\s*(if|for|while|switch|catch|function|return)\b", line
-        ):
-            symbols.append(
-                Symbol(m.group(1), "function", "definition", chunk_id, doc_path, i)
-            )
+        # Class method definitions (indented, no function keyword).
+        # Skip when inside a multi-line declaration — continuation lines
+        # like ``  new Foo(...)`` or ``  await something()`` would otherwise
+        # be falsely matched as class methods.
+        if not pending_name:
+            m = re.match(r"\s+(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{", line)
+            if m and not re.match(
+                r"\s*(if|for|while|switch|catch|function|return)\b", line
+            ):
+                symbols.append(
+                    Symbol(m.group(1), "function", "definition", chunk_id, doc_path, i)
+                )
 
         # Interface/type definitions (TS)
         m = re.match(r"(?:export\s+)?(?:interface|type)\s+(\w+)", stripped)
@@ -206,6 +286,19 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbo
                     i,
                 )
             )
+
+    # Emit any pending declaration at EOF (e.g. no closing paren/brace reached).
+    if pending_name:
+        symbols.append(
+            Symbol(
+                pending_name,
+                "variable",
+                "definition",
+                chunk_id,
+                doc_path,
+                pending_line,
+            )
+        )
 
     return symbols
 

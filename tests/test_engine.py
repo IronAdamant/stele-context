@@ -386,3 +386,39 @@ def multiply(a, b):
         assert not all_same, (
             "expected at least one signature to change after content edit"
         )
+
+    def test_detect_changes_scan_new_reports_unindexed_files(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        indexed = tmp_path / "indexed.py"
+        indexed.write_text("x = 1\n")
+        brand_new = tmp_path / "brand_new.py"
+        brand_new.write_text("y = 2\n")
+
+        cf = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(tmp_path),
+            enable_coordination=False,
+        )
+        cf.index_documents([str(indexed)])
+        result = cf.detect_changes_and_update(session_id="scan_test", scan_new=True)
+        scan_new_items = [
+            n for n in result["new"] if n.get("reason") == "New file (scan)"
+        ]
+        norm = cf._normalize_path(str(brand_new))
+        assert any(
+            p["path"] == norm or str(p["path"]).endswith("brand_new.py")
+            for p in scan_new_items
+        )
+
+    def test_detect_changes_scan_new_default_off(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "only_indexed.py").write_text("a = 1\n")
+        (tmp_path / "not_indexed.py").write_text("b = 2\n")
+        cf = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(tmp_path),
+            enable_coordination=False,
+        )
+        cf.index_documents([str(tmp_path / "only_indexed.py")])
+        result = cf.detect_changes_and_update(session_id="s", scan_new=False)
+        assert not any(n.get("reason") == "New file (scan)" for n in result["new"])

@@ -14,11 +14,11 @@ from stele_context.search_engine import (
 class TestComputeSearchAlpha:
     """Tests for alpha auto-tuning based on query characteristics."""
 
-    def test_plain_english_returns_base_alpha(self):
-        """A plain prose query should return the base alpha unchanged."""
+    def test_plain_english_prefers_bm25(self):
+        """Prose queries (no code signals) lower alpha to favor keyword matching."""
         base = 0.7
         result = compute_search_alpha("how do I handle authentication", base)
-        assert result == base
+        assert result == max(0.3, base - 0.2)
 
     def test_underscore_lowers_alpha(self):
         """A query with an underscore is a code signal; alpha should drop."""
@@ -79,9 +79,9 @@ class TestComputeSearchAlpha:
     def test_trailing_dot_not_a_signal(self):
         """A query ending with a period (sentence) should not trigger dot signal."""
         base = 0.7
-        # "the end." — ends with dot, so the dot condition is False
+        # "the end." — ends with dot, so the dot condition is False; still NL → lower alpha
         result = compute_search_alpha("the end.", base)
-        assert result == base
+        assert result == max(0.3, base - 0.2)
 
 
 class TestExtractQueryIdentifiers:

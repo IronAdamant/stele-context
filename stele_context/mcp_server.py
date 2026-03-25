@@ -254,9 +254,13 @@ class MCPServer:
             logger.info("Server running in background thread")
 
     def _heartbeat_loop(self) -> None:
-        """Background heartbeat for agent registration."""
+        """Background heartbeat for agent registration and lock cleanup."""
         while self.server is not None:
             self.stele.heartbeat(self.agent_id)
+            # Reap expired locks every heartbeat to clean up stale ownership.
+            # This prevents the 152-expired-locks buildup seen when agents
+            # disconnect without releasing their document locks.
+            self.stele.reap_expired_locks()
             time.sleep(HEARTBEAT_INTERVAL)
 
     def stop(self) -> None:
