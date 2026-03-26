@@ -135,6 +135,16 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbo
                 Symbol(m.group(1), "class", "definition", chunk_id, doc_path, i)
             )
 
+        # module.exports = ClassName / module.exports = new ClassName() / module.exports = { ... }
+        # Emits the RHS class/object name as a definition so find_references
+        # can resolve imports that reference the exported singleton.
+        m_exp = re.match(r"module\.exports\s*=\s*(?:new\s+)?(\w+)", stripped)
+        if m_exp:
+            rhs_name = m_exp.group(1)
+            symbols.append(
+                Symbol(rhs_name, "class", "definition", chunk_id, doc_path, i)
+            )
+
         # Non-destructured require: const X = require('path')
         # Must be checked before general variable pattern to avoid
         # classifying the variable name as a definition instead of reference.
@@ -246,6 +256,57 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbo
             symbols.append(
                 Symbol(m.group(1), "module", "reference", chunk_id, doc_path, i)
             )
+
+        # Method / attribute call targets: obj.method()
+        # Extracts 'method' as a function reference so call-chains like
+        # algorithms.calculateJaccard() create edges to the method definition.
+        # Skips class method definitions (lines containing '{') and keywords.
+        for m in re.finditer(r"\.(\w+)\s*\(", stripped):
+            method_name = m.group(1)
+            # Skip if this line is a class method definition (has '{' on same line
+            # after the method name, i.e. "  methodName() {").
+            # Also skip noise keywords that commonly appear before '.'.
+            skip_words = {
+                "if",
+                "else",
+                "for",
+                "while",
+                "switch",
+                "catch",
+                "return",
+                "throw",
+                "new",
+                "delete",
+                "typeof",
+                "import",
+                "export",
+                "default",
+                "case",
+                "break",
+                "continue",
+                "try",
+                "finally",
+                "do",
+                "with",
+            }
+            # Check the word before the '.' to skip constructs like "new Foo.bar()"
+            # or "return obj.method()". We want bare obj.method() call sites.
+            # A simple heuristic: the character immediately before the '.' should
+            # be a word character (part of an identifier), not a keyword.
+            start = m.start()
+            if start > 0 and stripped[start - 1].isalnum():
+                # e.g. "algorithms.calculateJaccard(" — valid call site
+                if method_name not in skip_words:
+                    symbols.append(
+                        Symbol(
+                            method_name,
+                            "function",
+                            "reference",
+                            chunk_id,
+                            doc_path,
+                            i,
+                        )
+                    )
 
         # DOM API -- cross-language HTML/CSS references
         for m in re.finditer(r"querySelector(?:All)?\(['\"]([^'\"]+)['\"]\)", stripped):

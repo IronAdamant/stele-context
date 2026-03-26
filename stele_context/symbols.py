@@ -190,8 +190,6 @@ _NOISE_REFS: frozenset = frozenset(
         "flush",
         "seek",
         "apply",
-        "call",
-        "bind",
         "start",
         "stop",
         "run",
