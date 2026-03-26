@@ -625,7 +625,7 @@ def cmd_detect(args: argparse.Namespace, stele: Stele) -> int:
     result = stele.detect_changes_and_update(
         session_id=args.session,
         document_paths=args.paths if args.paths else None,
-        scan_new=getattr(args, "scan_new", False),
+        scan_new=getattr(args, "scan_new", True),
     )
 
     _print_detect_section("Unchanged", result["unchanged"])

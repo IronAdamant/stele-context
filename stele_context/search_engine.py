@@ -23,6 +23,112 @@ from stele_context.index_store import (
 from stele_context.index import VectorIndex
 
 
+# ---------------------------------------------------------------------------
+# Semantic search quality helpers
+# ---------------------------------------------------------------------------
+
+
+def _compute_rank_disagreement(
+    hnsw_scores: dict[str, float],
+    bm25_scores: dict[str, float],
+    top_k: int,
+) -> float:
+    """Return 0.0 (rankings agree) → 1.0 (complete disagreement).
+
+    Measures what fraction of HNSW's top-k is absent from BM25's top-k.
+    High disagreement means HNSW retrieved structurally-similar but
+    keyword-irrelevant chunks; we should fall back to BM25.
+    """
+    if not hnsw_scores or not bm25_scores:
+        return 0.0
+
+    hnsw_top = {
+        cid
+        for cid, _ in sorted(hnsw_scores.items(), key=lambda x: x[1], reverse=True)[
+            :top_k
+        ]
+    }
+    bm25_top = {
+        cid
+        for cid, _ in sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)[
+            :top_k
+        ]
+    }
+
+    overlap = len(hnsw_top & bm25_top)
+    disagreement = 1.0 - (overlap / max(len(hnsw_top), 1))
+    return disagreement
+
+
+def _has_clear_hnsw_winner(
+    hnsw_scores: dict[str, float],
+    bm25_scores: dict[str, float],
+    top_k: int = 3,
+) -> bool:
+    """Return True if HNSW has a clear top result that BM25 barely acknowledges.
+
+    When HNSW shows a strong structural winner that BM25 doesn't confirm,
+    the winner is likely a structural false positive (similar bracket ratios,
+    line counts etc.) rather than genuinely relevant content.
+    """
+    if not hnsw_scores or len(hnsw_scores) < 2:
+        return False
+
+    sorted_hnsw = sorted(hnsw_scores.values(), reverse=True)
+    top = sorted_hnsw[0]
+    median_rest = sorted_hnsw[top_k] if len(sorted_hnsw) > top_k else sorted_hnsw[-1]
+    gap = top - median_rest
+    if gap <= _SCORE_GAP_THRESHOLD:
+        return False
+
+    # The clear winner must appear in BM25's top results to be trusted
+    hnsw_winner = max(hnsw_scores.items(), key=lambda x: x[1])[0]
+    bm25_top_5 = {
+        cid
+        for cid, _ in sorted(bm25_scores.items(), key=lambda x: x[1], reverse=True)[:5]
+    }
+    return hnsw_winner not in bm25_top_5
+
+
+def _proximity_score(content: str, query_terms: list[str]) -> float:
+    """Score chunks by how query terms co-occur near each other in the content.
+
+    - First-occurrence bonus: earlier occurrence of key terms = better
+    - Co-occurrence: rare query terms appearing close together = much better
+    - Rare-term bonus: terms with high IDF that appear = high signal
+
+    This catches cases where e.g. "allergen" and "dietary compliance" appear
+    in the same paragraph (domain-relevant) vs. just somewhere in the file.
+    """
+    if not query_terms or not content:
+        return 0.0
+
+    content_lower = content.lower()
+    first_positions = [content_lower.find(t) for t in query_terms]
+    present = [i for i, pos in enumerate(first_positions) if pos >= 0]
+
+    if not present:
+        return 0.0
+
+    # First-occurrence score (earlier = better, normalized 0-1)
+    min_pos = min(first_positions[i] for i in present)
+    first_score = 1.0 - min(min_pos / max(len(content), 1), 1.0)
+
+    # IDF-weighted co-occurrence: how many query terms appear, rare ones weighted more.
+    # Approximate with term length (longer = rarer) since no corpus IDF is available.
+    idf_weights = [min(len(t) / 8.0, 1.0) for t in query_terms]
+    present_weighted = sum(idf_weights[i] for i in present) / max(sum(idf_weights), 1.0)
+
+    # Proximity: penalize when terms are far apart in the content
+    positions = [first_positions[i] for i in present]
+    max_dist = max(positions) - min(positions) if len(positions) > 1 else 0
+    # Normalize to ~1000 chars = full penalty
+    proximity_score = 1.0 - min(max_dist / 1000.0, 1.0)
+
+    # Combined: co-occurrence (40%) + first occurrence (30%) + proximity (30%)
+    return 0.4 * present_weighted + 0.3 * first_score + 0.3 * proximity_score
+
+
 # Multiplicative boost for chunks with Tier 2 agent-supplied signatures.
 # Agent summaries encode human-readable semantics ("JWT auth middleware") which
 # produce more query-relevant signatures than statistical fingerprints alone.
@@ -48,6 +154,12 @@ _QUERY_STOP_WORDS = frozenset(
         "how",
     }
 )
+
+# Thresholds for the rank-disagreement fallback
+# HNSW/BM25 disagreement at which BM25 is trusted over HNSW (0.6 = <2 overlap in top-5)
+_RANK_DISAGREEMENT_THRESHOLD = 0.6
+# Score gap above which HNSW has a "clear winner" that BM25 should confirm
+_SCORE_GAP_THRESHOLD = 0.15
 
 
 def _text_signature(text: str) -> list[float]:
@@ -233,13 +345,22 @@ def search_unlocked(
             vec_score *= TIER2_BOOST
         combined[cid] = alpha * vec_score + (1.0 - alpha) * kw_score
 
-    # BM25 fallback: when top HNSW similarity is near zero the query doesn't
-    # match the semantic structure of the codebase well.  Fall back to pure BM25
-    # so natural-language queries like "allergen dietary compliance" aren't
-    # drowned out by structurally-similar but semantically-irrelevant chunks.
-    top_hnsw = max(hnsw_scores.values()) if hnsw_scores else 0.0
-    if top_hnsw < 0.1 and max(bm25_scores.values(), 0.0) > 0.0:
-        # Pure BM25 ranking for this candidate set.
+    # BM25 fallback: replace blended ranking with pure BM25 when HNSW is
+    # misleading the results.
+    #
+    # Signal 1 — Rank disagreement: if HNSW and BM25 rank results in completely
+    # different orders (disagreement > 0.6), BM25's keyword intent is more
+    # reliable than HNSW's structural fingerprints for domain-specific queries.
+    #
+    # Signal 2 — Clear winner unconfirmed: if HNSW shows a strong structural
+    # winner that BM25 doesn't confirm, that winner is a structural false
+    # positive (similar bracket ratios / line counts to the query but
+    # keyword-irrelevant).
+    disagreement = _compute_rank_disagreement(hnsw_scores, bm25_scores, top_k=5)
+    has_clear_winner = _has_clear_hnsw_winner(hnsw_scores, bm25_scores)
+    if (disagreement >= _RANK_DISAGREEMENT_THRESHOLD or has_clear_winner) and max(
+        bm25_scores.values(), 0.0
+    ) > 0.0:
         combined = {cid: bm25_norm.get(cid, 0.0) for cid in candidate_ids}
 
     ranked = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:top_k]
@@ -295,6 +416,28 @@ def search_unlocked(
             existing_ids.add(cid)
 
         # Re-sort and truncate
+        results.sort(key=lambda r: r["relevance_score"], reverse=True)
+        results = results[:top_k]
+
+    # Proximity re-ranking: boost chunks where query terms co-occur naturally.
+    # For domain-specific queries ("allergen dietary compliance"), chunks where
+    # key terms appear near each other in natural prose are more relevant than
+    # chunks that just happen to score well on structural fingerprints.
+    # Only apply when results exist and contain query terms.
+    if results and query_idents:
+        query_terms = [t.lower() for t in query_idents]
+        # Small boost weight so it adjusts ranking without dominating
+        PROXIMITY_WEIGHT = 0.25
+        for r in results:
+            prox = _proximity_score(r.get("content", ""), query_terms)
+            if prox > 0:
+                # Blend: mostly keep the hybrid score, add a proximity nudge
+                r["relevance_score"] = round(
+                    r["relevance_score"] * (1.0 - PROXIMITY_WEIGHT)
+                    + prox * PROXIMITY_WEIGHT,
+                    6,
+                )
+        # Final re-sort after proximity nudge
         results.sort(key=lambda r: r["relevance_score"], reverse=True)
         results = results[:top_k]
 

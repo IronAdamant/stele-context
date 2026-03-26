@@ -261,7 +261,7 @@ class SymbolGraphManager:
         depth: int = 2,
         document_path: str | None = None,
         *,
-        compact: bool = False,
+        compact: bool = True,
         include_content: bool = True,
         path_filter: str | None = None,
     ) -> dict[str, Any]:
