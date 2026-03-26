@@ -70,7 +70,10 @@ class TestHTTPServer:
             assert "get_supported_formats" in tool_names
             assert "list_sessions" in tool_names
             assert "search_text" in tool_names
-            assert len(tool_names) == 46
+            assert "register_dynamic_symbols" in tool_names
+            assert "remove_dynamic_symbols" in tool_names
+            assert "get_dynamic_symbols" in tool_names
+            assert len(tool_names) == 49
         finally:
             server.stop()
 

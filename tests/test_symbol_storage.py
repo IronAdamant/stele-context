@@ -349,6 +349,7 @@ class TestSymbolStats:
             "definition_count": 0,
             "reference_count": 0,
             "edge_count": 0,
+            "runtime_symbol_count": 0,
         }
 
     def test_stats_count_roles(self, tmp_path):

@@ -258,9 +258,94 @@ class SymbolStorage:
             ref_count = conn.execute(
                 "SELECT COUNT(*) FROM symbols WHERE role = 'reference'"
             ).fetchone()[0]
+            runtime_count = conn.execute(
+                "SELECT COUNT(*) FROM symbols WHERE chunk_id LIKE 'runtime:%'"
+            ).fetchone()[0]
             return {
                 "symbol_count": sym_count,
                 "definition_count": def_count,
                 "reference_count": ref_count,
                 "edge_count": edge_count,
+                "runtime_symbol_count": runtime_count,
             }
+
+    def store_dynamic_symbols(
+        self, symbols: list[dict[str, Any]], agent_id: str
+    ) -> dict[str, Any]:
+        """Store runtime/manifest symbols that don't correspond to real chunks.
+
+        Runtime symbols use pseudo chunk_ids prefixed with ``runtime:{agent_id}:``.
+        They appear in find_references, coupling, and impact_radius just like
+        static symbols, enabling the symbol graph to model dynamic registrations
+        (plugin hooks, runtime callbacks, etc.).
+
+        Args:
+            symbols: List of dicts with keys: name, kind, role, document_path,
+                line_number (optional), description (optional).
+            agent_id: Agent registering these symbols (for chunk_id namespacing).
+
+        Returns dict with stored count and any validation errors.
+        """
+        if not symbols:
+            return {"stored": 0, "errors": []}
+
+        stored = 0
+        errors: list[str] = []
+        for sym in symbols:
+            name = sym.get("name")
+            kind = sym.get("kind", "function")
+            role = sym.get("role", "definition")
+            doc_path = sym.get("document_path", "")
+            line_number = sym.get("line_number")
+
+            if not name:
+                errors.append(f"missing name in symbol: {sym}")
+                continue
+            if role not in ("definition", "reference"):
+                errors.append(f"invalid role '{role}' for symbol '{name}'")
+                continue
+
+            chunk_id = f"runtime:{agent_id}:{name}"
+            with connect(self.db_path) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO symbols "
+                    "(name, kind, role, chunk_id, document_path, line_number) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (name, kind, role, chunk_id, doc_path, line_number),
+                )
+            stored += 1
+
+        return {"stored": stored, "errors": errors}
+
+    def remove_dynamic_symbols(self, agent_id: str) -> dict[str, Any]:
+        """Remove all runtime symbols registered by a given agent.
+
+        Returns count of removed symbols.
+        """
+        prefix = f"runtime:{agent_id}:"
+        with connect(self.db_path) as conn:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM symbols WHERE chunk_id LIKE ?",
+                (prefix + "%",),
+            )
+            count = cur.fetchone()[0]
+            conn.execute(
+                "DELETE FROM symbols WHERE chunk_id LIKE ?",
+                (prefix + "%",),
+            )
+        return {"removed": count}
+
+    def get_dynamic_symbols(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+        """Get all runtime symbols, optionally filtered by agent."""
+        with connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if agent_id:
+                rows = conn.execute(
+                    "SELECT * FROM symbols WHERE chunk_id LIKE ? ORDER BY name",
+                    (f"runtime:{agent_id}:%",),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM symbols WHERE chunk_id LIKE 'runtime:%' ORDER BY name"
+                ).fetchall()
+            return [dict(r) for r in rows]

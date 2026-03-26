@@ -688,6 +688,67 @@ class Stele:
         with self._lock.write_lock():
             return self.symbol_manager.rebuild_graph()
 
+    def register_dynamic_symbols(
+        self,
+        symbols: list[dict[str, Any]],
+        agent_id: str,
+    ) -> dict[str, Any]:
+        """Register runtime/dynamic symbols that don't correspond to indexed chunks.
+
+        Use this for plugin hook registrations, runtime callbacks, and other
+        symbols that only exist at runtime and are invisible to static analysis.
+
+        Dynamic symbols appear in ``find_references``, ``coupling``, and
+        ``impact_radius`` just like statically-extracted symbols, enabling the
+        symbol graph to model dynamic registration patterns.
+
+        Symbols are namespaced by agent_id in the storage layer
+        (``runtime:{agent_id}:{name}``) and can be removed with
+        ``remove_dynamic_symbols``.
+
+        Args:
+            symbols: List of dicts with keys: name (required), kind
+                (default "function"), role (default "definition"),
+                document_path (default ""), line_number (optional).
+            agent_id: Agent registering these symbols (used for namespacing
+                and later removal).
+
+        Example::
+
+            engine.register_dynamic_symbols(
+                symbols=[
+                    {"name": "on_recipe_validated", "kind": "function",
+                     "document_path": "src/plugins/hooks.js"},
+                    {"name": "dietary_check_hook", "kind": "function",
+                     "role": "reference",
+                     "document_path": "src/services/validator.js"},
+                ],
+                agent_id="my-agent-123",
+            )
+        """
+        with self._lock.write_lock():
+            result = self.storage.store_dynamic_symbols(symbols, agent_id)
+            if result.get("stored"):
+                # Rebuild edges so dynamic symbols are connected into the graph.
+                self.symbol_manager.rebuild_edges()
+            return result
+
+    def remove_dynamic_symbols(self, agent_id: str) -> dict[str, Any]:
+        """Remove all dynamic symbols previously registered by an agent.
+
+        Returns count of removed symbols.
+        """
+        with self._lock.write_lock():
+            result = self.storage.remove_dynamic_symbols(agent_id)
+            if result.get("removed"):
+                self.symbol_manager.rebuild_edges()
+            return result
+
+    def get_dynamic_symbols(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+        """List all registered dynamic/runtime symbols, optionally filtered."""
+        with self._lock.read_lock():
+            return self.storage.get_dynamic_symbols(agent_id)
+
     # -- Document ownership & conflict prevention -----------------------------
 
     def acquire_document_lock(

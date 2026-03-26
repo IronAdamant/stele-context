@@ -138,6 +138,93 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
             "properties": {},
         },
     },
+    # -- Dynamic Symbol Tracking (Runtime Symbols) -----------------------------
+    {
+        "name": "register_dynamic_symbols",
+        "description": "Register runtime/dynamic symbols that don't correspond to "
+        "indexed file chunks — plugin hooks, runtime callbacks, dynamically "
+        "registered handlers. These appear in find_references, coupling, and "
+        "impact_radius just like statically-extracted symbols, enabling the "
+        "symbol graph to model dynamic registration patterns invisible to "
+        "static analysis. "
+        "USE WHEN: a plugin or runtime system registers symbols by name "
+        "(e.g., hook registration API), and you want those symbols to be "
+        "visible to find_references and impact_radius for change analysis.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbols": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Symbol name (e.g., 'on_recipe_validated')",
+                            },
+                            "kind": {
+                                "type": "string",
+                                "description": "Symbol kind: function, class, variable, module (default: function)",
+                                "default": "function",
+                            },
+                            "role": {
+                                "type": "string",
+                                "description": "'definition' (symbol is defined here) or 'reference' (symbol is used here, default: definition)",
+                                "default": "definition",
+                            },
+                            "document_path": {
+                                "type": "string",
+                                "description": "File path this symbol belongs to (e.g., 'src/plugins/hooks.js')",
+                            },
+                            "line_number": {
+                                "type": "integer",
+                                "description": "Optional line number where the symbol appears",
+                            },
+                        },
+                        "required": ["name"],
+                    },
+                    "description": "List of runtime symbols to register",
+                },
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent identifier — symbols are namespaced by agent for later removal",
+                },
+            },
+            "required": ["symbols", "agent_id"],
+        },
+    },
+    {
+        "name": "remove_dynamic_symbols",
+        "description": "Remove all runtime/dynamic symbols previously registered by "
+        "an agent. Use after an agent finishes work so stale runtime symbols "
+        "don't pollute future queries. "
+        "USE WHEN: cleaning up after an agent session completes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent whose symbols to remove",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    {
+        "name": "get_dynamic_symbols",
+        "description": "List all registered runtime/dynamic symbols, "
+        "optionally filtered by agent. Shows what dynamic symbols are currently "
+        "in the symbol graph.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Filter by agent (optional — omit to get all)",
+                },
+            },
+        },
+    },
     # -- Secondary: Sessions --------------------------------------------------
     {
         "name": "list_sessions",

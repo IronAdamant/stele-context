@@ -32,6 +32,8 @@ WRITE_TOOLS = frozenset(
         "release_document_lock",
         "refresh_document_lock",
         "release_agent_locks",
+        "register_dynamic_symbols",
+        "remove_dynamic_symbols",
     }
 )
 
@@ -84,6 +86,10 @@ def build_tool_map(
         "rebuild_symbols": engine.rebuild_symbol_graph,
         "stale_chunks": engine.stale_chunks,
         "coupling": engine.coupling,
+        # Dynamic symbol tracking (runtime symbols)
+        "register_dynamic_symbols": engine.register_dynamic_symbols,
+        "remove_dynamic_symbols": engine.remove_dynamic_symbols,
+        "get_dynamic_symbols": engine.get_dynamic_symbols,
         # Document locking
         "acquire_document_lock": engine.acquire_document_lock,
         "refresh_document_lock": engine.refresh_document_lock,

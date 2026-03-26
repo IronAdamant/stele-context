@@ -127,6 +127,17 @@ class StorageDelegatesMixin:
     def get_symbol_stats(self) -> dict[str, Any]:
         return self._symbol_storage.get_symbol_stats()
 
+    def store_dynamic_symbols(
+        self, symbols: list[dict[str, Any]], agent_id: str
+    ) -> dict[str, Any]:
+        return self._symbol_storage.store_dynamic_symbols(symbols, agent_id)
+
+    def remove_dynamic_symbols(self, agent_id: str) -> dict[str, Any]:
+        return self._symbol_storage.remove_dynamic_symbols(agent_id)
+
+    def get_dynamic_symbols(self, agent_id: str | None = None) -> list[dict[str, Any]]:
+        return self._symbol_storage.get_dynamic_symbols(agent_id)
+
     # -- Sessions (SessionStorage) --------------------------------------------
 
     def create_session(self, session_id: str, agent_id: str | None = None) -> None:

@@ -118,22 +118,25 @@ def detect_changes_unlocked(
     if document_paths is None:
         all_chunks = storage.search_chunks()
         document_paths = list({c["document_path"] for c in all_chunks})
-        if scan_new and project_root is not None:
-            dirs = skip_dirs if skip_dirs is not None else set()
-            expanded = expand_paths(
-                [str(project_root)],
-                chunkers,
-                dirs,
-                normalize_path,
-            )
-            indexed_set = {d["document_path"] for d in storage.get_all_documents()}
-            for p in expanded:
-                if p not in indexed_set:
-                    results["new"].append(
-                        {"path": p, "reason": "New file (scan)"},
-                    )
     else:
         document_paths = [normalize_path(p) for p in document_paths]
+
+    # scan_new discovers unindexed files in the project root regardless of
+    # whether document_paths was provided (fixes silent ignore bug).
+    if scan_new and project_root is not None:
+        dirs = skip_dirs if skip_dirs is not None else set()
+        expanded = expand_paths(
+            [str(project_root)],
+            chunkers,
+            dirs,
+            normalize_path,
+        )
+        indexed_set = {d["document_path"] for d in storage.get_all_documents()}
+        for p in expanded:
+            if p not in indexed_set:
+                results["new"].append(
+                    {"path": p, "reason": "New file (scan)"},
+                )
 
     session = storage.get_session(session_id)
 

@@ -14,11 +14,17 @@ from stele_context.search_engine import (
 class TestComputeSearchAlpha:
     """Tests for alpha auto-tuning based on query characteristics."""
 
-    def test_plain_english_prefers_bm25(self):
-        """Prose queries (no code signals) lower alpha to favor keyword matching."""
+    def test_plain_english_keeps_base_alpha(self):
+        """Prose queries (no code signals) keep base alpha so HNSW can complement BM25.
+
+        The statistical HNSW signal does not understand semantics, but it can
+        still surface structurally similar chunks.  For natural-language queries
+        we keep base_alpha so both signals contribute.  Code-like queries are
+        the ones that need alpha reduced to favor BM25 keyword matching.
+        """
         base = 0.7
         result = compute_search_alpha("how do I handle authentication", base)
-        assert result == max(0.3, base - 0.2)
+        assert result == base
 
     def test_underscore_lowers_alpha(self):
         """A query with an underscore is a code signal; alpha should drop."""
@@ -64,11 +70,11 @@ class TestComputeSearchAlpha:
         result = compute_search_alpha("def parse_config(args) {}", base)
         assert result >= 0.3
 
-    def test_one_signal_floor_is_0_4(self):
-        """With 1-2 signals alpha floor is 0.4, never lower."""
+    def test_one_signal_floor_is_0_3(self):
+        """With 1-2 signals alpha floor is 0.3 to allow meaningful reduction."""
         base = 0.45
         result = compute_search_alpha("parse_config", base)
-        assert result >= 0.4
+        assert result >= 0.3
 
     def test_dot_access_lowers_alpha(self):
         """A dotted expression like 'obj.method' is a code signal."""
@@ -76,12 +82,12 @@ class TestComputeSearchAlpha:
         result = compute_search_alpha("obj.method call", base)
         assert result < base
 
-    def test_trailing_dot_not_a_signal(self):
-        """A query ending with a period (sentence) should not trigger dot signal."""
+    def test_trailing_dot_is_plain_english(self):
+        """A query ending with a period (sentence) has no code signals; keeps base alpha."""
         base = 0.7
-        # "the end." — ends with dot, so the dot condition is False; still NL → lower alpha
+        # "the end." — ends with dot so dot condition is False; no other signals → plain NL
         result = compute_search_alpha("the end.", base)
-        assert result == max(0.3, base - 0.2)
+        assert result == base
 
 
 class TestExtractQueryIdentifiers:

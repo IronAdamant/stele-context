@@ -295,14 +295,18 @@ class SymbolGraphManager:
 
         visited: set[str] = set()
         queue = deque((cid, 0) for cid in seed_ids)
-        layers: dict[int, list[str]] = {}
+
+        # When compact=True, aggregate per-file counts during BFS instead of
+        # materialising every chunk first and condensing afterward.
+        by_file: dict[str, dict[str, Any]] = {}
+        result_chunks: list[dict[str, Any]] = []
+        affected_files: set[str] = set()
 
         while queue:
             current_id, current_depth = queue.popleft()
             if current_id in visited or current_depth > depth:
                 continue
             visited.add(current_id)
-            layers.setdefault(current_depth, []).append(current_id)
 
             if current_depth < depth:
                 edges = self.storage.get_incoming_edges(current_id)
@@ -310,50 +314,50 @@ class SymbolGraphManager:
                     if edge["source_chunk_id"] not in visited:
                         queue.append((edge["source_chunk_id"], current_depth + 1))
 
-        result_chunks: list[dict[str, Any]] = []
-        affected_files: set[str] = set()
-        for d, chunk_ids_at_depth in sorted(layers.items()):
-            for cid in chunk_ids_at_depth:
-                if cid in seed_ids and d == 0:
-                    continue
-                meta = self.storage.get_chunk(cid)
-                if meta:
-                    doc_p = meta["document_path"]
-                    if path_filter is not None and path_filter not in doc_p:
-                        continue
-                    affected_files.add(doc_p)
-                    row: dict[str, Any] = {
-                        "chunk_id": cid,
-                        "document_path": doc_p,
-                        "depth": d,
-                        "token_count": meta["token_count"],
+            # Skip the seed chunk itself (depth 0 from document_path seed).
+            if current_id in seed_ids and current_depth == 0:
+                continue
+
+            meta = self.storage.get_chunk(current_id)
+            if not meta:
+                continue
+            doc_p = meta["document_path"]
+            if path_filter is not None and path_filter not in doc_p:
+                continue
+            affected_files.add(doc_p)
+
+            if compact:
+                if doc_p not in by_file:
+                    by_file[doc_p] = {
+                        "path": doc_p,
+                        "chunk_count": 0,
+                        "depth_min": current_depth,
+                        "depth_max": current_depth,
                     }
-                    if include_content:
-                        row["content"] = meta.get("content")
-                    result_chunks.append(row)
+                e = by_file[doc_p]
+                e["chunk_count"] += 1
+                e["depth_min"] = min(e["depth_min"], current_depth)
+                e["depth_max"] = max(e["depth_max"], current_depth)
+            else:
+                row: dict[str, Any] = {
+                    "chunk_id": current_id,
+                    "document_path": doc_p,
+                    "depth": current_depth,
+                    "token_count": meta["token_count"],
+                }
+                if include_content:
+                    row["content"] = meta.get("content")
+                result_chunks.append(row)
 
         out: dict[str, Any] = {
             "origin": origin,
             "max_depth": depth,
-            "affected_chunks": len(result_chunks),
+            "affected_chunks": len(result_chunks)
+            if not compact
+            else sum(v["chunk_count"] for v in by_file.values()),
             "affected_files": len(affected_files),
         }
         if compact:
-            by_file: dict[str, dict[str, Any]] = {}
-            for row in result_chunks:
-                p = row["document_path"]
-                dval = row["depth"]
-                if p not in by_file:
-                    by_file[p] = {
-                        "path": p,
-                        "chunk_count": 0,
-                        "depth_min": dval,
-                        "depth_max": dval,
-                    }
-                e = by_file[p]
-                e["chunk_count"] += 1
-                e["depth_min"] = min(e["depth_min"], dval)
-                e["depth_max"] = max(e["depth_max"], dval)
             out["files"] = sorted(by_file.values(), key=lambda x: x["path"])
             out["chunks"] = []
         else:

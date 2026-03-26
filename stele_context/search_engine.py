@@ -81,7 +81,9 @@ def compute_search_alpha(query: str, base_alpha: float) -> float:
     """Auto-tune blend weight based on query characteristics.
 
     Code-like queries (identifiers, brackets, keywords) get lower
-    alpha to weight keyword matching more heavily.
+    alpha to weight keyword matching more heavily via BM25.
+    Natural-language queries keep or raise alpha so the HNSW
+    statistical signal can complement BM25 keyword matches.
     """
     signals = sum(
         (
@@ -97,11 +99,14 @@ def compute_search_alpha(query: str, base_alpha: float) -> float:
         )
     )
     if signals >= 3:
+        # Heavy code signals: rely on BM25 for identifier matching.
         return max(0.3, base_alpha - 0.3)
     if signals >= 1:
-        return max(0.4, base_alpha - 0.15)
-    # Natural-language queries: statistical HNSW signal is weak; favor BM25.
-    return max(0.3, base_alpha - 0.2)
+        # Moderate code signals: slightly favor BM25.
+        return max(0.3, base_alpha - 0.15)
+    # Natural-language: keep base_alpha so HNSW can complement BM25.
+    # For pure keyword queries (no semantic intent), BM25 dominates.
+    return base_alpha
 
 
 def ensure_bm25(
@@ -226,6 +231,15 @@ def search_unlocked(
         if cid in tier2_ids:
             vec_score *= TIER2_BOOST
         combined[cid] = alpha * vec_score + (1.0 - alpha) * kw_score
+
+    # BM25 fallback: when top HNSW similarity is near zero the query doesn't
+    # match the semantic structure of the codebase well.  Fall back to pure BM25
+    # so natural-language queries like "allergen dietary compliance" aren't
+    # drowned out by structurally-similar but semantically-irrelevant chunks.
+    top_hnsw = max(hnsw_scores.values()) if hnsw_scores else 0.0
+    if top_hnsw < 0.1 and max(bm25_scores.values(), 0.0) > 0.0:
+        # Pure BM25 ranking for this candidate set.
+        combined = {cid: bm25_norm.get(cid, 0.0) for cid in candidate_ids}
 
     ranked = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:top_k]
 
