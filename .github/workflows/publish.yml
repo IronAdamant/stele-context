@@ -3,15 +3,17 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
-  workflow_dispatch:  # Manual re-run after configuring PYPI_API_TOKEN
+  workflow_dispatch:
+
+# PyPI Trusted Publishing: short-lived OIDC token from GitHub — no PYPI_API_TOKEN secret.
+# One-time: pypi.org → project → Publishing → add trusted publisher (GitHub + this repo + publish.yml).
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Do not request id-token here: PyPI Trusted Publishing (OIDC) must be
-    # configured on pypi.org for this repo, or publish fails with invalid-publisher.
-    # API token auth uses secrets.PYPI_API_TOKEN only.
-
     steps:
     - uses: actions/checkout@v4
 
@@ -26,21 +28,12 @@ jobs:
         pip install build twine
 
     - name: Build package
-      run: |
-        python -m build
+      run: python -m build
 
     - name: Check package
-      run: |
-        twine check dist/*
+      run: twine check dist/*
 
-    # Twine upload avoids PyPI Trusted Publishing (OIDC). Set repo secret PYPI_API_TOKEN.
     - name: Publish to PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      run: |
-        if [ -z "${TWINE_PASSWORD}" ]; then
-          echo "::error::Repository secret PYPI_API_TOKEN is not set (PyPI → Account → API tokens)."
-          exit 1
-        fi
-        python -m twine upload dist/*
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        print-hash: true

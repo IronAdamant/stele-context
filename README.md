@@ -480,8 +480,8 @@ Run `stele-context` with the `environment_check` MCP tool, or call `engine.check
 
 1. Bump `version` in `pyproject.toml` and `stele_context/__init__.py`, update `CHANGELOG.md`.
 2. Tag and push: `git tag -a vX.Y.Z -m "..." && git push origin main && git push origin vX.Y.Z`
-3. **PyPI:** In the GitHub repo, add secret **`PYPI_API_TOKEN`** (PyPI → Account settings → API tokens → scope for `stele-context`).
-4. Create a **GitHub Release** from the tag (or use **Actions → Publish to PyPI → Run workflow** after `workflow_dispatch` is enabled).
+3. **PyPI (no repo secret):** Use [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) — on **pypi.org** open the project → **Publishing** → **Add a new publisher** → **GitHub** → set **repository owner** / **repository name** / **workflow name** `publish.yml` to match this repo. GitHub Actions then uses OIDC; you do **not** need `PYPI_API_TOKEN` in GitHub. If publish fails with `invalid-publisher`, the publisher entry on PyPI does not match the repo or workflow file name.
+4. Create a **GitHub Release** from the tag (or **Actions → Publish to PyPI → Run workflow**).
 
 The package has **no runtime dependencies** (`dependencies = []`); optional extras stay in `[project.optional-dependencies]`.
 
