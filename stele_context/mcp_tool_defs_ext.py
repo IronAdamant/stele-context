@@ -56,6 +56,8 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
         "Accepts chunk_id or document_path (at least one required). "
         "Default compact=true: per-file summaries (recommended for agents); "
         "set compact=false only for debugging (full chunk list). "
+        "summary_mode=true returns bounded output: depth_distribution plus "
+        "top_n_files impacted paths (by chunk count), similar to fan-in summaries. "
         "USE WHEN: blast-radius checks before edits, downstream impact.",
         "inputSchema": {
             "type": "object",
@@ -86,6 +88,16 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
                 "path_filter": {
                     "type": "string",
                     "description": "Only include results whose document path contains this substring (e.g. 'src/' to exclude tests)",
+                },
+                "summary_mode": {
+                    "type": "boolean",
+                    "description": "If true, return per-depth chunk counts and only top_n_files most-impacted paths (bounded payload; implies compact, no content)",
+                    "default": False,
+                },
+                "top_n_files": {
+                    "type": "integer",
+                    "description": "With summary_mode, max files listed in files (default 25)",
+                    "default": 25,
                 },
             },
         },

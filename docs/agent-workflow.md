@@ -40,9 +40,13 @@ Rough rule: **symbols first** for identifiers; **hybrid search** for concepts; *
 
 ### Bounded context on `search` / `map` / `stats`
 
-- **`search`**: `compact=true` (previews only), `max_result_tokens` (cap total body size), `return_response_meta=true` (truncation metadata).
-- **`map`**: `compact=true`, `max_documents`, `max_annotation_chars`.
+- **`search`**: `compact=true` (previews only), `max_result_tokens` (cap total body size), `return_response_meta=true` (truncation metadata), **`path_prefix`** when the index spans multiple trees and you want one project’s paths only.
+- **`map`**: `compact=true`, `max_documents`, `max_annotation_chars`, **`path_prefix`** to list only documents under a project-relative prefix.
 - **`stats`**: `compact=true` for a small JSON-friendly payload.
+
+### Impact radius without huge payloads
+
+- **`impact_radius`**: use **`summary_mode=true`** (optional **`top_n_files`**) for **`depth_distribution`** and a capped **`files`** list plus **`files_total`** — prefer this over **`compact=false`** for hub files.
 
 ## Tier 2 bootstrap (two passes)
 

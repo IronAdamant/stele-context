@@ -2,6 +2,13 @@
 
 Chronological record of development activity on Stele Context, maintained for LLM agent context.
 
+## 2026-03-27 - v1.0.5 RecipeLab findings parity (zero-dep)
+
+- **search_engine / engine**: weak raw HNSW cosine → BM25 fallback; **`path_prefix`** on **`search`** and **`get_map`**; CLI **`--path-prefix`**.
+- **symbol_graph / engine**: **`impact_radius(..., summary_mode=, top_n_files=)`** — depth distribution + bounded file list.
+- **Docs**: CHANGELOG, README, AGENTS.md, STABILITY.md, CLAUDE.md, `docs/agent-workflow.md`, COMPLETE_PROJECT_DOCUMENTATION, findings `stele-context.md` closure note — **reasonable stopping place** for stdlib core scope.
+- **Release**: PyPI via GitHub Actions on tag **v1.0.5**.
+
 ## 2026-03-27 - v1.0.4 Agent orientation and bounded retrieval
 
 - **`AGENTS.md`**, **`docs/philosophy.md`**, **`docs/agent-workflow.md`** — parity docs for LLM-first workflows (session vs index, Tier 2 bootstrap, trust).

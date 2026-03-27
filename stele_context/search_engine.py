@@ -163,6 +163,18 @@ _SCORE_GAP_THRESHOLD = 0.15
 # Raw cosine spread in the HNSW candidate set below this ⇒ all hits equally
 # "structurally similar" (RecipeLab-style ~0.69 scores); trust BM25 instead.
 _FLAT_HNSW_SPAN_THRESHOLD = 0.035
+# When HNSW's best raw cosine is below this, the query matches nothing strongly
+# in vector space (weak semantic signal); prefer BM25 keyword ranking.
+_LOW_HNSW_TOP_RAW_THRESHOLD = 0.70
+
+
+def _doc_matches_path_prefix(doc_path: str, prefix: str | None) -> bool:
+    """True if document_path is under prefix (path prefix, not substring)."""
+    if not prefix:
+        return True
+    d = doc_path.replace("\\", "/")
+    p = prefix.replace("\\", "/").rstrip("/")
+    return d == p or d.startswith(p + "/")
 
 
 def _text_signature(text: str) -> list[float]:
@@ -308,6 +320,7 @@ def search_unlocked(
     max_result_tokens: int | None = None,
     compact: bool = False,
     return_response_meta: bool = False,
+    path_prefix: str | None = None,
 ) -> list[dict[str, Any]] | dict[str, Any]:
     """Hybrid (HNSW+BM25) or keyword-only (BM25) search across chunks."""
     mode = (search_mode or "hybrid").strip().lower()
@@ -319,8 +332,10 @@ def search_unlocked(
     if bm25_index is None:
         raise RuntimeError("BM25 index not initialized")
 
+    rank_limit = top_k * 10 if path_prefix else top_k
+
     if mode == "keyword":
-        bm25_ranked = bm25_index.search(query, top_k=max(1, top_k * 2))
+        bm25_ranked = bm25_index.search(query, top_k=max(1, max(top_k, rank_limit) * 2))
         candidate_ids = list(dict.fromkeys(cid for cid, _ in bm25_ranked))
         if not candidate_ids:
             return []
@@ -331,7 +346,7 @@ def search_unlocked(
         else:
             bm25_norm = bm25_scores
         combined = {cid: bm25_norm.get(cid, 0.0) for cid in candidate_ids}
-        ranked = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:top_k]
+        ranked = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:rank_limit]
     else:
         query_sig = _text_signature(query)
 
@@ -396,14 +411,17 @@ def search_unlocked(
         disagreement = _compute_rank_disagreement(hnsw_scores, bm25_scores, top_k=5)
         has_clear_winner = _has_clear_hnsw_winner(hnsw_scores, bm25_scores)
         flat_hnsw = hnsw_span_raw < _FLAT_HNSW_SPAN_THRESHOLD and len(hnsw_scores) >= 4
+        max_hnsw_raw = max(hnsw_scores.values()) if hnsw_scores else 0.0
+        low_semantic = max_hnsw_raw < _LOW_HNSW_TOP_RAW_THRESHOLD
         if (
             disagreement >= _RANK_DISAGREEMENT_THRESHOLD
             or has_clear_winner
             or flat_hnsw
+            or low_semantic
         ) and max(bm25_scores.values(), default=0.0) > 0.0:
             combined = {cid: bm25_norm.get(cid, 0.0) for cid in candidate_ids}
 
-        ranked = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:top_k]
+        ranked = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:rank_limit]
 
     results = []
     for chunk_id, score in ranked:
@@ -439,6 +457,10 @@ def search_unlocked(
                 continue
             chunk_meta = storage.get_chunk(cid)
             if chunk_meta is None:
+                continue
+            if path_prefix and not _doc_matches_path_prefix(
+                chunk_meta["document_path"], path_prefix
+            ):
                 continue
             content = storage.get_chunk_content(cid)
             entry = {
@@ -481,6 +503,14 @@ def search_unlocked(
                 )
         # Final re-sort after proximity nudge
         results.sort(key=lambda r: r["relevance_score"], reverse=True)
+        results = results[:top_k]
+
+    if path_prefix:
+        results = [
+            r
+            for r in results
+            if _doc_matches_path_prefix(r.get("document_path", ""), path_prefix)
+        ]
         results = results[:top_k]
 
     from stele_context.agent_response import truncate_search_results
@@ -633,11 +663,16 @@ def get_map_unlocked(
     compact: bool = False,
     max_documents: int | None = None,
     max_annotation_chars: int = 200,
+    path_prefix: str | None = None,
 ) -> dict[str, Any]:
     """Build project overview: all documents with chunk counts and annotations."""
     documents = storage.get_all_documents()
     result, total_tokens = [], 0
     for doc in documents:
+        if path_prefix and not _doc_matches_path_prefix(
+            doc["document_path"], path_prefix
+        ):
+            continue
         chunks = storage.search_chunks(document_path=doc["document_path"])
         doc_tokens = sum(c["token_count"] for c in chunks)
         total_tokens += doc_tokens

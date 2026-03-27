@@ -116,7 +116,8 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
         "name": "search",
         "description": "Secondary exploration tool — HNSW (statistical vectors) plus "
         "BM25 keywords with automatic fallback to keyword ranking when vector "
-        "and keyword results disagree. NOT primary retrieval: results can "
+        "and keyword results disagree, when HNSW top scores are weak, or when "
+        "scores are flat. NOT primary retrieval: results can "
         "favor structural/code boilerplate over query intent. "
         "USE WHEN: broad exploration after indexing; prefer agent_grep or "
         "search_text for verifying identifiers, renames, or exact occurrences. "
@@ -155,6 +156,10 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                     "description": "If true, return {results, meta} with truncation info.",
                     "default": False,
                 },
+                "path_prefix": {
+                    "type": "string",
+                    "description": "If set, only return chunks whose document path starts with this prefix (project-relative path filter; reduces multi-repo noise).",
+                },
             },
             "required": ["query"],
         },
@@ -165,6 +170,7 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
         "token totals, annotations, index_health (documents/chunks/symbol_rows, "
         "storage_dir, latest_indexed_at, seconds_since_last_index, "
         "symbol_graph_status, chunk_store_status, alerts), and project_root. "
+        "Optional path_prefix limits to documents under that path prefix. "
         "USE WHEN: starting work on a project, understanding what's indexed, "
         "checking project scope and size.",
         "inputSchema": {
@@ -183,6 +189,10 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                     "type": "integer",
                     "description": "Truncate each annotation content to this many chars.",
                     "default": 200,
+                },
+                "path_prefix": {
+                    "type": "string",
+                    "description": "If set, only include documents whose path starts with this prefix (project-relative; isolates one repo in a shared index).",
                 },
             },
         },

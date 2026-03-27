@@ -483,6 +483,23 @@ class TestEngineSymbolIntegration:
         assert len(impact["files"]) >= 1
         assert all("chunk_count" in f and "depth_min" in f for f in impact["files"])
 
+    def test_impact_radius_summary_mode(self):
+        self._write_and_index("core.py", "def core_fn():\n    return 1\n")
+        self._write_and_index("user.py", "from core import core_fn\ncore_fn()\n")
+        core_path = str(Path(self.tmpdir) / "core.py")
+        impact = self.cf.impact_radius(
+            document_path=core_path,
+            depth=2,
+            summary_mode=True,
+            top_n_files=5,
+        )
+        assert impact.get("summary_mode") is True
+        assert "depth_distribution" in impact
+        assert impact["depth_distribution"]
+        assert "files" in impact
+        assert len(impact["files"]) <= 5
+        assert impact.get("files_total", 0) >= len(impact["files"])
+
     def test_impact_radius_omit_content(self):
         self._write_and_index("core.py", "def core_fn():\n    return 1\n")
         self._write_and_index("user.py", "from core import core_fn\ncore_fn()\n")

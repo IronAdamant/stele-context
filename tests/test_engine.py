@@ -126,6 +126,36 @@ def multiply(a, b):
         assert len(r) >= 1
         assert "unique_kwarg" in (r[0].get("content") or "")
 
+    def test_get_map_and_search_path_prefix(self, tmp_path):
+        """path_prefix limits map and search to documents under a path."""
+        (tmp_path / ".git").mkdir()
+        (tmp_path / "alpha").mkdir()
+        (tmp_path / "beta").mkdir()
+        (tmp_path / "alpha" / "a.py").write_text("def only_in_alpha():\n    pass\n")
+        (tmp_path / "beta" / "b.py").write_text("def only_in_beta():\n    pass\n")
+        cf = Stele(
+            storage_dir=str(tmp_path / "storage"),
+            project_root=str(tmp_path),
+            enable_coordination=False,
+        )
+        cf.index_documents(
+            [
+                str(tmp_path / "alpha" / "a.py"),
+                str(tmp_path / "beta" / "b.py"),
+            ]
+        )
+        m = cf.get_map(path_prefix="alpha")
+        assert m["total_documents"] == 1
+        assert "alpha" in m["documents"][0]["path"].replace("\\", "/")
+
+        hits = cf.search("only_in", top_k=5, path_prefix="alpha")
+        assert len(hits) >= 1
+        assert all("alpha" in h["document_path"].replace("\\", "/") for h in hits)
+
+        hits_b = cf.search("only_in", top_k=5, path_prefix="beta")
+        assert len(hits_b) >= 1
+        assert all("beta" in h["document_path"].replace("\\", "/") for h in hits_b)
+
     def test_map_and_stats_include_index_health(self, tmp_path):
         (tmp_path / ".git").mkdir()
         f = tmp_path / "a.py"

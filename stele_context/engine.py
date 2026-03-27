@@ -360,13 +360,17 @@ class Stele:
         compact: bool = False,
         max_documents: int | None = None,
         max_annotation_chars: int = 200,
+        path_prefix: str | None = None,
     ) -> dict[str, Any]:
+        if path_prefix is not None:
+            path_prefix = self._normalize_path(path_prefix)
         with self._lock.read_lock():
             data = _se.get_map_unlocked(
                 self.storage,
                 compact=compact,
                 max_documents=max_documents,
                 max_annotation_chars=max_annotation_chars,
+                path_prefix=path_prefix,
             )
         data["project_root"] = (
             str(self._project_root) if self._project_root is not None else None
@@ -620,7 +624,10 @@ class Stele:
         max_result_tokens: int | None = None,
         compact: bool = False,
         return_response_meta: bool = False,
+        path_prefix: str | None = None,
     ) -> list[dict[str, Any]] | dict[str, Any]:
+        if path_prefix is not None:
+            path_prefix = self._normalize_path(path_prefix)
         with self._lock.read_lock():
             return _se.search_unlocked(
                 query,
@@ -635,6 +642,7 @@ class Stele:
                 max_result_tokens=max_result_tokens,
                 compact=compact,
                 return_response_meta=return_response_meta,
+                path_prefix=path_prefix,
             )
 
     def get_context(
@@ -760,6 +768,8 @@ class Stele:
         compact: bool = True,
         include_content: bool = True,
         path_filter: str | None = None,
+        summary_mode: bool = False,
+        top_n_files: int = 25,
     ) -> dict[str, Any]:
         if document_path:
             document_path = self._normalize_path(document_path)
@@ -771,6 +781,8 @@ class Stele:
                 compact=compact,
                 include_content=include_content,
                 path_filter=path_filter,
+                summary_mode=summary_mode,
+                top_n_files=top_n_files,
             )
 
     def coupling(self, document_path: str) -> dict[str, Any]:

@@ -5,6 +5,19 @@ All notable changes to Stele Context will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-03-27
+
+### Added
+- **Hybrid search** — BM25-only fallback when **max raw HNSW cosine** is below a fixed weak-signal threshold (~0.70), in addition to existing disagreement / flat-HNSW / clear-winner fallbacks (still **zero core deps**).
+- **`Stele.search(..., path_prefix=)`** / **`get_map(..., path_prefix=)`** — optional **project-relative path prefix** to scope results when one storage index spans multiple trees (MCP + engine; CLI **`--path-prefix`** on **`search`** and **`map`**).
+- **`Stele.impact_radius(..., summary_mode=, top_n_files=)`** — bounded **summary** payload: **`depth_distribution`**, top-**N** impacted files by chunk count, **`files_total`** (MCP + engine).
+
+### Changed
+- **`cli_metadata.cmd_map`** — passes **`max_annotation_chars`** through to **`get_map`**.
+
+### Documentation
+- README, AGENTS.md, STABILITY.md, CLAUDE.md, `docs/agent-workflow.md`, findings note, COMPLETE_PROJECT_DOCUMENTATION, LLM_Development — parity with 1.0.5 APIs and **reasonable stopping place** for zero-dep core scope (see STABILITY.md).
+
 ## [1.0.4] - 2026-03-27
 
 ### Added

@@ -93,6 +93,8 @@ def cmd_map(args: argparse.Namespace, stele: Stele) -> int:
     result = stele.get_map(
         compact=getattr(args, "compact", False),
         max_documents=getattr(args, "max_documents", None),
+        max_annotation_chars=getattr(args, "max_annotation_chars", 200),
+        path_prefix=getattr(args, "path_prefix", None),
     )
     if getattr(args, "output_json", False):
         print(json.dumps(result, indent=2, default=str))

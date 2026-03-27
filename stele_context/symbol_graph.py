@@ -313,6 +313,8 @@ class SymbolGraphManager:
         compact: bool = True,
         include_content: bool = True,
         path_filter: str | None = None,
+        summary_mode: bool = False,
+        top_n_files: int = 25,
     ) -> dict[str, Any]:
         """Find all chunks affected by a change to a chunk or file (BFS).
 
@@ -322,7 +324,12 @@ class SymbolGraphManager:
         ``compact`` returns per-file summaries instead of per-chunk records.
         ``include_content=False`` omits chunk text (smaller payloads).
         ``path_filter`` keeps only results whose path contains the substring.
+        ``summary_mode`` (implies compact) returns a bounded payload: depth
+        distribution plus top-N impacted files by chunk count (fan-in style).
         """
+        if summary_mode:
+            compact = True
+            include_content = False
         # Resolve seed chunk IDs
         if document_path and not chunk_id:
             doc_chunks = self.storage.get_document_chunks(document_path)
@@ -350,6 +357,7 @@ class SymbolGraphManager:
         by_file: dict[str, dict[str, Any]] = {}
         result_chunks: list[dict[str, Any]] = []
         affected_files: set[str] = set()
+        depth_counts: dict[int, int] = {}
 
         while queue:
             current_id, current_depth = queue.popleft()
@@ -376,6 +384,7 @@ class SymbolGraphManager:
             affected_files.add(doc_p)
 
             if compact:
+                depth_counts[current_depth] = depth_counts.get(current_depth, 0) + 1
                 if doc_p not in by_file:
                     by_file[doc_p] = {
                         "path": doc_p,
@@ -397,6 +406,7 @@ class SymbolGraphManager:
                 if include_content:
                     row["content"] = meta.get("content")
                 result_chunks.append(row)
+                depth_counts[current_depth] = depth_counts.get(current_depth, 0) + 1
 
         out: dict[str, Any] = {
             "origin": origin,
@@ -407,10 +417,28 @@ class SymbolGraphManager:
             "affected_files": len(affected_files),
         }
         if compact:
-            out["files"] = sorted(by_file.values(), key=lambda x: x["path"])
+            file_rows = sorted(by_file.values(), key=lambda x: x["path"])
+            if summary_mode:
+                top_n = max(1, top_n_files)
+                top_impacted = sorted(
+                    by_file.values(),
+                    key=lambda x: (-x["chunk_count"], x["path"]),
+                )[:top_n]
+                out["summary_mode"] = True
+                out["depth_distribution"] = {
+                    str(k): depth_counts[k] for k in sorted(depth_counts)
+                }
+                out["files"] = top_impacted
+                out["files_total"] = len(file_rows)
+            else:
+                out["files"] = file_rows
             out["chunks"] = []
         else:
             out["chunks"] = result_chunks
+            if depth_counts:
+                out["depth_distribution"] = {
+                    str(k): depth_counts[k] for k in sorted(depth_counts)
+                }
         return out
 
     def rebuild_graph(self) -> dict[str, Any]:

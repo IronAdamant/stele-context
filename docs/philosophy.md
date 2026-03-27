@@ -14,7 +14,7 @@ Optional extras (`performance`, `tree-sitter`, multimodal chunkers, etc.) stay *
 ## Two tiers of “meaning”
 
 **Tier 1 — always on (statistical signatures)**  
-Every chunk gets a compact **128-dimensional signature** derived from structure and text statistics. It powers change detection and a baseline vector for hybrid search (HNSW + BM25) with **no external model**.
+Every chunk gets a compact **128-dimensional signature** derived from structure and text statistics. It powers change detection and a baseline vector for hybrid search (HNSW + BM25) with **no external model**. The hybrid ranker **falls back to BM25** when vector/keyword signals disagree, scores are flat, or the top raw cosine is weak (v1.0.5+); optional **`path_prefix`** scopes **`map`** / **`search`** when one index covers multiple trees.
 
 **Tier 2 — agent-supplied (semantic summaries or vectors)**  
 You — or another LLM — act as the **embedding model**:

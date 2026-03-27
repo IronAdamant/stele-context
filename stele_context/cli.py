@@ -169,6 +169,12 @@ Examples:
         help="Include truncation meta in JSON output",
     )
     search_parser.add_argument(
+        "--path-prefix",
+        default=None,
+        metavar="PREFIX",
+        help="Only results under this project-relative path prefix (multi-repo isolation)",
+    )
+    search_parser.add_argument(
         "--json",
         action="store_true",
         dest="output_json",
@@ -420,6 +426,12 @@ Examples:
         help="With --compact, max documents to list",
     )
     map_parser.add_argument(
+        "--path-prefix",
+        default=None,
+        metavar="PREFIX",
+        help="Only documents whose path starts with this prefix (project-relative)",
+    )
+    map_parser.add_argument(
         "--json",
         action="store_true",
         dest="output_json",
@@ -650,6 +662,7 @@ def cmd_search(args: argparse.Namespace, stele: Stele) -> int:
         max_result_tokens=getattr(args, "max_result_tokens", None),
         compact=getattr(args, "compact", False),
         return_response_meta=want_meta,
+        path_prefix=getattr(args, "path_prefix", None),
     )
     if isinstance(raw, dict):
         results = raw.get("results") or []

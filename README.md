@@ -20,8 +20,10 @@ Stele Context helps LLM agents avoid re-reading unchanged files by caching chunk
 - **Zero Required Dependencies**: Runs on Python stdlib alone — no supply chain risks
 - **Multi-Modal Support**: Text, code, images, PDFs, audio, and video (optional dependencies)
 - **HNSW Vector Index**: O(log n) semantic search across all indexed chunks
-- **Hybrid Search**: HNSW cosine similarity + BM25 keyword matching, auto-tuned blending; optional **`search_mode=keyword`** for BM25-only (deterministic keyword ranking)
-- **Index health**: `map` and `stats` expose **`index_health`** (counts, staleness, **`alerts`**, **`project_root`**) — see [CHANGELOG](CHANGELOG.md) for 1.0.4
+- **Hybrid Search**: HNSW cosine similarity + BM25 keyword matching, auto-tuned blending; falls back to BM25 when vector/keyword signals disagree, scores are flat, or **top raw cosine is weak**; optional **`search_mode=keyword`** for BM25-only (deterministic keyword ranking)
+- **Scoped `map` / `search`**: optional **`path_prefix`** (project-relative) to limit documents when the index spans multiple projects
+- **`impact_radius` summary mode**: **`summary_mode`** + **`top_n_files`** for depth counts and a bounded top-files list (large-hub files)
+- **Index health**: `map` and `stats` expose **`index_health`** (counts, staleness, **`alerts`**, **`project_root`**) — see [CHANGELOG](CHANGELOG.md) for 1.0.5
 - **Agent orientation**: **`doctor`** / **`project_brief`** (MCP + CLI), bounded **`search`**/**`map`**/**`stats`**, **`get_context`** trust + **`agent_notes`**; see [AGENTS.md](AGENTS.md)
 - **Tree-Sitter Chunking**: AST-aware code chunking for 9 languages (optional, falls back to regex)
 - **Symbol Graph**: Cross-file reference tracking — `find_references`, `find_definition`, `impact_radius`

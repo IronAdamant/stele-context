@@ -34,3 +34,7 @@ Stele is a **local, persistent index** of your project: chunks, hybrid search (H
 ## Trust
 
 If **`trust.cache_aligned_with_disk`** is false or **`staleness_hint`** is true, treat cached text as potentially stale and prefer **`detect_changes`** + re-index for files you edit.
+
+## Scope (zero-dep core)
+
+The **stdlib-only** engine is in a **reasonable stopping place** for hybrid retrieval, symbol tools, and agent-oriented bounds: further gains on “semantic” quality without a bundled model are diminishing; optional **Tier 2** (your summaries/embeddings) remains the supported path for higher intent alignment. **`path_prefix`** on **`map`** / **`search`** reduces cross-tree noise; **`impact_radius(..., summary_mode=true)`** keeps blast-radius output small. See **STABILITY.md** and [CHANGELOG](CHANGELOG.md) for 1.0.5.

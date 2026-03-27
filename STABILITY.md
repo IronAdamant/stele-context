@@ -73,3 +73,7 @@ Before removing or renaming a public API element:
 ## Currently Deprecated
 
 None. All deprecated aliases were removed in 1.0.0.
+
+## Product scope (zero-dep core)
+
+As of **v1.0.5**, the **core package** (no required third-party runtime dependencies) is in a **reasonable stopping place** for RecipeLab-style validation: hybrid search includes weak-vector and multi-signal BM25 fallbacks; **`map`** / **`search`** support optional **`path_prefix`** scoping; **`impact_radius`** supports **`summary_mode`** for bounded outputs. Further improvements that do not change the “no bundled embedding model” story are expected to be **incremental** (heuristics, UX, docs) unless the project explicitly adopts optional heavy deps or new major features.

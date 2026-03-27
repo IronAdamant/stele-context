@@ -1,6 +1,6 @@
 # Stele Context - Complete Project Documentation
 
-**Last updated:** 2026-03-27 · **Release:** v1.0.4
+**Last updated:** 2026-03-27 · **Release:** v1.0.5
 
 ## Documentation (root)
 
@@ -20,7 +20,7 @@
 | `stele_context/engine.py` | Main orchestrator, thin `Stele` facade class | indexing, search_engine, change_detection, engine_utils, config, rwlock, session, storage, symbol_graph | test_engine.py |
 | `stele_context/engine_utils.py` | Path normalization, lock routing, env checks | coordination, env_checks | (via test_engine.py, test_worktree_safety.py) |
 | `stele_context/indexing.py` | Document indexing: chunk, store, merge, expand | chunkers.base, chunkers.numpy_compat | test_engine.py |
-| `stele_context/search_engine.py` | Hybrid search (HNSW+BM25), get_context, map/stats, project_brief, search bounds | bm25, index, index_store, agent_response, chunkers | test_engine.py, test_search_engine.py |
+| `stele_context/search_engine.py` | Hybrid search (HNSW+BM25, weak-cosine BM25 fallback, path_prefix), get_context, map/stats, project_brief, search bounds | bm25, index, index_store, agent_response, chunkers | test_engine.py, test_search_engine.py |
 | `stele_context/index_health.py` | `compute_index_health_snapshot()` — alerts, staleness for map/stats | None | test_index_health.py |
 | `stele_context/change_detection.py` | Detect file changes, re-index modified chunks | chunkers.base, chunkers.numpy_compat | test_engine.py |
 | `stele_context/config.py` | `.stele-context.toml` loader with minimal TOML parser | None | test_config.py |
@@ -40,7 +40,7 @@
 | `stele_context/rwlock.py` | Read-write lock for thread safety | None | test_concurrency.py |
 | `stele_context/symbols.py` | `SymbolExtractor` - dispatcher + Python AST | symbol_patterns | test_symbols.py |
 | `stele_context/symbol_patterns.py` | `Symbol` dataclass + 10 language regex extractors | None | test_symbols.py |
-| `stele_context/symbol_graph.py` | `SymbolGraphManager` - edges, staleness, queries | symbols, storage | test_symbols.py |
+| `stele_context/symbol_graph.py` | `SymbolGraphManager` - edges, staleness, queries, `impact_radius` summary_mode | symbols, storage | test_symbols.py |
 | `stele_context/coordination.py` | `CoordinationBackend` - cross-worktree shared DB | agent_registry, change_notifications, lock_ops | test_worktree_safety.py |
 | `stele_context/change_notifications.py` | Change notification storage for coordination DB | None | test_worktree_safety.py |
 | `stele_context/agent_registry.py` | Agent registration, heartbeat, reaping | None | test_worktree_safety.py |
@@ -104,4 +104,4 @@
 | `tests/test_connection_pool.py` | Thread-local pool, connect() context manager, search_text edges | ~40 |
 | `tests/test_media_chunkers.py` | Media chunker extensions, HAS_* flags, modality detection | ~30 |
 
-**Total: 860+ tests (1 skipped without MCP SDK)**
+**Total: 862+ tests (1 skipped without MCP SDK)**
