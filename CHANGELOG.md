@@ -5,6 +5,24 @@ All notable changes to Stele Context will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-03-27
+
+### Added
+- **`index_health` module** (`index_health.py`) — `compute_index_health_snapshot()` for `map`/`stats`: `alerts`, `symbol_graph_status`, `chunk_store_status`, `seconds_since_last_index`, `storage_dir`; actionable hints for empty index, missing symbols with chunks present, and index older than ~7 days
+- **`Stele.search(..., search_mode=)`** — `hybrid` (default) or `keyword` (BM25-only, no HNSW); CLI `--search-mode`
+- **`map` / `get_stats`** — `index_health`, **`project_root`** (detected repo root or `null`)
+- **CI** — `search-regression` job: `pip install -e .` + pytest only, runs `pytest -m search_regression`
+- **Tests** — `test_index_health.py`, `test_search_regression.py`, `@pytest.mark.search_regression`
+
+### Changed
+- **Hybrid search** — Stronger BM25 weight for natural-language queries, flat-HNSW detection, proximity terms from words ≥4 chars; default `search_alpha` **0.42**; rank-disagreement threshold **0.5**
+- **`find_references` / `find_definition`** — `symbol_index` + `guidance` when there are no hits (empty graph vs missing symbol)
+- **MCP tool descriptions** — Search positioned as secondary to `agent_grep` / `search_text` / symbol tools; `detect_changes` documents `scan_new` default
+- **`pyproject.toml` version** — Synced with `__version__` (was 1.0.1 vs 1.0.2)
+
+### Fixed
+- Documentation and packaging version alignment for PyPI sdist/wheel metadata
+
 ## [1.0.1] - 2026-03-22
 
 ### Fixed
@@ -531,6 +549,7 @@ with document locks, optimistic versioning, and cross-worktree shared state.
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 1.0.3 | 2026-03-27 | Index health + alerts, search `keyword` mode, hybrid tuning, symbol diagnostics, CI search-regression |
 | 0.8.0 | 2026-03-16 | Multi-agent support: RWLock, threaded HTTP, document ownership, optimistic locking, conflict resolution |
 | 0.7.0 | 2026-03-16 | Symbol graph, cross-file references, directory indexing, staleness detection, search-with-edges |
 | 0.6.0 | 2026-03-15 | Hybrid search, BPE tokens, adaptive HNSW, per-modality thresholds, binary handling |

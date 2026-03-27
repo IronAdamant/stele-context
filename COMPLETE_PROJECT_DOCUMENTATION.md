@@ -9,7 +9,8 @@
 | `stele_context/engine.py` | Main orchestrator, thin `Stele` facade class | indexing, search_engine, change_detection, engine_utils, config, rwlock, session, storage, symbol_graph | test_engine.py |
 | `stele_context/engine_utils.py` | Path normalization, lock routing, env checks | coordination, env_checks | (via test_engine.py, test_worktree_safety.py) |
 | `stele_context/indexing.py` | Document indexing: chunk, store, merge, expand | chunkers.base, chunkers.numpy_compat | test_engine.py |
-| `stele_context/search_engine.py` | Hybrid search (HNSW+BM25), get_context, stats | bm25, index, index_store, chunkers | test_engine.py |
+| `stele_context/search_engine.py` | Hybrid search (HNSW+BM25), get_context, stats | bm25, index, index_store, chunkers | test_engine.py, test_search_engine.py |
+| `stele_context/index_health.py` | `compute_index_health_snapshot()` — alerts, staleness for map/stats | None | test_index_health.py |
 | `stele_context/change_detection.py` | Detect file changes, re-index modified chunks | chunkers.base, chunkers.numpy_compat | test_engine.py |
 | `stele_context/config.py` | `.stele-context.toml` loader with minimal TOML parser | None | test_config.py |
 | `stele_context/storage.py` | `StorageBackend` - SQLite + filesystem persistence | storage_schema, storage_delegates, all sub-storages | test_engine.py, test_storage_migration.py |
@@ -86,7 +87,9 @@
 | `tests/test_stemmer.py` | Porter stemmer: stem(), split_identifier() | ~25 |
 | `tests/test_cli.py` | CLI commands, argument parsing, JSON output | ~30 |
 | `tests/test_search_engine.py` | Search alpha tuning, identifier extraction, signatures | ~30 |
+| `tests/test_index_health.py` | Index health snapshot, alerts | ~4 |
+| `tests/test_search_regression.py` | Keyword/hybrid regression (`@search_regression`) | ~4 |
 | `tests/test_connection_pool.py` | Thread-local pool, connect() context manager, search_text edges | ~40 |
 | `tests/test_media_chunkers.py` | Media chunker extensions, HAS_* flags, modality detection | ~30 |
 
-**Total: 739 tests (1 skipped without MCP SDK)**
+**Total: 850+ tests (1 skipped without MCP SDK)**

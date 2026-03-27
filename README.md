@@ -18,7 +18,8 @@ Stele Context helps LLM agents avoid re-reading unchanged files by caching chunk
 - **Zero Required Dependencies**: Runs on Python stdlib alone — no supply chain risks
 - **Multi-Modal Support**: Text, code, images, PDFs, audio, and video (optional dependencies)
 - **HNSW Vector Index**: O(log n) semantic search across all indexed chunks
-- **Hybrid Search**: HNSW cosine similarity + BM25 keyword matching, auto-tuned blending
+- **Hybrid Search**: HNSW cosine similarity + BM25 keyword matching, auto-tuned blending; optional **`search_mode=keyword`** for BM25-only (deterministic keyword ranking)
+- **Index health**: `map` and `stats` expose **`index_health`** (counts, staleness, **`alerts`**, **`project_root`**) — see [CHANGELOG](CHANGELOG.md) for 1.0.3
 - **Tree-Sitter Chunking**: AST-aware code chunking for 9 languages (optional, falls back to regex)
 - **Symbol Graph**: Cross-file reference tracking — `find_references`, `find_definition`, `impact_radius`
 - **Multi-Agent Safe**: Per-document locking, optimistic versioning, cross-worktree coordination
@@ -144,6 +145,7 @@ stele-context index --force document.py    # Force re-index
 
 ```bash
 stele-context search "authentication logic" --top-k 5
+stele-context search "exact keyword ranking" --search-mode keyword
 stele-context search "error handling" --json
 ```
 
