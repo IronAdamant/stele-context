@@ -18,7 +18,7 @@ Key Features:
 All operations are 100% offline and local-only. No internet access required.
 """
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 __author__ = "Stele Context Contributors"
 __license__ = "MIT"
 

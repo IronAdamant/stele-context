@@ -1222,7 +1222,10 @@ class TestHTMLEdgeResolution:
         # From the JS file's perspective, HTML depends on it
         # compact=True (default) returns files list; compact=False returns chunks list
         impact = cf.impact_radius(document_path="public/api.js", depth=1, compact=False)
-        affected_files = {c["document_path"] for c in impact.get("chunks", [])}
+        # document_path uses OS separators on Windows (public\page.html)
+        affected_files = {
+            Path(c["document_path"]).as_posix() for c in impact.get("chunks", [])
+        }
         assert "public/page.html" in affected_files, (
             f"Expected page.html in affected files, got {affected_files}"
         )

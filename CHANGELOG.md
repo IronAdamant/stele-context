@@ -5,6 +5,11 @@ All notable changes to Stele Context will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.7] - 2026-03-27
+
+### Fixed
+- **Tests** — `test_integration_js_impact_from_html` normalizes `document_path` with `Path(...).as_posix()` so assertions match stored paths on **Windows** (`public\page.html` vs `public/page.html`).
+
 ## [1.0.6] - 2026-03-27
 
 ### Fixed

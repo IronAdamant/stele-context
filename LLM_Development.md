@@ -2,6 +2,10 @@
 
 Chronological record of development activity on Stele Context, maintained for LLM agent context.
 
+## 2026-03-27 - v1.0.7 Windows test path normalization
+
+- **`test_symbols`**: `test_integration_js_impact_from_html` uses `Path.as_posix()` for `document_path` sets (Windows CI).
+
 ## 2026-03-27 - v1.0.6 Windows index save locking
 
 - **`index_store`**: `msvcrt.locking` + `os.replace` retries when `fcntl` unavailable — fixes concurrent save test on Windows CI.
