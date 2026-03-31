@@ -5,6 +5,11 @@ All notable changes to Stele Context will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2026-03-31
+
+### Added
+- **`get_context` recently_searched tracking** — When `session_id` is provided, `get_context` now returns `recently_searched` (bool) and `search_pattern` (str) on unchanged and new entries, indicating if the file was found via `agent_grep`/`search_text` in this session. Enables agents to know "I already grep'd this file for the exact line I need."
+
 ## [1.0.8] - 2026-03-31
 
 ### Added

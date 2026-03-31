@@ -444,3 +444,25 @@ class SessionStorage:
                 )
                 result.append(d)
             return result
+
+    def get_recent_search_for_file(
+        self, session_id: str, document_path: str
+    ) -> dict[str, Any] | None:
+        """Return the most recent search that checked this file, if any.
+
+        Returns a dict with ``pattern``, ``tool``, and ``searched_at`` fields,
+        or ``None`` if the file was not recently searched in this session.
+        """
+        import json
+
+        searches = self.get_search_history(session_id)
+        # Scan backward (most recent first) for efficiency
+        for search in reversed(searches):
+            files_checked = json.loads(search["files_checked"])
+            if document_path in files_checked:
+                return {
+                    "pattern": search["pattern"],
+                    "tool": search["tool"],
+                    "searched_at": search["searched_at"],
+                }
+        return None

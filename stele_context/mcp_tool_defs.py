@@ -233,11 +233,11 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
         "name": "get_context",
         "description": "Check cached document state — returns unchanged/changed/new "
         "categorization per file. Unchanged entries may include trust (mtime vs "
-        "index, staleness) and per-chunk agent_notes. "
+        "index, staleness) and per-chunk agent_notes. When session_id is provided, "
+        "also includes recently_searched (bool) and search_pattern (str) indicating "
+        "if this file was found via agent_grep/search_text in this session. "
         "USE WHEN: checking if files need re-indexing before starting work, "
-        "reading cached chunk content without re-reading disk. "
-        "Pass session_id to record which files were fully read — subsequent "
-        "calls can check what was already retrieved this session.",
+        "reading cached chunk content without re-reading disk.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -249,7 +249,7 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                 "session_id": {
                     "type": "string",
                     "description": "Optional session ID. Records each returned file "
-                    "as read so get_session_read_files reflects what was cached.",
+                    "as read and adds recently_searched/search_pattern to unchanged entries.",
                 },
                 "include_trust": {
                     "type": "boolean",

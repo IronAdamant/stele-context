@@ -694,6 +694,7 @@ class Stele:
                 storage=self.storage,
                 include_trust=include_trust,
                 max_chunk_content_tokens=max_chunk_content_tokens,
+                session_id=session_id,
             )
         # Record file reads in session after releasing lock
         if session_id and result.get("unchanged"):

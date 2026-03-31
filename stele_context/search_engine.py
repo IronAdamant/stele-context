@@ -537,6 +537,7 @@ def get_context_unlocked(
     storage: Any,
     include_trust: bool = True,
     max_chunk_content_tokens: int | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Core get_context logic with optional trust hints for LLM calibration."""
     from stele_context.agent_response import (
@@ -560,7 +561,13 @@ def get_context_unlocked(
 
         stored_doc = storage.get_document(doc_path)
         if stored_doc is None:
-            result["new"].append({"path": doc_path})
+            new_entry: dict[str, Any] = {"path": doc_path}
+            if session_id:
+                recent = storage.get_recent_search_for_file(session_id, doc_path)
+                new_entry["recently_searched"] = recent is not None
+                if recent:
+                    new_entry["search_pattern"] = recent["pattern"]
+            result["new"].append(new_entry)
             continue
 
         # Fast-path: skip full read if mtime+size unchanged
@@ -635,6 +642,12 @@ def get_context_unlocked(
                     "max_chunk_staleness": max_staleness,
                     "staleness_hint": max_staleness >= 0.3,
                 }
+            # Add recently_searched info if session_id provided
+            if session_id:
+                recent = storage.get_recent_search_for_file(session_id, doc_path)
+                entry["recently_searched"] = recent is not None
+                if recent:
+                    entry["search_pattern"] = recent["pattern"]
             result["unchanged"].append(entry)
         else:
             chg: dict[str, Any] = {
