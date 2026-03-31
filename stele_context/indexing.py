@@ -400,11 +400,18 @@ def index_documents_unlocked(
     if results["indexed"]:
         save_index()
         save_bm25()
-        affected = set()
+        # Collect affected chunk IDs before rebuilding edges.
+        affected: set[str] = set()
         for doc_info in results["indexed"]:
             for c in storage.get_document_chunks(doc_info["path"]):
                 affected.add(c["chunk_id"])
-        symbol_manager.rebuild_edges(affected_chunk_ids=affected or None)
+        # Full edge rebuild: incremental (affected_chunk_ids=...) is incorrect
+        # when unchanged files have edges to newly indexed files — those edges
+        # would be dropped.  Full rebuild is O(30K symbols) and <1 s.
+        symbol_manager.rebuild_edges(affected_chunk_ids=None)
+        # Propagate staleness so dependent chunks are flagged.
+        if affected:
+            symbol_manager.propagate_staleness(affected)
 
     # Notify other agents about changes
     if coordination and results["indexed"]:

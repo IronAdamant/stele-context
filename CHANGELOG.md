@@ -5,6 +5,11 @@ All notable changes to Stele Context will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2026-03-31
+
+### Fixed
+- **`indexing.py` / `change_detection.py`** — `rebuild_edges` was called with `affected_chunk_ids=...` (incremental), silently dropping edges from unchanged files that referenced newly indexed/modified files. Changed to full rebuild (`affected_chunk_ids=None`) — O(30K symbols, <1 s). `index_documents` now also calls `propagate_staleness` after indexing, so `stale_chunks()` correctly flags dependents. Manual `rebuild_graph` no longer needed after `stele index`.
+
 ## [1.0.7] - 2026-03-27
 
 ### Fixed

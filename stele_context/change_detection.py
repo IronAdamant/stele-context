@@ -269,7 +269,10 @@ def detect_changes_unlocked(
         for doc_info in results["modified"]:
             for c in storage.get_document_chunks(doc_info["path"]):
                 modified_chunk_ids.add(c["chunk_id"])
-        symbol_manager.rebuild_edges(affected_chunk_ids=modified_chunk_ids or None)
+        # Full edge rebuild: incremental (affected_chunk_ids=...) is incorrect
+        # when unchanged files have edges to modified/removed files — those
+        # edges would be dropped.  Full rebuild is O(30K symbols) and <1 s.
+        symbol_manager.rebuild_edges(affected_chunk_ids=None)
         if modified_chunk_ids:
             symbol_manager.propagate_staleness(modified_chunk_ids)
 
