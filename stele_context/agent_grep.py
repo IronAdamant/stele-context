@@ -131,6 +131,8 @@ def agent_grep(
     max_tokens: int = 4000,
     deduplicate: bool = True,
     context_lines: int = 0,
+    session_id: str | None = None,
+    auto_index_func: Any = None,
 ) -> dict[str, Any]:
     """LLM-optimized search across indexed chunks.
 
@@ -156,12 +158,20 @@ def agent_grep(
         Collapse structurally identical match lines.
     context_lines :
         Lines of context above/below each match (0 = match line only).
+    session_id :
+        Optional session ID. When provided, records this search in the
+        session's search history and auto-indexes files with matches.
+    auto_index_func :
+        Optional callable ``(list[str]) -> None``. Called with the list
+        of file paths that had matches, so the search act also caches
+        those files. No-op if ``None``.
 
     Returns
     -------
     dict
         ``summary``, ``groups``, ``total_matches``, ``shown_matches``,
-        ``truncated``, ``total_tokens``.
+        ``truncated``, ``total_tokens``, ``files_checked``,
+        ``files_with_matches``.
     """
     # 1. Raw text search
     raw_matches = storage.search_text(
@@ -169,6 +179,14 @@ def agent_grep(
     )
 
     if not raw_matches:
+        if session_id:
+            storage.record_search(
+                session_id=session_id,
+                pattern=pattern,
+                tool="agent_grep",
+                files_checked=[],
+                files_with_matches=[],
+            )
         return {
             "summary": f"0 matches for '{_truncate(pattern, 40)}'",
             "groups": [],
@@ -176,11 +194,25 @@ def agent_grep(
             "shown_matches": 0,
             "truncated": 0,
             "total_tokens": 0,
+            "files_checked": 0,
+            "files_with_matches": [],
         }
 
     # 2. Collect chunk IDs and document paths
     chunk_ids = [m["chunk_id"] for m in raw_matches]
     doc_paths = sorted({m["document_path"] for m in raw_matches})
+
+    # 3. Record search provenance and auto-index files with matches
+    if session_id:
+        storage.record_search(
+            session_id=session_id,
+            pattern=pattern,
+            tool="agent_grep",
+            files_checked=doc_paths,
+            files_with_matches=doc_paths,
+        )
+        if auto_index_func:
+            auto_index_func(doc_paths)
 
     # 3. Batch-fetch symbols for scope + classification
     chunk_symbols: dict[str, list[dict[str, Any]]] = {}
@@ -304,6 +336,8 @@ def agent_grep(
         "shown_matches": shown,
         "truncated": max(0, truncated),
         "total_tokens": tokens_used,
+        "files_checked": len(doc_paths),
+        "files_with_matches": doc_paths,
     }
 
 

@@ -75,6 +75,12 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                     "description": "Lines of context above/below each match (default: 0)",
                     "default": 0,
                 },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session ID. When provided, records this search "
+                    "in session history and auto-indexes files with matches so they "
+                    "are cached for get_context — no separate index call needed.",
+                },
             },
             "required": ["pattern"],
         },
@@ -229,7 +235,9 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
         "categorization per file. Unchanged entries may include trust (mtime vs "
         "index, staleness) and per-chunk agent_notes. "
         "USE WHEN: checking if files need re-indexing before starting work, "
-        "reading cached chunk content without re-reading disk.",
+        "reading cached chunk content without re-reading disk. "
+        "Pass session_id to record which files were fully read — subsequent "
+        "calls can check what was already retrieved this session.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -237,6 +245,11 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Document paths to check",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session ID. Records each returned file "
+                    "as read so get_session_read_files reflects what was cached.",
                 },
                 "include_trust": {
                     "type": "boolean",
@@ -249,6 +262,40 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                 },
             },
             "required": ["document_paths"],
+        },
+    },
+    {
+        "name": "get_search_history",
+        "description": "Return all grep/search_text runs recorded for a session — "
+        'the "post-it note" showing which files were already searched. '
+        "USE WHEN: checking what you already grep'd before re-running a search, "
+        "or verifying which files were auto-indexed after a grep.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID to get search history for",
+                },
+            },
+            "required": ["session_id"],
+        },
+    },
+    {
+        "name": "get_session_read_files",
+        "description": "Return all files fully read via get_context in a session — "
+        "distinct from searched files. Shows what content was retrieved from cache. "
+        "USE WHEN: checking what you already fully read before re-calling get_context, "
+        "to avoid re-fetching files you already have.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Session ID to get read file list for",
+                },
+            },
+            "required": ["session_id"],
         },
     },
     # -- Primary: Indexing & Change Detection ---------------------------------

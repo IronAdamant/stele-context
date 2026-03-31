@@ -181,11 +181,35 @@ Entry points: `stele-context` (CLI), `stele-context-mcp` (MCP stdio server)
 
 When using Stele Context's MCP tools during refactoring:
 
-### Before bulk edits
-- `stele-context agent_grep "<pattern>"` for LLM-optimized search with scope, classification, and token budget — preferred over search/search_text for agent workflows
-- `stele-context search "<symbol>"` for semantic/keyword search across chunks
-- `stele-context find_references "<symbol>"` for definition/reference graph lookups
-- `stele-context get_context` to read current file content from the index
+### Grep-first workflow (primary)
+
+The core principle: **grep to find, grep to cache**. Every `agent_grep` call
+automatically indexes the files it searches, so searching and caching happen
+in one step. `get_search_history` tells you what you already searched.
+
+```
+1. agent_grep "pattern" --session-id S  → results + files auto-indexed
+2. get_search_history --session-id S    → "you grep'd file X, it's fresh"
+3. get_context --session-id S           → full cached content, no re-read
+4. find_references "symbol"             → symbol graph (definitions + usages)
+```
+
+`get_context` with `session_id` records which files were fully read. Call
+`get_session_read_files --session-id S` to see what you already retrieved
+before re-calling `get_context`.
+
+### Tool selection guide
+
+| Tool | Use when |
+|------|----------|
+| `agent_grep` | Finding usages, auditing code — primary search tool |
+| `find_references` | Looking up a specific symbol's definition and all callers |
+| `find_definition` | Finding where a symbol is defined |
+| `get_context` | Getting full file content from cache (records read in session) |
+| `get_search_history` | Checking what you already grep'd this session |
+| `get_session_read_files` | Checking what you already fully read this session |
+| `search` (semantic) | Open-ended exploration only — not for targeted audits |
+| `search_text` | Guaranteed complete substring/regex search |
 
 ### After edits
 - `stele-context index --force-reindex` the changed files to update the cache
@@ -196,3 +220,4 @@ When using Stele Context's MCP tools during refactoring:
 - **No overlapping files**: Parallel agents must work on disjoint file sets.
 - **Lint between batches**: Run `ruff check stele_context/` after each agent completes, not just at the end.
 - **Reindex after passes**: After a batch of changes, reindex before the next agent reads.
+

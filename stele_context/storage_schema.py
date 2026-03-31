@@ -253,3 +253,40 @@ def migrate_database(db_path: Path) -> None:
         chunk_cols = {row[1] for row in cursor.fetchall()}
         if "agent_notes" not in chunk_cols:
             conn.execute("ALTER TABLE chunks ADD COLUMN agent_notes TEXT")
+
+        # Session search history: tracks every grep/search_text run per session
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_searches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                pattern TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                files_checked INTEGER NOT NULL,
+                files_with_matches INTEGER NOT NULL,
+                searched_at REAL NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_searches_session "
+            "ON session_searches(session_id)"
+        )
+
+        # Session file reads: tracks which files were fully read via get_context
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_file_reads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                document_path TEXT NOT NULL,
+                chunk_ids_json TEXT NOT NULL,
+                read_at REAL NOT NULL,
+                UNIQUE(session_id, document_path)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reads_session "
+            "ON session_file_reads(session_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_reads_doc "
+            "ON session_file_reads(document_path)"
+        )

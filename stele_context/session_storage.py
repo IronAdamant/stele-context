@@ -344,3 +344,103 @@ class SessionStorage:
         for kv_file in session_kv_dir.glob("*.kv"):
             if str(kv_file) not in referenced_paths:
                 kv_file.unlink()
+
+    # -- Search and read provenance tracking --------------------------------
+
+    def record_search(
+        self,
+        session_id: str,
+        pattern: str,
+        tool: str,
+        files_checked: list[str],
+        files_with_matches: list[str],
+    ) -> None:
+        """Record a grep/search_text run for the session's search history."""
+        now = time.time()
+        with connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO session_searches
+                (session_id, pattern, tool, files_checked, files_with_matches, searched_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    session_id,
+                    pattern,
+                    tool,
+                    len(files_checked),
+                    len(files_with_matches),
+                    now,
+                ),
+            )
+
+    def get_search_history(self, session_id: str) -> list[dict[str, Any]]:
+        """Return all searches recorded for this session."""
+        with connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT pattern, tool, files_checked, files_with_matches, searched_at
+                FROM session_searches
+                WHERE session_id = ?
+                ORDER BY searched_at ASC
+            """,
+                (session_id,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def record_file_read(
+        self,
+        session_id: str,
+        document_path: str,
+        chunk_ids: list[str],
+    ) -> None:
+        """Record that a file was fully read via get_context."""
+        now = time.time()
+        import json
+
+        with connect(self.db_path) as conn:
+            # Upsert: update read_at if already recorded
+            conn.execute(
+                """
+                INSERT INTO session_file_reads
+                (session_id, document_path, chunk_ids_json, read_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(session_id, document_path) DO UPDATE SET
+                    chunk_ids_json = excluded.chunk_ids_json,
+                    read_at = excluded.read_at
+            """,
+                (session_id, document_path, json.dumps(chunk_ids), now),
+            )
+
+    def get_session_read_files(self, session_id: str) -> list[dict[str, Any]]:
+        """Return all files fully read in this session, with staleness."""
+        import json
+
+        with connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT r.document_path, r.chunk_ids_json, r.read_at,
+                       d.staleness_score
+                FROM session_file_reads r
+                LEFT JOIN documents d ON r.document_path = d.document_path
+                WHERE r.session_id = ?
+                ORDER BY r.read_at DESC
+            """,
+                (session_id,),
+            )
+            rows = cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                d["chunk_ids"] = json.loads(d["chunk_ids_json"])
+                del d["chunk_ids_json"]
+                # staleness_score may be NULL for unindexed files
+                d["staleness_score"] = (
+                    float(d["staleness_score"])
+                    if d["staleness_score"] is not None
+                    else None
+                )
+                result.append(d)
+            return result

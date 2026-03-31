@@ -423,12 +423,15 @@ class Stele:
         regex: bool = False,
         document_path: str | None = None,
         limit: int = 50,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """Search chunk content by exact substring or regex pattern.
 
         Perfect recall for literal patterns. Complements semantic search
         for cases where exact text matching is needed (e.g., finding all
         usages of a specific identifier before renaming).
+        When session_id is provided, records search history and auto-indexes
+        files with matches.
         """
         with self._lock.read_lock():
             if document_path is not None:
@@ -436,13 +439,30 @@ class Stele:
             matches = self.storage.search_text(
                 pattern, regex=regex, document_path=document_path, limit=limit
             )
-            return {
+            doc_paths = sorted({m["document_path"] for m in matches})
+            result = {
                 "pattern": pattern,
                 "regex": regex,
                 "match_count": sum(m["match_count"] for m in matches),
                 "chunk_count": len(matches),
                 "results": matches,
+                "files_checked": len(doc_paths),
+                "files_with_matches": doc_paths,
             }
+
+        # Auto-index and record history outside the read lock
+        if session_id:
+            self.storage.record_search(
+                session_id=session_id,
+                pattern=pattern,
+                tool="search_text",
+                files_checked=[document_path] if document_path else doc_paths,
+                files_with_matches=doc_paths,
+            )
+            if doc_paths:
+                self.index_documents(doc_paths, agent_id=session_id)
+
+        return result
 
     def agent_grep(
         self,
@@ -455,17 +475,20 @@ class Stele:
         max_tokens: int = 4000,
         deduplicate: bool = True,
         context_lines: int = 0,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """LLM-optimized search: grep with scope, classification, token budget.
 
         See :func:`stele_context.agent_grep.agent_grep` for full docs.
+        When session_id is provided, records search history and auto-indexes
+        files with matches (no separate index call needed).
         """
         from stele_context.agent_grep import agent_grep as _agent_grep
 
         with self._lock.read_lock():
             if document_path is not None:
                 document_path = self._normalize_path(document_path)
-            return _agent_grep(
+            result = _agent_grep(
                 self.storage,
                 pattern,
                 regex=regex,
@@ -476,7 +499,15 @@ class Stele:
                 max_tokens=max_tokens,
                 deduplicate=deduplicate,
                 context_lines=context_lines,
+                session_id=session_id,
+                auto_index_func=None,  # deferred outside lock to avoid deadlock
             )
+
+        # Auto-index files with matches after releasing the read lock
+        if session_id and result.get("files_with_matches"):
+            self.index_documents(result["files_with_matches"], agent_id=session_id)
+
+        return result
 
     def list_sessions(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock.read_lock():
@@ -649,11 +680,12 @@ class Stele:
         self,
         document_paths: list[str],
         *,
+        session_id: str | None = None,
         include_trust: bool = True,
         max_chunk_content_tokens: int | None = None,
     ) -> dict[str, Any]:
         with self._lock.read_lock():
-            return _se.get_context_unlocked(
+            result = _se.get_context_unlocked(
                 document_paths,
                 normalize_path=self._normalize_path,
                 resolve_path=self._resolve_path,
@@ -663,6 +695,22 @@ class Stele:
                 include_trust=include_trust,
                 max_chunk_content_tokens=max_chunk_content_tokens,
             )
+        # Record file reads in session after releasing lock
+        if session_id and result.get("unchanged"):
+            for entry in result["unchanged"]:
+                chunk_ids = [c["chunk_id"] for c in entry.get("chunks", [])]
+                if chunk_ids:
+                    self.storage.record_file_read(session_id, entry["path"], chunk_ids)
+        return result
+
+    def get_search_history(self, session_id: str) -> dict[str, Any]:
+        """Return all searches recorded for this session."""
+        searches = self.storage.get_search_history(session_id)
+        return {"session_id": session_id, "searches": searches}
+
+    def get_session_read_files(self, session_id: str) -> list[dict[str, Any]]:
+        """Return all files fully read in this session."""
+        return self.storage.get_session_read_files(session_id)
 
     def get_project_brief(self, top_n: int = 40) -> dict[str, Any]:
         with self._lock.read_lock():

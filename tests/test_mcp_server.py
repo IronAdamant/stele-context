@@ -73,7 +73,9 @@ class TestHTTPServer:
             assert "register_dynamic_symbols" in tool_names
             assert "remove_dynamic_symbols" in tool_names
             assert "get_dynamic_symbols" in tool_names
-            assert len(tool_names) == 53
+            assert (
+                len(tool_names) == 55
+            )  # +2: get_search_history, get_session_read_files
         finally:
             server.stop()
 

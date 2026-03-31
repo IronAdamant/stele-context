@@ -121,6 +121,9 @@ def build_tool_map(
         "search_text": engine.search_text,
         # LLM-optimized search
         "agent_grep": engine.agent_grep,
+        # Session provenance (grep-to-cache workflow)
+        "get_search_history": engine.get_search_history,
+        "get_session_read_files": engine.get_session_read_files,
     }
 
     # Utility tools backed by chunker metadata (not engine methods)

@@ -185,6 +185,32 @@ class StorageDelegatesMixin:
     def prune_chunks(self, session_id: str, max_tokens: int) -> int:
         return self._session_storage.prune_chunks(session_id, max_tokens)
 
+    def record_search(
+        self,
+        session_id: str,
+        pattern: str,
+        tool: str,
+        files_checked: list[str],
+        files_with_matches: list[str],
+    ) -> None:
+        self._session_storage.record_search(
+            session_id, pattern, tool, files_checked, files_with_matches
+        )
+
+    def get_search_history(self, session_id: str) -> list[dict[str, Any]]:
+        return self._session_storage.get_search_history(session_id)
+
+    def record_file_read(
+        self,
+        session_id: str,
+        document_path: str,
+        chunk_ids: list[str],
+    ) -> None:
+        self._session_storage.record_file_read(session_id, document_path, chunk_ids)
+
+    def get_session_read_files(self, session_id: str) -> list[dict[str, Any]]:
+        return self._session_storage.get_session_read_files(session_id)
+
     # -- Document locks (DocumentLockStorage) ---------------------------------
 
     def acquire_document_lock(
