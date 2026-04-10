@@ -26,7 +26,7 @@ Stele Context helps LLM agents avoid re-reading unchanged files by caching chunk
 - **Index health**: `map` and `stats` expose **`index_health`** (counts, staleness, **`alerts`**, **`project_root`**) — see [CHANGELOG](CHANGELOG.md) for 1.0.5
 - **Agent orientation**: **`doctor`** / **`project_brief`** (MCP + CLI), bounded **`search`**/**`map`**/**`stats`**, **`get_context`** trust + **`agent_notes`**; see [AGENTS.md](AGENTS.md)
 - **Tree-Sitter Chunking**: AST-aware code chunking for 9 languages (optional, falls back to regex)
-- **Symbol Graph**: Cross-file reference tracking — `find_references`, `find_definition`, `impact_radius`
+- **Symbol Graph**: Cross-file reference tracking — `find_references`, `find_definition`, `impact_radius`, alias resolution, destructured exports
 - **Multi-Agent Safe**: Per-document locking, optimistic versioning, cross-worktree coordination
 - **MCP Server**: JSON-RPC over stdio for Claude Desktop, HTTP REST for other agents
 - **Project Config**: `.stele-context.toml` file for per-project settings
@@ -492,7 +492,7 @@ The package has **no runtime dependencies** (`dependencies = []`); optional extr
 
 ```bash
 pip install -e ".[dev]"
-pytest                              # 860+ tests
+pytest                              # 870+ tests
 pytest --cov=stele_context           # With coverage
 python benchmarks/run_all.py        # Performance benchmarks
 mypy stele_context/                 # Type checking

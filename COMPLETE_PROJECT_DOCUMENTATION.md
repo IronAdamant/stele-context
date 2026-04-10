@@ -39,7 +39,7 @@
 | `stele_context/bm25.py` | `BM25Index` - keyword scoring | None | test_bm25.py |
 | `stele_context/rwlock.py` | Read-write lock for thread safety | None | test_concurrency.py |
 | `stele_context/symbols.py` | `SymbolExtractor` - dispatcher + Python AST | symbol_patterns | test_symbols.py |
-| `stele_context/symbol_patterns.py` | `Symbol` dataclass + 10 language regex extractors | None | test_symbols.py |
+| `stele_context/symbol_patterns.py` | `Symbol` dataclass + 10 language regex extractors, const alias tracking, destructured module.exports parsing | None | test_symbols.py |
 | `stele_context/symbol_graph.py` | `SymbolGraphManager` - edges, staleness, queries, `impact_radius` summary_mode | symbols, storage | test_symbols.py |
 | `stele_context/coordination.py` | `CoordinationBackend` - cross-worktree shared DB | agent_registry, change_notifications, lock_ops | test_worktree_safety.py |
 | `stele_context/change_notifications.py` | Change notification storage for coordination DB | None | test_worktree_safety.py |

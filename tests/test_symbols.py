@@ -159,6 +159,100 @@ class TestSymbolExtractorJavaScript:
         syms = self.ext.extract(code, "types.ts", "c1", "ts")
         assert any(s.name == "Config" and s.role == "definition" for s in syms)
 
+    def test_const_alias_emits_rhs_reference(self):
+        """const Alias = OriginalClass should emit reference for OriginalClass."""
+        code = "const CodeNavigator = SemanticCodeNavigatorService;"
+        syms = self.ext.extract(code, "service.js", "c1", "js")
+        defs = [s for s in syms if s.role == "definition"]
+        refs = [
+            s
+            for s in syms
+            if s.role == "reference" and s.name == "SemanticCodeNavigatorService"
+        ]
+        assert any(s.name == "CodeNavigator" and s.kind == "variable" for s in defs)
+        assert len(refs) >= 1, "RHS identifier should be emitted as reference"
+
+    def test_const_alias_no_self_reference(self):
+        """const X = X should not emit X as both def and ref of itself."""
+        code = "const X = X;"
+        syms = self.ext.extract(code, "a.js", "c1", "js")
+        refs = [s for s in syms if s.role == "reference" and s.name == "X"]
+        assert len(refs) == 0
+
+    def test_destructured_module_exports_simple(self):
+        """module.exports = { X, Y } should emit references for X and Y."""
+        code = "module.exports = { DynamicDispatcher, SymbolRegistry };"
+        syms = self.ext.extract(code, "index.js", "c1", "js")
+        refs = [s for s in syms if s.role == "reference"]
+        assert any(s.name == "DynamicDispatcher" for s in refs)
+        assert any(s.name == "SymbolRegistry" for s in refs)
+
+    def test_destructured_module_exports_aliased(self):
+        """module.exports = { Alias: Original } should emit def for Alias, ref for Original."""
+        code = "module.exports = { CodeNavigator: SemanticService, StepParser: RecipeParser };"
+        syms = self.ext.extract(code, "index.js", "c1", "js")
+        defs = [s for s in syms if s.role == "definition"]
+        refs = [s for s in syms if s.role == "reference"]
+        assert any(s.name == "CodeNavigator" for s in defs)
+        assert any(s.name == "SemanticService" for s in refs)
+        assert any(s.name == "StepParser" for s in defs)
+        assert any(s.name == "RecipeParser" for s in refs)
+
+    def test_destructured_module_exports_spread_require(self):
+        """module.exports = { ...require('./x') } should emit module reference."""
+        code = "module.exports = { ...require('./utils'), ...require('./helpers') };"
+        syms = self.ext.extract(code, "barrel.js", "c1", "js")
+        refs = [s for s in syms if s.role == "reference" and s.kind == "module"]
+        assert any(s.name == "./utils" for s in refs)
+        assert any(s.name == "./helpers" for s in refs)
+
+    def test_destructured_module_exports_multiline(self):
+        """Multiline module.exports = { ... } should be parsed."""
+        code = (
+            "module.exports = {\n"
+            "  DynamicDispatcher,\n"
+            "  CodeNavigator: SemanticService,\n"
+            "  ...require('./utils'),\n"
+            "};"
+        )
+        syms = self.ext.extract(code, "index.js", "c1", "js")
+        refs = [s for s in syms if s.role == "reference"]
+        defs = [s for s in syms if s.role == "definition"]
+        assert any(s.name == "DynamicDispatcher" for s in refs)
+        assert any(s.name == "CodeNavigator" for s in defs)
+        assert any(s.name == "SemanticService" for s in refs)
+        assert any(s.name == "./utils" and s.kind == "module" for s in refs)
+
+
+class TestNoiseRefsFiltering:
+    """Test that _NOISE_REFS includes stdlib and generic method names."""
+
+    def test_nodejs_stdlib_in_noise(self):
+        for name in ("path", "fs", "crypto", "os", "http", "url"):
+            assert name in _NOISE_REFS, f"{name} should be in _NOISE_REFS"
+
+    def test_generic_methods_in_noise(self):
+        for name in ("getStats", "constructor", "toJSON", "emit", "on"):
+            assert name in _NOISE_REFS, f"{name} should be in _NOISE_REFS"
+
+    def test_noise_refs_prevent_edges(self):
+        """Noisy symbol names should not produce cross-file edges."""
+        symbols = [
+            Symbol("getStats", "function", "definition", "c1", "a.js"),
+            Symbol("getStats", "function", "reference", "c2", "b.js"),
+        ]
+        edges = resolve_symbols(symbols)
+        assert len(edges) == 0, "getStats should be filtered by _NOISE_REFS"
+
+    def test_noise_refs_preserve_definitions(self):
+        """Filtering only applies to references — definitions are still stored."""
+        symbols = [
+            Symbol("path", "variable", "definition", "c1", "a.js"),
+            Symbol("path", "variable", "reference", "c2", "b.js"),
+        ]
+        edges = resolve_symbols(symbols)
+        assert len(edges) == 0
+
 
 class TestSymbolExtractorHTML:
     """Test HTML symbol extraction."""

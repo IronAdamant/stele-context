@@ -5,6 +5,18 @@ All notable changes to Stele Context will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **JS alias resolution** — `const Alias = OriginalClass` now emits the RHS identifier as a variable reference, enabling `find_references` and `coupling` to trace re-exported aliases (e.g. `CodeNavigator`, `StepParser`).
+- **Destructured `module.exports` parsing** — `module.exports = { X, Y, Alias: Original, ...require('./path') }` is now parsed via content pre-pass. Simple names emit references, aliased entries emit definition+reference pairs, spread requires emit module references for barrel module coupling.
+- **Coupling noise filtering** — `_NOISE_REFS` expanded with Node.js stdlib module names (`path`, `fs`, `crypto`, `os`, `http`, etc.) and common generic method names (`getStats`, `constructor`, `toJSON`, `emit`, `on`, `listen`, etc.) to eliminate false-positive coupling through shared boilerplate symbols.
+
+### Fixed
+- `find_references` for `const Alias = Class` patterns no longer returns `not_found` — the alias now creates an edge to the original definition.
+- `coupling` for barrel modules using `module.exports = { ...require('./x') }` now shows connected files instead of returning empty results.
+- `coupling` no longer reports dozens of false-positive connections through Node.js stdlib imports and ubiquitous method names like `getStats`.
+
 ## [1.0.9] - 2026-03-31
 
 ### Added

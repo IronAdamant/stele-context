@@ -85,6 +85,9 @@ Backward compat: core.py re-exports Stele + Chunk
 - **BM25 persistence**: Same pattern alongside HNSW. Lazy-loaded on first search.
 - **Symbol graph**: Python uses `ast.walk()`, all others use regex. Edges cleared and rebuilt after batch indexing (O(symbols), <1s for ~30K symbols). Python extractor captures `ast.Name(Load)` nodes as `kind="name"` references (function-as-value, keyword args, assignments, returns) in addition to `kind="function"` from `ast.Call`. Call-target names are deduplicated via `id(node)` to avoid double-counting.
 - **CJS require classification**: Non-destructured `const X = require('./path')` emits `kind="import", role="reference"` for the variable name (not `kind="variable", role="definition"`). For external modules (path without `./` or `../` prefix), only the module path reference is emitted — the variable name is suppressed to avoid spurious edges between files importing the same npm package. Destructured `const { a } = require(...)` was already correct.
+- **Const alias tracking**: `const Alias = OriginalClass;` emits `Alias` as `kind="variable", role="definition"` AND `OriginalClass` as `kind="variable", role="reference"`. This creates an edge from the alias to the original definition, enabling `find_references` to resolve re-exported aliases like `const CodeNavigator = SemanticCodeNavigatorService`.
+- **Destructured module.exports**: `module.exports = { X, Y, Alias: Original, ...require('./path') }` is parsed via a content pre-pass (handles multiline). Simple names (`X`) emit a variable reference (definition already captured by class/function patterns). Aliased entries (`Alias: Original`) emit a definition for the alias and a reference for the original. Spread requires (`...require('./path')`) emit a module reference, enabling coupling for barrel modules.
+- **Coupling noise filtering**: `_NOISE_REFS` includes Node.js stdlib module names (`path`, `fs`, `crypto`, `os`, `http`, `url`, etc.) and common generic method names (`getStats`, `constructor`, `toJSON`, `emit`, `on`, `listen`, etc.) to prevent false-positive coupling through shared boilerplate symbols.
 - **JS module path resolution**: `_module_matches_path()` handles Python dotted imports (`foo.bar` → `foo/bar.py`), JS relative requires (`../models/Recipe` → `models/Recipe.js`), and bare web paths from HTML `<script src>` / `<link href>` (`app.js` → `public/app.js`, `js/main.js` → `public/js/main.js`). Strips `./`/`../` prefixes for relative paths, strips leading `/` for absolute web paths. Matches against file suffixes with common JS/TS/CSS extensions. External requires (no relative prefix, no file extension) never match local files.
 - **HTML→JS/CSS dependency edges**: `resolve_symbols` includes a module-to-file fallback. When a `kind="module"` reference (e.g. `"app.js"` from HTML `<script src>`) has no matching definition by name, it checks `_module_matches_path()` against all document paths with definitions. If matched, an edge is created to the first chunk of the target file. This enables `impact_radius` and `coupling` to work for frontend code referenced via `<script>` and `<link>` tags.
 - **Cross-language linking**: CSS-prefixed names (`.classname`, `#id`) avoid collisions. HTML attrs -> CSS selectors, JS DOM API -> CSS.
@@ -170,7 +173,7 @@ Coordination DB (`<git-common-dir>/stele-context/coordination.db`):
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 860+ tests (860+ pass, 1 skipped without mcp SDK)
+pytest                    # 870+ tests (872 pass, 1 skipped without mcp SDK)
 mypy stele_context/
 ruff check stele_context/
 ```

@@ -2,6 +2,13 @@
 
 Chronological record of development activity on Stele Context, maintained for LLM agent context.
 
+## 2026-04-10 - JS symbol extraction improvements (Review Eleven findings)
+
+- **`symbol_patterns.py`**: Added const alias tracking — `const Alias = Class` now emits RHS as variable reference. Added content pre-pass for destructured `module.exports = { X, Y, Alias: Original, ...require('./path') }` — parses simple re-exports, aliased re-exports, and spread requires.
+- **`symbols.py`**: Expanded `_NOISE_REFS` with Node.js stdlib module names (`path`, `fs`, `crypto`, `os`, `http`, `url`, `util`, `stream`, `events`, `buffer`, `net`, `tls`, `dns`, `zlib`, `assert`, `process`, `child_process`) and common generic method names (`getStats`, `constructor`, `toJSON`, `toObject`, `initialize`, `configure`, `validate`, `handle`, `emit`, `on`, `off`, `once`, `listen`, `send`, `receive`, `create`, `destroy`, `reset`, `connect`, `disconnect`, `dispatch`, `notify`, `render`, `setup`, `teardown`).
+- **`tests/test_symbols.py`**: Added 10 new tests — const alias RHS reference, alias self-reference prevention, destructured module.exports (simple/aliased/spread/multiline), noise refs for stdlib and generic methods, edge filtering.
+- **Findings**: `findings/stele-context.md` → `findings/stele-context_closed.md`.
+
 ## 2026-03-31 - v1.0.8 Grep-first indexing + symbol graph fix
 
 - **`storage_schema.py`**: Added `session_searches` and `session_file_reads` tables for search + read provenance tracking.

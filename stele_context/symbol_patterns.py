@@ -83,6 +83,69 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbo
     """
     symbols: list[Symbol] = []
 
+    # Pre-pass: destructured module.exports = { X, Y, Alias: Original, ...require('./x') }
+    # [^}] matches across newlines, so this handles multiline blocks.
+    for m_dexp in re.finditer(r"module\.exports\s*=\s*\{([^}]+)\}", content):
+        inner = m_dexp.group(1)
+        exp_line = content[: m_dexp.start()].count("\n") + 1
+        for entry_str in inner.split(","):
+            entry_str = entry_str.strip()
+            if not entry_str:
+                continue
+            # Spread require: ...require('./path')
+            m_spread = re.match(
+                r"\.\.\.\s*require\(\s*['\"]([^'\"]+)['\"]\s*\)", entry_str
+            )
+            if m_spread:
+                symbols.append(
+                    Symbol(
+                        m_spread.group(1),
+                        "module",
+                        "reference",
+                        chunk_id,
+                        doc_path,
+                        exp_line,
+                    )
+                )
+                continue
+            # Alias: Original (renamed re-export)
+            m_aliased = re.match(r"(\w+)\s*:\s*(\w+)", entry_str)
+            if m_aliased:
+                symbols.append(
+                    Symbol(
+                        m_aliased.group(1),
+                        "variable",
+                        "definition",
+                        chunk_id,
+                        doc_path,
+                        exp_line,
+                    )
+                )
+                symbols.append(
+                    Symbol(
+                        m_aliased.group(2),
+                        "variable",
+                        "reference",
+                        chunk_id,
+                        doc_path,
+                        exp_line,
+                    )
+                )
+                continue
+            # Simple name re-export: X  (definition already captured by class/function pattern)
+            m_simple = re.match(r"(\w+)\s*$", entry_str)
+            if m_simple:
+                symbols.append(
+                    Symbol(
+                        m_simple.group(1),
+                        "variable",
+                        "reference",
+                        chunk_id,
+                        doc_path,
+                        exp_line,
+                    )
+                )
+
     # State for multi-line declaration accumulation.
     # When a const/let/var starts but the RHS opens a paren/brace (e.g.
     # ``const x = new Foo(`` or ``const x = {``), we defer the symbol emission
@@ -203,6 +266,22 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbo
                             i,
                         )
                     )
+                    # Alias tracking: const Alias = OriginalClass
+                    # Emit the RHS bare identifier as a reference so edges
+                    # connect the alias to the original definition.
+                    rhs_ident = rhs.strip().rstrip(";").strip()
+                    m_rhs = re.match(r"^(\w+)$", rhs_ident)
+                    if m_rhs and m_rhs.group(1) != m_var.group(1):
+                        symbols.append(
+                            Symbol(
+                                m_rhs.group(1),
+                                "variable",
+                                "reference",
+                                chunk_id,
+                                doc_path,
+                                i,
+                            )
+                        )
 
         # Class method definitions (indented, no function keyword).
         # Skip when inside a multi-line declaration — continuation lines
