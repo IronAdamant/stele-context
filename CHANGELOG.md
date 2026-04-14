@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Symbol `container` scoping** — The `Symbol` dataclass now carries a `container` field (e.g. `ClassName` or `ClassName.methodName`) populated by the Python AST and JS/TS regex extractors. `resolve_symbols` uses this to prefer definitions that share the reference's container, eliminating false coupling between unrelated files that happen to define the same generic name.
+- **Test-to-source linking** — The symbol graph now creates `test_of` edges automatically. Test files are linked to source files via filename convention (`test_X.py` → `X.py`, `X_test.py` → `X.py`) and import-to-path analysis, making `impact_radius` and `coupling` aware of test coverage.
+- **Incremental edge rebuilds (restored)** — `rebuild_edges(affected_chunk_ids=...)` is safe again. It tracks which symbol names changed in affected chunks and re-resolves edges for *all* chunks referencing those names, preserving edges from unchanged files that point into modified files. Large codebase indexing no longer forces a full O(N) rebuild on every update.
 - **JS bare function call extraction** — `extract_javascript` now captures bare function calls (`validatePositiveInt(value)`) and `new ClassName()` constructor calls, enabling `find_references` to link test files and internal call sites that were previously invisible.
 - **Impact radius significance thresholding** — `impact_radius(..., significance_threshold=0.1)` filters out edges driven by common stdlib/generic symbols (`push`, `has`, `addEdge`, `addNode`, etc.), preventing massive over-estimation of blast radius for new files. Optional `exclude_symbols=[...]` lets callers suppress specific symbols.
 - **Coupling significance thresholding** — `coupling(..., significance_threshold=0.1)` applies the same common-symbol discounting. Results now include a `semantic_score` that penalises generic shared symbols, sorting by meaning instead of raw edge count.
@@ -15,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Extended `_NOISE_REFS`** — Added `now`, `from`, `addNode`, `addEdge`, `removeNode`, `removeEdge`, `getNode`, `getEdge`, `hasNode`, `hasEdge`, `setNode`, `setEdge`, `updateNode`, `updateEdge`, `findNode`, `findEdge`, `queryNode`, `queryEdge` to the noise set, reducing false coupling and impact from commonly-shared generic method names.
 
 ### Fixed
+- **Regex quote corruption** — Fixed a `SyntaxError` in `symbol_patterns.py` caused by unescaped double quotes inside `r"..."` raw-string regex character classes.
 - `find_references` for `const Alias = Class` patterns no longer returns `not_found` — the alias now creates an edge to the original definition.
 - `coupling` for barrel modules using `module.exports = { ...require('./x') }` now shows connected files instead of returning empty results.
 - `coupling` no longer reports dozens of false-positive connections through Node.js stdlib imports and ubiquitous method names like `getStats`.
@@ -31,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Grep-first indexing** — `agent_grep` and `search_text` with `session_id` now auto-index files that had matches and record search history. `get_search_history(session_id)` returns what you grep'd; `get_context` with `session_id` records fully-read files. New tools: `get_search_history`, `get_session_read_files`. MCP tool count: **55** (was 53).
 
 ### Fixed
-- **`indexing.py` / `change_detection.py`** — `rebuild_edges` was called with `affected_chunk_ids=...` (incremental), silently dropping edges from unchanged files that referenced newly indexed/modified files. Changed to full rebuild (`affected_chunk_ids=None`) — O(30K symbols, <1 s). `index_documents` now also calls `propagate_staleness` after indexing, so `stale_chunks()` correctly flags dependents. Manual `rebuild_graph` no longer needed after `stele index`.
+- **`indexing.py` / `change_detection.py`** — `rebuild_edges` was called with `affected_chunk_ids=...` (incremental), silently dropping edges from unchanged files that referenced newly indexed/modified files. Temporarily changed to full rebuild (`affected_chunk_ids=None`) — O(30K symbols, <1 s). `index_documents` now also calls `propagate_staleness` after indexing, so `stale_chunks()` correctly flags dependents. Manual `rebuild_graph` no longer needed after `stele index`.
 
 ## [1.0.7] - 2026-03-27
 
