@@ -116,6 +116,12 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
                     "items": {"type": "string"},
                     "description": "Optional list of symbol names to ignore when traversing edges.",
                 },
+                "direction": {
+                    "type": "string",
+                    "enum": ["dependents", "dependencies", "both"],
+                    "description": "Traversal direction: dependents (incoming edges, default), dependencies (outgoing edges), or both.",
+                    "default": "dependents",
+                },
             },
         },
     },
@@ -146,6 +152,12 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
                     "items": {"type": "string"},
                     "description": "Optional list of symbol names to ignore when computing coupling.",
                 },
+                "mode": {
+                    "type": "string",
+                    "enum": ["edges", "co_consumers"],
+                    "description": "Coupling mode: edges (shared symbol dependencies, default) or co_consumers (co-imported by the same consumers).",
+                    "default": "edges",
+                },
             },
             "required": ["document_path"],
         },
@@ -154,7 +166,8 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
         "name": "stale_chunks",
         "description": "Find chunks whose dependencies changed — detects context "
         "rot through the symbol graph. Staleness score: 0.8 = direct "
-        "dependency changed, 0.64 = transitive. "
+        "dependency changed, 0.64 = transitive. On active codebases, "
+        "consider threshold=0.5 or higher to avoid alert fatigue. "
         "USE WHEN: checking if cached context is still valid after edits, "
         "identifying stale files that need re-review after upstream changes.",
         "inputSchema": {
@@ -162,7 +175,7 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
             "properties": {
                 "threshold": {
                     "type": "number",
-                    "description": "Minimum staleness score (0.0-1.0, default 0.3)",
+                    "description": "Minimum staleness score (0.0-1.0, default 0.3). For active development, use 0.5+ to reduce noise.",
                     "default": 0.3,
                 },
             },

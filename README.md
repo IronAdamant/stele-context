@@ -102,8 +102,8 @@ If you've ever wished your AI coding assistant had a persistent memory for your 
 |---------------|-----------------|
 | "Don't re-read files that haven't changed" | `get_context` returns cached content for unchanged files, only re-reads modified ones |
 | "Ask a broad question about my code"" | `query` combines semantic search, symbol graph, and text grep into one deduplicated result list |
-| "What files would break if I change this?" | `impact_radius` follows the dependency chain to find affected files; `significance_threshold` filters out noise from common symbols like `push`/`addEdge`. Also works with `symbol=` for dynamic/runtime hooks |
-| "Which files are tightly coupled?" | `coupling` shows shared symbols with a `semantic_score` that discounts generic boilerplate |
+| "What files would break if I change this?" | `impact_radius` follows the dependency chain to find affected files; `significance_threshold` filters out noise from common symbols like `push`/`addEdge`. Also works with `symbol=` for dynamic/runtime hooks and `direction=` for outgoing or bidirectional traversal |
+| "Which files are tightly coupled?" | `coupling` shows shared symbols with a `semantic_score` that discounts generic boilerplate. `mode=co_consumers` catches files imported together by the same consumers |
 | "Search my code by what it does, not just keywords" | `search` combines meaning-based and keyword matching |
 | "Find every line matching a pattern" | `agent_grep` does text/regex search with token-budgeted results |
 | "Run several operations in one round-trip" | `batch` executes multiple tool calls under a single write lock |

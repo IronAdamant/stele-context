@@ -81,6 +81,11 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                     "in session history and auto-indexes files with matches so they "
                     "are cached for get_context — no separate index call needed.",
                 },
+                "working_tree": {
+                    "type": "boolean",
+                    "description": "When true, auto-index modified and untracked files from the git working tree before searching.",
+                    "default": False,
+                },
             },
             "required": ["pattern"],
         },
@@ -112,6 +117,11 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                     "type": "integer",
                     "description": "Max chunks to return (default: 50)",
                     "default": 50,
+                },
+                "working_tree": {
+                    "type": "boolean",
+                    "description": "When true, auto-index modified and untracked files from the git working tree before searching.",
+                    "default": False,
                 },
             },
             "required": ["pattern"],
@@ -165,6 +175,15 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                 "path_prefix": {
                     "type": "string",
                     "description": "If set, only return chunks whose document path starts with this prefix (project-relative path filter; reduces multi-repo noise).",
+                },
+                "working_tree": {
+                    "type": "boolean",
+                    "description": "When true, auto-index modified and untracked files from the git working tree before searching.",
+                    "default": False,
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session ID. Required when working_tree is true for tracking.",
                 },
             },
             "required": ["query"],
@@ -492,6 +511,15 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                 "path_prefix": {
                     "type": "string",
                     "description": "Optional project-relative path prefix filter",
+                },
+                "working_tree": {
+                    "type": "boolean",
+                    "description": "When true, auto-index modified and untracked files from the git working tree before searching.",
+                    "default": False,
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session ID. Required when working_tree is true for tracking.",
                 },
             },
             "required": ["query"],

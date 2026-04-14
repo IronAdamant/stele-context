@@ -297,7 +297,15 @@ class SymbolGraphManager:
                 }
             )
 
-        return {
+        guidance = (
+            "On actively developed codebases, many files may show mild staleness. "
+            "Consider using threshold=0.5 to focus on direct dependency changes, "
+            "or threshold=0.64 for transitive changes only."
+            if threshold <= 0.3 and len(stale) > 50
+            else None
+        )
+
+        out: dict[str, Any] = {
             "threshold": threshold,
             "total_stale": len(stale),
             "files_affected": len(by_doc),
@@ -310,6 +318,9 @@ class SymbolGraphManager:
                 )
             ],
         }
+        if guidance:
+            out["guidance"] = guidance
+        return out
 
     def find_references(self, symbol: str) -> dict[str, Any]:
         """Find all definitions and references for a symbol name."""
@@ -435,6 +446,7 @@ class SymbolGraphManager:
         top_n_files: int = 25,
         significance_threshold: float = 0.0,
         exclude_symbols: list[str] | None = None,
+        direction: str = "dependents",
     ) -> dict[str, Any]:
         """Find all chunks affected by a change to a chunk or file (BFS).
 
@@ -447,6 +459,8 @@ class SymbolGraphManager:
         ``path_filter`` keeps only results whose path contains the substring.
         ``summary_mode`` (implies compact) returns a bounded payload: depth
         distribution plus top-N impacted files by chunk count (fan-in style).
+        ``direction`` controls traversal: ``dependents`` (incoming edges,
+        default), ``dependencies`` (outgoing edges), or ``both``.
         """
         if summary_mode:
             compact = True
@@ -483,6 +497,7 @@ class SymbolGraphManager:
             return {"error": "Provide chunk_id, document_path, or symbol"}
 
         exclude_set = set(exclude_symbols) if exclude_symbols else None
+        direction = (direction or "dependents").lower()
 
         visited: set[str] = set()
         queue = deque((cid, 0) for cid in seed_ids)
@@ -494,6 +509,25 @@ class SymbolGraphManager:
         affected_files: set[str] = set()
         depth_counts: dict[int, int] = {}
 
+        # Hybrid seeding for document_path: the symbol edge graph can be sparse
+        # for base classes (module imports may not resolve to edges). We also
+        # seed the BFS with raw symbol references to symbols defined in the file.
+        if document_path and direction in ("dependents", "both"):
+            definition_symbols = self.storage.get_symbols_for_chunks(list(seed_ids))
+            defined_names = {
+                s["name"]
+                for s in definition_symbols
+                if s["role"] == "definition"
+                and self._is_significant_symbol(
+                    s["name"], significance_threshold, exclude_set
+                )
+            }
+            for name in defined_names:
+                for ref in self.storage.find_references_by_name(name):
+                    ref_cid = ref["chunk_id"]
+                    if ref_cid not in seed_ids and ref_cid not in visited:
+                        queue.append((ref_cid, 1))
+
         while queue:
             current_id, current_depth = queue.popleft()
             if current_id in visited or current_depth > depth:
@@ -501,15 +535,24 @@ class SymbolGraphManager:
             visited.add(current_id)
 
             if current_depth < depth:
-                edges = self.storage.get_incoming_edges(current_id)
+                edges: list[dict[str, Any]] = []
+                if direction in ("dependents", "both"):
+                    edges.extend(self.storage.get_incoming_edges(current_id))
+                if direction in ("dependencies", "both"):
+                    edges.extend(self.storage.get_outgoing_edges(current_id))
                 for edge in edges:
                     sym = edge["symbol_name"]
                     if not self._is_significant_symbol(
                         sym, significance_threshold, exclude_set
                     ):
                         continue
-                    if edge["source_chunk_id"] not in visited:
-                        queue.append((edge["source_chunk_id"], current_depth + 1))
+                    next_id = (
+                        edge["source_chunk_id"]
+                        if edge["target_chunk_id"] == current_id
+                        else edge["target_chunk_id"]
+                    )
+                    if next_id not in visited:
+                        queue.append((next_id, current_depth + 1))
 
             # Skip the seed chunk itself (depth 0 from document_path seed).
             if current_id in seed_ids and current_depth == 0:
@@ -558,6 +601,8 @@ class SymbolGraphManager:
         }
         if significance_threshold > 0.0:
             out["significance_threshold"] = significance_threshold
+        if direction != "dependents":
+            out["direction"] = direction
         if compact:
             file_rows = sorted(by_file.values(), key=lambda x: x["path"])
             if summary_mode:
@@ -628,14 +673,30 @@ class SymbolGraphManager:
         document_path: str,
         significance_threshold: float = 0.0,
         exclude_symbols: list[str] | None = None,
+        mode: str = "edges",
     ) -> dict[str, Any]:
-        """Find files semantically coupled to a given file via symbol edges.
+        """Find files semantically coupled to a given file.
 
-        Queries all symbol edges involving chunks from the target document,
-        groups by the OTHER document, and counts shared symbols per pair.
-        Falls back to dynamic symbols registered for this document_path when
-        no indexed chunks exist.
+        ``mode="edges"`` (default): queries symbol edges involving chunks from
+        the target document, groups by the OTHER document, and counts shared
+        symbols per pair. Falls back to dynamic symbols registered for this
+        document_path when no indexed chunks exist.
+
+        ``mode="co_consumers"``: detects files that are co-imported or
+        co-referenced by the same consumers as the target file. This catches
+        tight coupling between e.g. ``Recipe.js`` and ``Tag.js`` when both are
+        heavily consumed by ``src/api/routes/recipes.js``.
         """
+        mode = (mode or "edges").lower()
+        exclude_set = set(exclude_symbols) if exclude_symbols else None
+
+        if mode == "co_consumers":
+            return self._coupling_co_consumers(
+                document_path,
+                significance_threshold=significance_threshold,
+                exclude_set=exclude_set,
+            )
+
         doc_chunks = self.storage.get_document_chunks(document_path)
         doc_chunk_ids: set[str] = set()
         if doc_chunks:
@@ -656,8 +717,6 @@ class SymbolGraphManager:
                 "coupled_files": [],
                 "total_coupled": 0,
             }
-
-        exclude_set = set(exclude_symbols) if exclude_symbols else None
 
         # Collect edges in both directions
         coupled: dict[str, dict[str, Any]] = {}
@@ -751,3 +810,92 @@ class SymbolGraphManager:
         if significance_threshold > 0.0:
             out["significance_threshold"] = significance_threshold
         return out
+
+    def _coupling_co_consumers(
+        self,
+        document_path: str,
+        significance_threshold: float = 0.0,
+        exclude_set: set[str] | None = None,
+    ) -> dict[str, Any]:
+        """Find files co-imported or co-referenced by the same consumers."""
+        doc_chunks = self.storage.get_document_chunks(document_path)
+        doc_chunk_ids = {c["chunk_id"] for c in doc_chunks} if doc_chunks else set()
+
+        # Fallback to dynamic symbols
+        if not doc_chunk_ids:
+            dyn = self.storage.get_all_symbols()
+            doc_chunk_ids = {
+                s["chunk_id"]
+                for s in dyn
+                if s.get("document_path") == document_path
+                and s.get("chunk_id", "").startswith("runtime:")
+            }
+
+        # Find all consumers (files that reference chunks in the target file)
+        consumer_chunks: set[str] = set()
+        for cid in doc_chunk_ids:
+            for edge in self.storage.get_incoming_edges(cid):
+                if self._is_significant_symbol(
+                    edge["symbol_name"], significance_threshold, exclude_set
+                ):
+                    consumer_chunks.add(edge["source_chunk_id"])
+
+        # For each consumer, find what other files it also references
+        other_file_refs: dict[str, dict[str, Any]] = {}
+        for consumer_cid in consumer_chunks:
+            consumer_chunk = self.storage.get_chunk(consumer_cid)
+            if not consumer_chunk:
+                continue
+            consumer_path = consumer_chunk["document_path"]
+            for edge in self.storage.get_outgoing_edges(consumer_cid):
+                sym = edge["symbol_name"]
+                if not self._is_significant_symbol(
+                    sym, significance_threshold, exclude_set
+                ):
+                    continue
+                target_chunk = self.storage.get_chunk(edge["target_chunk_id"])
+                if not target_chunk:
+                    continue
+                other_path = target_chunk["document_path"]
+                if other_path == document_path:
+                    continue
+                entry = other_file_refs.setdefault(
+                    other_path,
+                    {
+                        "path": other_path,
+                        "symbols": set(),
+                        "shared_consumers": set(),
+                    },
+                )
+                entry["symbols"].add(sym)
+                entry["shared_consumers"].add(consumer_path)
+
+        results = []
+        for entry in other_file_refs.values():
+            unique_syms = entry["symbols"]
+            semantic_score: float = float(len(unique_syms))
+            if semantic_score > 0:
+                generic_ratio = sum(
+                    1 for s in unique_syms if s in _NOISE_REFS or len(s) <= 3
+                ) / len(unique_syms)
+                semantic_score = round(semantic_score * (1.0 - generic_ratio), 2)
+            # Boost score by number of shared consumers (Jaccard-style proxy)
+            consumer_score = round(len(entry["shared_consumers"]) * 0.5, 2)
+            results.append(
+                {
+                    "path": entry["path"],
+                    "shared_symbols": sorted(unique_syms),
+                    "shared_symbol_count": len(unique_syms),
+                    "shared_consumers": sorted(entry["shared_consumers"]),
+                    "shared_consumer_count": len(entry["shared_consumers"]),
+                    "direction": "co_consumed",
+                    "semantic_score": round(semantic_score + consumer_score, 2),
+                }
+            )
+        results.sort(key=lambda x: (-x["semantic_score"], -x["shared_consumer_count"]))
+
+        return {
+            "document_path": document_path,
+            "coupled_files": results,
+            "total_coupled": len(results),
+        }

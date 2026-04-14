@@ -17,6 +17,8 @@ from typing import Any
 
 from stele_context.chunkers.base import estimate_tokens
 
+import sqlite3
+
 # -- Line-level classification heuristics ------------------------------------
 
 _COMMENT_PREFIXES = ("#", "//", "--", ";", "%", "/*", "* ", "///", "/**")
@@ -173,6 +175,53 @@ def agent_grep(
         ``truncated``, ``total_tokens``, ``files_checked``,
         ``files_with_matches``.
     """
+    try:
+        return _agent_grep_impl(
+            storage,
+            pattern,
+            regex=regex,
+            document_path=document_path,
+            classify=classify,
+            include_scope=include_scope,
+            group_by=group_by,
+            max_tokens=max_tokens,
+            deduplicate=deduplicate,
+            context_lines=context_lines,
+            session_id=session_id,
+            auto_index_func=auto_index_func,
+        )
+    except sqlite3.Error as e:
+        return {
+            "error": f"Database error during agent_grep: {e}. "
+            "Try running rebuild_symbols or detect_changes to repair the index, "
+            "or check for concurrent database access.",
+            "summary": f"Database error for '{_truncate(pattern, 40)}'",
+            "groups": [],
+            "total_matches": 0,
+            "shown_matches": 0,
+            "truncated": 0,
+            "total_tokens": 0,
+            "files_checked": 0,
+            "files_with_matches": [],
+        }
+
+
+def _agent_grep_impl(
+    storage: Any,
+    pattern: str,
+    *,
+    regex: bool = False,
+    document_path: str | None = None,
+    classify: bool = True,
+    include_scope: bool = True,
+    group_by: str = "file",
+    max_tokens: int = 4000,
+    deduplicate: bool = True,
+    context_lines: int = 0,
+    session_id: str | None = None,
+    auto_index_func: Any = None,
+) -> dict[str, Any]:
+    """Internal implementation of agent_grep (separated for error handling)."""
     # 1. Raw text search
     raw_matches = storage.search_text(
         pattern, regex=regex, document_path=document_path, limit=500

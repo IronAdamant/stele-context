@@ -36,7 +36,7 @@ class ConnectionPool:
         if conn is not None:
             return conn
 
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.execute("PRAGMA synchronous=NORMAL")
         self._local.conn = conn
 

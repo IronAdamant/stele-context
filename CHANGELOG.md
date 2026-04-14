@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`impact_radius(..., direction=...)`** — New `direction` parameter supporting `dependents` (default, incoming edges), `dependencies` (outgoing edges), and `both`. Also adds hybrid seeding for `document_path` mode: when the symbol edge graph is sparse for base classes, raw symbol references are used as a fallback so high fan-in files no longer report zero affected chunks.
+- **`coupling(..., mode="co_consumers")`** — New `co_consumers` mode that detects files co-imported or co-referenced by the same consumers as the target file, catching tight coupling invisible to shared-outgoing-edge analysis.
+- **`working_tree` auto-indexing** — `agent_grep`, `search_text`, `search`, and `query` now accept `working_tree=True` to auto-index modified and untracked files from the git working tree before searching.
+- **`stale_chunks` guidance** — When many files are stale at the default threshold, the response now includes guidance suggesting `threshold=0.5` or `0.64` for active codebases.
+
+### Fixed
+- **SQLite stability** — Increased connection timeout to 30 seconds in `ConnectionPool` and fallback `sqlite3.connect()` calls to reduce "unable to open database file" errors under concurrent load.
+- **`agent_grep` database error handling** — Catches SQLite errors gracefully and returns actionable guidance to run `rebuild_symbols` or `detect_changes`.
+- **`query()` text match integration** — Fixed broken `agent_grep` result parsing that was looking for non-existent `results` and `chunk_id` keys. Errors from sub-searches are now surfaced in `errors` instead of being silently swallowed.
+
 ## [1.1.0] - 2026-04-14
 
 ### Added

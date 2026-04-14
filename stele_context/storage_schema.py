@@ -51,7 +51,7 @@ def connect(db_path: Any) -> Any:
             conn.rollback()
             raise
     else:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=30.0)
         conn.row_factory = None  # reset to default for consistency
         conn.execute("PRAGMA synchronous=NORMAL")
         try:

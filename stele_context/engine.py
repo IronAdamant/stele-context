@@ -417,6 +417,44 @@ class Stele:
         )
         return data
 
+    def _index_working_tree(self, agent_id: str | None = None) -> list[str]:
+        """Index modified and untracked files from the git working tree.
+
+        Returns the list of newly indexed file paths.
+        """
+        if self._project_root is None:
+            return []
+        try:
+            import subprocess
+
+            result = subprocess.run(
+                ["git", "status", "--porcelain", "-u"],
+                cwd=str(self._project_root),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                return []
+            changed: list[str] = []
+            for line in result.stdout.splitlines():
+                if len(line) < 4:
+                    continue
+                # Two-letter status followed by space and path
+                path = line[3:]
+                # Handle renamed files "R   old -> new"
+                if " -> " in path:
+                    path = path.split(" -> ")[-1]
+                abs_path = self._project_root / path
+                if abs_path.is_file():
+                    changed.append(str(abs_path))
+            if changed:
+                indexed = self.index_documents(changed, agent_id=agent_id)
+                return [d["path"] for d in indexed.get("indexed", [])]
+        except Exception:
+            pass
+        return []
+
     def search_text(
         self,
         pattern: str,
@@ -424,6 +462,7 @@ class Stele:
         document_path: str | None = None,
         limit: int = 50,
         session_id: str | None = None,
+        working_tree: bool = False,
     ) -> dict[str, Any]:
         """Search chunk content by exact substring or regex pattern.
 
@@ -431,8 +470,12 @@ class Stele:
         for cases where exact text matching is needed (e.g., finding all
         usages of a specific identifier before renaming).
         When session_id is provided, records search history and auto-indexes
-        files with matches.
+        files with matches. When working_tree is True, auto-indexes modified
+        and untracked files before searching.
         """
+        if working_tree:
+            self._index_working_tree(agent_id=session_id)
+
         with self._lock.read_lock():
             if document_path is not None:
                 document_path = self._normalize_path(document_path)
@@ -476,14 +519,20 @@ class Stele:
         deduplicate: bool = True,
         context_lines: int = 0,
         session_id: str | None = None,
+        working_tree: bool = False,
     ) -> dict[str, Any]:
         """LLM-optimized search: grep with scope, classification, token budget.
 
         See :func:`stele_context.agent_grep.agent_grep` for full docs.
         When session_id is provided, records search history and auto-indexes
         files with matches (no separate index call needed).
+        When working_tree is True, auto-indexes modified and untracked files
+        before searching.
         """
         from stele_context.agent_grep import agent_grep as _agent_grep
+
+        if working_tree:
+            self._index_working_tree(agent_id=session_id)
 
         with self._lock.read_lock():
             if document_path is not None:
@@ -665,7 +714,11 @@ class Stele:
         compact: bool = False,
         return_response_meta: bool = False,
         path_prefix: str | None = None,
+        working_tree: bool = False,
+        session_id: str | None = None,
     ) -> list[dict[str, Any]] | dict[str, Any]:
+        if working_tree:
+            self._index_working_tree(agent_id=session_id)
         if path_prefix is not None:
             path_prefix = self._normalize_path(path_prefix)
         with self._lock.read_lock():
@@ -831,6 +884,7 @@ class Stele:
         top_n_files: int = 25,
         significance_threshold: float = 0.0,
         exclude_symbols: list[str] | None = None,
+        direction: str = "dependents",
     ) -> dict[str, Any]:
         if document_path:
             document_path = self._normalize_path(document_path)
@@ -847,6 +901,7 @@ class Stele:
                 top_n_files=top_n_files,
                 significance_threshold=significance_threshold,
                 exclude_symbols=exclude_symbols,
+                direction=direction,
             )
 
     def coupling(
@@ -854,6 +909,7 @@ class Stele:
         document_path: str,
         significance_threshold: float = 0.0,
         exclude_symbols: list[str] | None = None,
+        mode: str = "edges",
     ) -> dict[str, Any]:
         document_path = self._normalize_path(document_path)
         with self._lock.read_lock():
@@ -861,6 +917,7 @@ class Stele:
                 document_path,
                 significance_threshold=significance_threshold,
                 exclude_symbols=exclude_symbols,
+                mode=mode,
             )
 
     def rebuild_symbol_graph(self) -> dict[str, Any]:
@@ -1038,6 +1095,8 @@ class Stele:
         query: str,
         top_k: int = 10,
         path_prefix: str | None = None,
+        working_tree: bool = False,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         """Composite retrieval that merges symbol, semantic, and text search.
 
@@ -1050,8 +1109,12 @@ class Stele:
         """
         from stele_context.search_engine import extract_query_identifiers
 
+        if working_tree:
+            self._index_working_tree(agent_id=session_id)
+
         results: list[dict[str, Any]] = []
         seen_chunks: set[str] = set()
+        errors: list[str] = []
 
         # 1. Semantic search
         try:
@@ -1068,8 +1131,8 @@ class Stele:
                 if cid and cid not in seen_chunks:
                     seen_chunks.add(cid)
                     results.append({**r, "source": "semantic_search"})
-        except Exception:
-            pass
+        except Exception as e:
+            errors.append(f"semantic_search: {e}")
 
         # 2. Symbol lookups for identifiers in the query
         idents = extract_query_identifiers(query)
@@ -1106,8 +1169,8 @@ class Stele:
                                     "symbol": ident,
                                 }
                             )
-            except Exception:
-                pass
+            except Exception as e:
+                errors.append(f"symbol_graph({ident}): {e}")
 
         # 3. Text grep for the full query phrase (agent-friendly, token-capped)
         try:
@@ -1116,23 +1179,29 @@ class Stele:
                 max_tokens=2000,
                 session_id=None,
             )
-            for file_match in grep_res.get("results", []):
-                for match in file_match.get("matches", []):
-                    cid = match.get("chunk_id")
+            # agent_grep returns groups, not results; matches have 'file' not 'chunk_id'
+            for group in grep_res.get("groups", []):
+                for match in group.get("matches", []):
+                    file_path = match.get("file", "")
+                    if not file_path:
+                        continue
+                    # Find the chunk for this file/line
+                    chunk_meta = self._chunk_for_line(file_path, match.get("line", 0))
+                    cid = chunk_meta.get("chunk_id") if chunk_meta else None
                     if cid and cid not in seen_chunks:
                         seen_chunks.add(cid)
                         results.append(
                             {
                                 "chunk_id": cid,
-                                "document_path": file_match.get("document_path", ""),
-                                "content": match.get("line", "")[:300],
+                                "document_path": file_path,
+                                "content": match.get("excerpt", "")[:300],
                                 "source": "text_match",
                             }
                         )
-        except Exception:
-            pass
+        except Exception as e:
+            errors.append(f"text_match: {e}")
 
-        return {
+        out: dict[str, Any] = {
             "query": query,
             "results": results[:top_k],
             "sources": {
@@ -1147,6 +1216,28 @@ class Stele:
                 ),
             },
         }
+        if errors:
+            out["errors"] = errors
+        return out
+
+    def _chunk_for_line(
+        self, document_path: str, line_number: int
+    ) -> dict[str, Any] | None:
+        """Find the chunk that contains the given line in a document."""
+        chunks = self.storage.get_document_chunks(document_path)
+        if not chunks:
+            return None
+        # Compute base lines for each chunk
+        cumulative = 1
+        for chunk in sorted(chunks, key=lambda c: c.get("start_pos", 0)):
+            content = chunk.get("content") or ""
+            newlines = content.count("\n")
+            end_line = cumulative + newlines + (0 if content.endswith("\n") else 1)
+            if cumulative <= line_number < end_line:
+                return chunk
+            cumulative = end_line
+        # Fallback: last chunk
+        return chunks[-1] if chunks else None
 
     # -- Batch operations -----------------------------------------------------
 
