@@ -243,6 +243,25 @@ _NOISE_REFS: frozenset = frozenset(
         "render",
         "setup",
         "teardown",
+        # Additional common symbols that drive false impact/coupling
+        "now",
+        "from",
+        "addNode",
+        "addEdge",
+        "removeNode",
+        "removeEdge",
+        "getNode",
+        "getEdge",
+        "hasNode",
+        "hasEdge",
+        "setNode",
+        "setEdge",
+        "updateNode",
+        "updateEdge",
+        "findNode",
+        "findEdge",
+        "queryNode",
+        "queryEdge",
     }
 )
 

@@ -8,14 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **JS alias resolution** — `const Alias = OriginalClass` now emits the RHS identifier as a variable reference, enabling `find_references` and `coupling` to trace re-exported aliases (e.g. `CodeNavigator`, `StepParser`).
-- **Destructured `module.exports` parsing** — `module.exports = { X, Y, Alias: Original, ...require('./path') }` is now parsed via content pre-pass. Simple names emit references, aliased entries emit definition+reference pairs, spread requires emit module references for barrel module coupling.
-- **Coupling noise filtering** — `_NOISE_REFS` expanded with Node.js stdlib module names (`path`, `fs`, `crypto`, `os`, `http`, etc.) and common generic method names (`getStats`, `constructor`, `toJSON`, `emit`, `on`, `listen`, etc.) to eliminate false-positive coupling through shared boilerplate symbols.
+- **JS bare function call extraction** — `extract_javascript` now captures bare function calls (`validatePositiveInt(value)`) and `new ClassName()` constructor calls, enabling `find_references` to link test files and internal call sites that were previously invisible.
+- **Impact radius significance thresholding** — `impact_radius(..., significance_threshold=0.1)` filters out edges driven by common stdlib/generic symbols (`push`, `has`, `addEdge`, `addNode`, etc.), preventing massive over-estimation of blast radius for new files. Optional `exclude_symbols=[...]` lets callers suppress specific symbols.
+- **Coupling significance thresholding** — `coupling(..., significance_threshold=0.1)` applies the same common-symbol discounting. Results now include a `semantic_score` that penalises generic shared symbols, sorting by meaning instead of raw edge count.
+- **Shadow-aware definitions** — `find_definition` now annotates multiple definitions of the same symbol in a single file with `definition_index`, `shadowed: true`, and `shadow_count`, making block-scope shadowed symbols visible.
+- **Extended `_NOISE_REFS`** — Added `now`, `from`, `addNode`, `addEdge`, `removeNode`, `removeEdge`, `getNode`, `getEdge`, `hasNode`, `hasEdge`, `setNode`, `setEdge`, `updateNode`, `updateEdge`, `findNode`, `findEdge`, `queryNode`, `queryEdge` to the noise set, reducing false coupling and impact from commonly-shared generic method names.
 
 ### Fixed
 - `find_references` for `const Alias = Class` patterns no longer returns `not_found` — the alias now creates an edge to the original definition.
 - `coupling` for barrel modules using `module.exports = { ...require('./x') }` now shows connected files instead of returning empty results.
 - `coupling` no longer reports dozens of false-positive connections through Node.js stdlib imports and ubiquitous method names like `getStats`.
+- `find_references` now surfaces test-file and internal JS call-site references that were missed because bare function calls and `new ClassName()` were not extracted.
 
 ## [1.0.9] - 2026-03-31
 

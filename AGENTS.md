@@ -21,9 +21,10 @@ Stele is a **local, persistent index** of your project: chunks, hybrid search (H
 
 ## Retrieval discipline
 
-- **Symbols** (`find_definition`, `find_references`) for identifiers and imports.
+- **Symbols** (`find_definition`, `find_references`) for identifiers and imports. `find_definition` now annotates shadowed symbols with `definition_index`, `shadowed`, and `shadow_count`.
 - **`agent_grep` / `search_text`** for exhaustive or regex proof. Both accept **`session_id`** — they auto-index files with matches and record search history, so **`get_search_history`** tells you what you already searched.
 - **`search`** for exploration; use **`compact`**, **`max_result_tokens`**, or **`return_response_meta`** to cap context.
+- **`impact_radius`** / **`coupling`** — use `significance_threshold > 0` to filter out blast-radius and coupling noise from common stdlib/generic symbols (e.g. `push`, `has`, `addEdge`).
 - **`get_context`** returns **trust** hints (mtime vs index, staleness) and optional **`agent_notes`** per chunk. Pass **`session_id`** to record which files were fully read — check **`get_session_read_files`** to avoid re-fetching.
 
 ## Tier 2 and chunk notes
@@ -37,4 +38,4 @@ If **`trust.cache_aligned_with_disk`** is false or **`staleness_hint`** is true,
 
 ## Scope (zero-dep core)
 
-The **stdlib-only** engine is in a **reasonable stopping place** for hybrid retrieval, symbol tools, and agent-oriented bounds: further gains on “semantic” quality without a bundled model are diminishing; optional **Tier 2** (your summaries/embeddings) remains the supported path for higher intent alignment. **`path_prefix`** on **`map`** / **`search`** reduces cross-tree noise; **`impact_radius(..., summary_mode=true)`** keeps blast-radius output small. See **STABILITY.md** and [CHANGELOG](CHANGELOG.md) for 1.0.5.
+The **stdlib-only** engine is in a **reasonable stopping place** for hybrid retrieval, symbol tools, and agent-oriented bounds: further gains on "semantic" quality without a bundled model are diminishing; optional **Tier 2** (your summaries/embeddings) remains the supported path for higher intent alignment. **`path_prefix`** on **`map`** / **`search`** reduces cross-tree noise; **`impact_radius(..., summary_mode=true, significance_threshold=0.1)`** keeps blast-radius output small and noise-free. See **STABILITY.md** and [CHANGELOG](CHANGELOG.md) for latest.

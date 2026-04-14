@@ -819,6 +819,8 @@ class Stele:
         path_filter: str | None = None,
         summary_mode: bool = False,
         top_n_files: int = 25,
+        significance_threshold: float = 0.0,
+        exclude_symbols: list[str] | None = None,
     ) -> dict[str, Any]:
         if document_path:
             document_path = self._normalize_path(document_path)
@@ -832,12 +834,23 @@ class Stele:
                 path_filter=path_filter,
                 summary_mode=summary_mode,
                 top_n_files=top_n_files,
+                significance_threshold=significance_threshold,
+                exclude_symbols=exclude_symbols,
             )
 
-    def coupling(self, document_path: str) -> dict[str, Any]:
+    def coupling(
+        self,
+        document_path: str,
+        significance_threshold: float = 0.0,
+        exclude_symbols: list[str] | None = None,
+    ) -> dict[str, Any]:
         document_path = self._normalize_path(document_path)
         with self._lock.read_lock():
-            return self.symbol_manager.coupling(document_path)
+            return self.symbol_manager.coupling(
+                document_path,
+                significance_threshold=significance_threshold,
+                exclude_symbols=exclude_symbols,
+            )
 
     def rebuild_symbol_graph(self) -> dict[str, Any]:
         with self._lock.write_lock():

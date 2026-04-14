@@ -336,56 +336,76 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbo
                 Symbol(m.group(1), "module", "reference", chunk_id, doc_path, i)
             )
 
-        # Method / attribute call targets: obj.method()
-        # Extracts 'method' as a function reference so call-chains like
-        # algorithms.calculateJaccard() create edges to the method definition.
-        # Skips class method definitions (lines containing '{') and keywords.
-        for m in re.finditer(r"\.(\w+)\s*\(", stripped):
-            method_name = m.group(1)
-            # Skip if this line is a class method definition (has '{' on same line
-            # after the method name, i.e. "  methodName() {").
-            # Also skip noise keywords that commonly appear before '.'.
-            skip_words = {
-                "if",
-                "else",
-                "for",
-                "while",
-                "switch",
-                "catch",
-                "return",
-                "throw",
-                "new",
-                "delete",
-                "typeof",
-                "import",
-                "export",
-                "default",
-                "case",
-                "break",
-                "continue",
-                "try",
-                "finally",
-                "do",
-                "with",
-            }
-            # Check the word before the '.' to skip constructs like "new Foo.bar()"
-            # or "return obj.method()". We want bare obj.method() call sites.
-            # A simple heuristic: the character immediately before the '.' should
-            # be a word character (part of an identifier), not a keyword.
-            start = m.start()
-            if start > 0 and stripped[start - 1].isalnum():
-                # e.g. "algorithms.calculateJaccard(" — valid call site
-                if method_name not in skip_words:
-                    symbols.append(
-                        Symbol(
-                            method_name,
-                            "function",
-                            "reference",
-                            chunk_id,
-                            doc_path,
-                            i,
-                        )
+        # Function references: both bare calls (validatePositiveInt()) and
+        # method calls (obj.method()).  This ensures test files and internal
+        # call sites are linked for find_references/impact_radius.
+        _CALL_SKIP_WORDS = {
+            "if",
+            "else",
+            "for",
+            "while",
+            "switch",
+            "catch",
+            "return",
+            "throw",
+            "new",
+            "delete",
+            "typeof",
+            "import",
+            "export",
+            "default",
+            "case",
+            "break",
+            "continue",
+            "try",
+            "finally",
+            "do",
+            "with",
+            "function",
+            "class",
+            "extends",
+            "implements",
+            "interface",
+            "enum",
+            "const",
+            "let",
+            "var",
+        }
+        # Unified extractor: group 1 = method call (after dot),
+        # group 2 = bare function call.
+        for m in re.finditer(r"(?:\.(\w+)|(?:^|[^\.\w])(\w+))\s*\(", stripped):
+            func_name = m.group(1) or m.group(2)
+            if func_name and func_name not in _CALL_SKIP_WORDS:
+                # Skip if this looks like a class method definition on the same line.
+                # Heuristic: the original line contains the func name followed by
+                # "() {" somewhere — but since we're already in the reference pass,
+                # we only need to avoid obvious false positives.  The _CALL_SKIP_WORDS
+                # set catches most keywords.
+                symbols.append(
+                    Symbol(
+                        func_name,
+                        "function",
+                        "reference",
+                        chunk_id,
+                        doc_path,
+                        i,
                     )
+                )
+
+        # new ClassName() references — constructor calls in tests and app code.
+        for m in re.finditer(r"new\s+(\w+)", stripped):
+            class_name = m.group(1)
+            if class_name not in _CALL_SKIP_WORDS:
+                symbols.append(
+                    Symbol(
+                        class_name,
+                        "class",
+                        "reference",
+                        chunk_id,
+                        doc_path,
+                        i,
+                    )
+                )
 
         # DOM API -- cross-language HTML/CSS references
         for m in re.finditer(r"querySelector(?:All)?\(['\"]([^'\"]+)['\"]\)", stripped):

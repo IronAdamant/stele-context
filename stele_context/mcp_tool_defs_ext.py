@@ -58,6 +58,9 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
         "set compact=false only for debugging (full chunk list). "
         "summary_mode=true returns bounded output: depth_distribution plus "
         "top_n_files impacted paths (by chunk count), similar to fan-in summaries. "
+        "significance_threshold>0 filters out low-significance edges driven by "
+        "common stdlib/generic symbols (e.g. push, has, addEdge), reducing "
+        "false-positive blast radius for new files. "
         "USE WHEN: blast-radius checks before edits, downstream impact.",
         "inputSchema": {
             "type": "object",
@@ -99,6 +102,16 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
                     "description": "With summary_mode, max files listed in files (default 25)",
                     "default": 25,
                 },
+                "significance_threshold": {
+                    "type": "number",
+                    "description": "If > 0, skip edges driven by common stdlib/generic symbols (e.g. 0.1 filters push/has/addEdge). Default 0.0 = no filtering.",
+                    "default": 0.0,
+                },
+                "exclude_symbols": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of symbol names to ignore when traversing edges.",
+                },
             },
         },
     },
@@ -106,8 +119,9 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
         "name": "coupling",
         "description": "Find files semantically coupled to a given file via shared "
         "symbol dependencies. Returns coupled files sorted by strength with "
-        "direction (depends_on / depended_on_by / bidirectional) and shared "
-        "symbol names. "
+        "direction (depends_on / depended_on_by / bidirectional), shared "
+        "symbol names, and a semantic_score that discounts generic symbols. "
+        "significance_threshold>0 filters out low-significance common symbols. "
         "USE WHEN: assessing which files need co-modification, understanding "
         "tight coupling for refactoring, identifying related files to review "
         "together.",
@@ -117,6 +131,16 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
                 "document_path": {
                     "type": "string",
                     "description": "File path to find coupled files for",
+                },
+                "significance_threshold": {
+                    "type": "number",
+                    "description": "If > 0, skip edges driven by common stdlib/generic symbols (e.g. 0.1 filters push/has/addEdge). Default 0.0 = no filtering.",
+                    "default": 0.0,
+                },
+                "exclude_symbols": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of symbol names to ignore when computing coupling.",
                 },
             },
             "required": ["document_path"],

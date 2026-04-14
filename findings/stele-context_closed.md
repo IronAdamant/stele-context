@@ -1,163 +1,167 @@
-# Stele-context MCP Findings — Review Eleven
+# Review Nineteen: Stele-context Challenge Report
 
-**Date:** 2026-04-10
-**Features Tested Against:** SemanticCodeNavigator (primary), RecipeLineageTracker, AdaptiveRecipeCompiler, all 6 features
+## Feature: SteleSemanticMutationEngine
 
-## Executive Summary
-
-Stele-context was challenged primarily by the **SemanticCodeNavigator** feature — a service built around heavily aliased symbols, proxy patterns, re-exports under different names, and dynamic method dispatch. This directly tests Stele's `find_references` and `find_definition` capabilities against indirected symbols. Stele showed **strong performance on direct symbols and import tracking** but **completely failed to resolve re-exported aliases** — the core challenge.
-
-## Tools Tested
-
-### 1. `index` — PASSED
-- **Result:** Successfully indexed all 30 new files (18 source + 6 routes + 6 tests).
-- **Stats:** 51 chunks, 48,483 tokens total.
-- **Observation:** Fast and reliable. Chunking was appropriate — smaller files got 1-2 chunks, larger files got 2-3.
-- **Verdict:** Continues to be Stele's most reliable feature.
-
-### 2. `detect_changes` — PASSED
-- **Result:** Correctly identified 1 modified file (`routeLoader.js`) and 160+ new files (including all 6 feature directories).
-- **Key observation:** `scan_new: true` (default) correctly discovered all new files by scanning the filesystem. This addresses the previous limitation where `detect_changes` couldn't find unindexed files.
-- **Verdict:** Working well with the filesystem scan mode.
-
-### 3. `find_references` — MIXED RESULTS
-
-#### Test 1: `SemanticCodeNavigatorService` (canonical name)
-- **Verdict:** `external` (only 1 reference found)
-- **Found:** Import in `semanticNavigatorRoutes.js` (line 5)
-- **Missing:** Did NOT find the class definition in `SemanticCodeNavigatorService.js`, did NOT find usage in `semanticNavigator.test.js`
-- **Assessment:** PARTIAL FAILURE. The class is defined and imported in multiple files but Stele only found one reference.
-
-#### Test 2: `CodeNavigator` (alias of SemanticCodeNavigatorService)
-- **Verdict:** `not_found`
-- **Result:** Zero matches. The symbol `CodeNavigator` exists as `const CodeNavigator = SemanticCodeNavigatorService` in the service file and is imported in the test file.
-- **Assessment:** COMPLETE FAILURE. Stele cannot resolve `const Alias = OriginalClass` patterns. This is the core challenge gap.
-
-#### Test 3: `RecipeSnapshot` (alias of createLineageNode)
-- **Verdict:** `referenced` (2 matches — 1 definition, 1 import)
-- **Found:** Variable definition in `LineageNode.js` (line 103), import in `lineageTracker.test.js` (line 4)
-- **Assessment:** PARTIAL SUCCESS. Found the alias definition and its test import. But missed the module.exports line where it's re-exported.
-
-#### Test 4: `DynamicDispatcher` (class definition)
-- **find_definition result:** Zero definitions found.
-- **Assessment:** COMPLETE FAILURE. `DynamicDispatcher` is a `class` defined in `DynamicDispatcher.js` and exported via `module.exports`. Stele's symbol extractor missed it entirely.
-- **Possible cause:** The class is exported as `module.exports = { DynamicDispatcher }` (destructured export), and the symbol extractor may not parse class definitions inside destructured exports.
-
-### 4. `coupling` — STRONG PERFORMANCE
-- **File tested:** `src/services/lineageTracker/RecipeLineageTrackerService.js`
-- **Result:** 65 coupled files found with detailed direction and shared symbols.
-- **Top couplings:**
-  - `lineageTracker.test.js` — 14 shared symbols, bidirectional
-  - `lineageRoutes.js` — 10 shared symbols, `depended_on_by`
-  - `LineageGraph.js` — 8 shared symbols, bidirectional (actual import dependency)
-- **Assessment:** EXCELLENT. Stele's semantic coupling correctly identified the real import dependencies (LineageGraph, LineageNode) AND the test/route files that consume the service. Direction labels are accurate.
-- **Noise issue:** Many files coupled via generic symbols like `path` and `getStats`. These are false positives from method-name collisions, not actual coupling.
-
-### 5. `search` (keyword mode) — GOOD RESULTS
-- **Query:** "dynamic dispatch aliased symbols proxy pattern"
-- **Mode:** `keyword` (BM25)
-- **Top results:**
-  1. `tests/services/semanticNavigator.test.js` — 0.893 relevance
-  2. `src/services/semanticNavigator/SemanticCodeNavigatorService.js` — 0.825
-  3. `src/services/semanticNavigator/SymbolAliasRegistry.js` — 0.648
-  4. `src/services/semanticNavigator/DynamicDispatcher.js` — 0.624
-- **Assessment:** SIGNIFICANT IMPROVEMENT. BM25 keyword search returned highly relevant results for this query. All top 5 results are from the correct feature. This confirms the Phase 9 finding that BM25 mode is far more useful than hybrid for specific queries.
-
-## Challenge-Specific Findings
-
-### Symbol Alias Resolution (Core Challenge)
-
-| Symbol | Type | find_references | find_definition |
-|---|---|---|---|
-| `SemanticCodeNavigatorService` | class (canonical) | 1 ref (external) | Not tested |
-| `CodeNavigator` | const alias | NOT FOUND | N/A |
-| `SymbolNavigator` | const alias | Not tested | N/A |
-| `RecipeSnapshot` | const alias | 2 refs (referenced) | N/A |
-| `DerivationPoint` | const alias | Not tested | N/A |
-| `DynamicDispatcher` | class (canonical) | Not tested | NOT FOUND |
-| `StepParser` | const alias | Not tested | N/A |
-| `RecipeDecoder` | const alias | Not tested | N/A |
-
-**Pattern:** Stele fails to index:
-1. **`const Alias = OriginalClass` patterns** — `CodeNavigator`, `SymbolNavigator`, `StepParser`, `RecipeDecoder` all invisible
-2. **Class definitions in destructured exports** — `DynamicDispatcher` defined as `class DynamicDispatcher` but exported via `module.exports = { DynamicDispatcher }` was not found by `find_definition`
-3. **Re-exported aliases in `module.exports`** — When `module.exports = { Original, Alias1: Original, Alias2: Original }`, the aliases are invisible
-
-### Coupling Noise from Generic Symbols
-Stele's coupling correctly found the real dependencies but also reported 40+ false-positive couplings through shared method names:
-- `getStats` appears in nearly every service file → massive false coupling
-- `path` (the Node.js module) creates coupling between every file that imports it
-
-**Recommendation:** Coupling should filter out stdlib imports (`path`, `fs`, `crypto`) and extremely common method names (`getStats`, `constructor`, `toJSON`).
-
-## Bugs / Issues Found
-
-1. **`find_definition` failed for `DynamicDispatcher`** — Class exported via destructured `module.exports` not indexed
-2. **`find_references` returns `external` for `SemanticCodeNavigatorService`** — Should be `referenced` since definition and imports both exist
-3. **`const Alias = Class` pattern invisible** — Re-export aliases (`CodeNavigator`, `StepParser`, etc.) completely missing from symbol index
-4. **Coupling noise from generic symbols** — `getStats` and `path` create massive false-positive coupling
-
-## Validated Capabilities (confirmed working)
-
-- [x] `index` — Fast, reliable, correct chunking
-- [x] `detect_changes` with `scan_new: true` discovers new unindexed files
-- [x] `search` in `keyword` mode returns highly relevant results (0.89 relevance)
-- [x] `coupling` correctly identifies real import dependencies with direction
-- [x] `find_references` for `RecipeSnapshot` (const alias) partially works (found definition + test import)
-
-## Unresolved Issues (carried forward)
-
-- [ ] **CRITICAL:** `const Alias = Class` patterns invisible to symbol index
-- [ ] **CRITICAL:** `find_definition` misses classes in destructured `module.exports`
-- [ ] `find_references` verdict inconsistency (`external` when definition exists in indexed files)
-- [ ] Coupling polluted by stdlib imports and common method names — needs filtering
-- [ ] `search` in `hybrid` mode still unreliable (not tested this round, but BM25 clearly superior)
+**Purpose**: Generates ambiguous symbol lattices, shadow layers, and semantic mutations across recipe modules to stress-test Stele-context's ability to track references, resolve definitions, compute impact radius, and detect semantic coupling.
 
 ---
 
-## Part 2: Multi-Agent Refactor Findings
+## Implementation Summary
 
-**Refactor scope:** 3 agents — Agent A (barrel modules), Agent B (VCS route merge), Agent C (BaseModel + FileStore).
+`SteleSemanticMutationEngine` (plus `AmbiguousSymbolLattice` and `SymbolMutation`) creates deliberate semantic ambiguity through three patterns:
 
-### `index` post-refactor — PASSED
-- Indexed 10 new/modified files: 5 barrel modules, vcsRoutes.js, BaseModel.js, fileStore.js, routeLoader.js, baseModel.test.js
-- Total: 15 chunks, 13,972 tokens. Fast and clean.
+1. **Scope Shadowing**: The same symbol name is redefined in nested block scopes within a single module.
+2. **Symbol Splitting / Renaming**: A symbol like `butter` is recorded as renamed to `margarine`, with historical mutation tracking.
+3. **Multi-Context Redefinition**: A symbol exists in multiple modules (e.g., `flour` in both `BreadRecipe` and `CakeRecipe`) and is also shadowed in variant subclasses.
 
-### `find_references` for `BaseModel` — CORRECT
-- **Verdict:** `referenced` (2 matches)
-- Found: class definition in `src/models/BaseModel.js` (line 1), import in `tests/utils/baseModel.test.js` (line 7)
-- **Assessment:** Correctly found the new class and its test consumer. Direction is right — BaseModel is defined once and imported once.
-- **Contrast with Part 1:** `DynamicDispatcher` (also a class) was NOT found by `find_definition`. `BaseModel` WAS found. The difference: `BaseModel` uses `module.exports = { BaseModel }` just like `DynamicDispatcher`. But BaseModel's file is simpler (no other exports). This suggests the symbol extractor may have a bug with files that export many symbols.
+Key capabilities:
+- `addNode(symbolName, context)` — registers a symbol in a specific module/line/scope
+- `addEdge(from, to, relationType)` — tracks semantic relationships (`uses`, `renamed_to`, `split_into`)
+- `recordMutation(mutation)` — stores `rename`, `split`, and `shadow` events with timestamps
+- `findSymbolInAllContexts(symbolName)` — resolves a symbol across static contexts, shadow layers, and mutation history
+- `getImpactRadius(symbolName, depth)` — bidirectional BFS over symbol edges to find transitive dependents/dependencies
+- `generateConflictingModule(name, symbolName, lineCount)` — auto-generates a JS module where `symbolName` is redefined 6 times in different scopes
+- `generateAmbiguousRecipeModule(recipeName, ingredients, steps)` — auto-generates a class inheritance chain with shadowed ingredient methods
 
-### `find_references` for `bulkCreate` — EXCELLENT
-- **Verdict:** `referenced` (6 matches)
-- Found: 2 definitions (FileStore.js line 161, Ingredient.js line 80) + 4 references in baseModel.test.js
-- **Assessment:** Outstanding. Stele found `bulkCreate` in TWO definition locations — the new FileStore method AND a pre-existing `bulkCreate` method on the Ingredient model. This cross-file definition tracking is exactly what Stele excels at.
+Tests: **7 passing** (symbol tracking, shadow mutations, impact radius, ambiguous module generation, stats, most-ambiguous-symbol detection).
 
-### `find_definition` for `findWhere` — CORRECT
-- Found in `src/utils/fileStore.js` at line 153 with full chunk content.
-- **Assessment:** New methods added by Agent C are immediately visible to Stele after indexing.
+---
 
-### `coupling` for barrel module — EMPTY (0 coupled files)
-- **File:** `src/services/mcpProbes/chiselProbes.js`
-- **Result:** 0 coupled files
-- **Assessment:** FAILURE. The barrel module re-exports from 3 other files via `require()`. Stele should show coupling to those 3 source files. Instead, it shows nothing.
-- **Root cause hypothesis:** Barrel modules use `module.exports = { ...require('./a'), ...require('./b') }` spread syntax. Stele's symbol extractor likely doesn't resolve spread-imported symbols, so no shared symbols are detected.
+## Stele-context Tools Tested
 
-### `coupling` for merged VCS routes — STRONG
-- **File:** `src/api/routes/vcsRoutes.js`
-- **Result:** 24 coupled files, top coupling:
-  - `versionControlService.js` — 14 shared symbols (bidirectional)
-  - `response.js` — 6 shared symbols (depends_on)
-  - `diffService.js` — 4 shared symbols (depends_on)
-  - `routeLoader.js` — 2 shared symbols, correctly shows `depended_on_by` direction
-- **Assessment:** Excellent. Agent B merged 3 route files into one, and Stele's coupling correctly shows the new merged file's full dependency map. The `routeLoader.js` coupling with `createVcsRoutes` symbol proves Stele tracked the refactored import path.
+### 1. `find_references` — Symbol Tracking
 
-### Multi-Agent Coordination Impact on Stele
-- Agent A's barrel modules are invisible to coupling (spread syntax gap)
-- Agent B's merged routes are fully visible with correct coupling
-- Agent C's new FileStore methods are immediately findable after indexing
-- **Cross-agent conflict detected:** Both the old `branchRoutes.js` and new `vcsRoutes.js` show coupling to `versionControlService.js`. Stele doesn't know the old files are superseded — it would flag both as coupled. This is a stale-data issue that `detect_changes` should help with.
+**Challenge**: After indexing `steleSemanticMutationEngine.js`, we queried for references to `SteleSemanticMutationEngine`.
 
-### New issue found
-- [ ] **Barrel module spread syntax** (`module.exports = { ...require('./x') }`) produces zero coupling — Stele cannot resolve spread re-exports
+**Result**:
+```json
+{
+  "symbol": "SteleSemanticMutationEngine",
+  "verdict": "external",
+  "definitions": [],
+  "references": [
+    {
+      "symbol": "SteleSemanticMutationEngine",
+      "kind": "variable",
+      "document_path": "src/services/steleSemanticMutationEngine.js",
+      "line_number": 265,
+      ...
+    }
+  ],
+  "total": 1
+}
+```
+
+**Analysis**: The verdict `external` is technically correct because the class is exported via `module.exports`. However, Stele only returned 1 reference (the export line) and did not surface the 7 test references across the new test file. The `definitions` array was empty, which is a gap — it should have included the class definition at line 265.
+
+**Gap**: `find_references` does not reliably link test files to exported symbols unless those tests are already committed and indexed with strong import edges. Uncommitted test files have weak visibility.
+
+---
+
+### 2. `find_definition` — Jump to Definition
+
+**Challenge**: We queried the definition of `AmbiguousSymbolLattice`.
+
+**Result**: Stele returned the **full class definition** (all 150+ lines) with the correct `line_number: 1` and `kind: "class"`. The content preview included the complete constructor and all methods.
+
+**Analysis**: This worked flawlessly. The jump-to-definition capability is robust for top-level class declarations.
+
+**However**: When a symbol is shadowed (e.g., `mix` redefined 5 times inside block scopes in `generateConflictingModule`), `find_definition` only returns the first definition. It does **not** return the 5 nested shadow definitions. This is expected for most use cases, but for our deliberately ambiguous lattice, it means Stele cannot disambiguate scoped redefinitions.
+
+---
+
+### 3. `impact_radius` — Blast Radius Analysis
+
+**Challenge**: We ran `impact_radius` on `steleSemanticMutationEngine.js` with `summary_mode: true` and `depth: 2`.
+
+**Result**:
+```json
+{
+  "origin": "src/services/steleSemanticMutationEngine.js",
+  "max_depth": 2,
+  "affected_chunks": 64,
+  "affected_files": 63,
+  "depth_distribution": { "1": 5, "2": 59 },
+  "files_total": 63
+}
+```
+
+The affected files included:
+- `tests/services/knowledgeGraph.test.js`
+- `src/api/routes/agentCoordinationRoutes.js`
+- `src/models/BaseModel.js`
+- `src/cli/index.js`
+- ...and 59 others
+
+**Analysis**: This is a massive over-estimation of impact. The file is a **leaf service** with zero actual runtime dependencies on the rest of the codebase. The 63 affected files are inferred purely through shared common symbols (`Map`, `Set`, `push`, `reduce`, etc.) or weak structural similarity.
+
+**Critical Gap**: `impact_radius` on new files is **unusable** for prioritization because it treats the addition of basic JavaScript operations (Array methods, Date, etc.) as high-impact couplings. There is no thresholding or "common-symbol discounting."
+
+**Recommendation**: Add a `significance_threshold` parameter to filter out impact caused only by standard library symbols or boilerplate patterns.
+
+---
+
+### 4. `coupling` — Semantic Coupling
+
+**Challenge**: We queried coupling for `steleSemanticMutationEngine.js`.
+
+**Result**: 24 coupled files. Top shared symbols:
+- `addEdge`, `addNode` — coupled with `src/services/incrementalBuildGraph.js`, `src/services/knowledgeGraph/GraphStore.js`, `tests/services/knowledgeGraph.test.js`
+- `has`, `now` — coupled with `src/services/tieredCache/*.js`, `src/utils/multiMap.js`
+- `from` — coupled with `src/utils/CircularDependencyDetector.js`, `src/utils/conversion.js`
+- `recordMutation` — coupled with `src/services/runtimeSymbolMutationTracker.js`
+
+**Analysis**: The coupling results are **structurally accurate** — these files genuinely share method names. However, the semantic meaning of `addEdge` in `SteleSemanticMutationEngine` (symbol lattice edge) is completely different from `addEdge` in `incrementalBuildGraph.js` (build graph edge). Stele treats them as identical couplings.
+
+**Gap**: Coupling is name-based, not semantic-meaning-based. For ambiguous symbol lattices where the same name maps to different concepts, this produces false-positive coupling.
+
+---
+
+### 5. `index` and `detect_changes`
+
+**Challenge**: We indexed all 6 new feature files and then checked for changes.
+
+**Result**: `index` succeeded for all files, chunking them into 2-3 chunks each. `detect_changes` was not explicitly run in isolation, but the subsequent `diff_impact` and `suggest_tests` calls showed that the index was live.
+
+**Analysis**: Indexing is fast and reliable. No issues here.
+
+---
+
+## Refactoring Exercise: `validatePositiveInt` → `validatePositiveInteger`
+
+As a real-world stress test, we performed a simple cross-file rename of `validatePositiveInt` to `validatePositiveInteger` in `src/utils/validation.js` and updated all call sites across 3 model files and the validation test suite.
+
+**Stele-context findings:**
+
+- `find_references` on `validatePositiveInt` returned only the definition in `src/utils/validation.js` and the 3 model import sites (`Recipe.js`, `MealPlan.js`, `CookingLog.js`). It **missed** the internal call sites inside `validatePagination` and the test file `tests/utils/validation.test.js`.
+- `find_definition` on `validatePositiveInteger` correctly returned the exact function body in `src/utils/validation.js`.
+- `impact_radius` on `src/utils/validation.js` returned a large number of affected files, driven by common symbols like `push` and `has` in the test suite.
+
+This confirms the gaps identified above: Stele-context is accurate for definition finding and import tracking, but misses internal usages and over-estimates impact due to shared common symbols.
+
+---
+
+## Gaps Identified
+
+| Gap | Severity | Evidence |
+|-----|----------|----------|
+| `find_references` misses uncommitted test references | Medium | Only 1 reference returned for `SteleSemanticMutationEngine` despite 7 tests |
+| `find_definition` cannot disambiguate shadowed symbols | Medium | Only first `mix` definition returned; 5 block-scope shadows ignored |
+| `impact_radius` massively over-estimates for new files | **High** | 63 affected files for a zero-dependency leaf service |
+| `coupling` is name-based, not meaning-based | Medium | `addEdge` in symbol lattice falsely coupled to build graph `addEdge` |
+| No common-symbol discounting in impact/coupling | High | Standard JS methods (`push`, `now`, `has`) drive coupling scores |
+
+---
+
+## Recommendations
+
+1. **Impact Radius Thresholding**: Add a parameter to ignore impacts driven solely by standard-library or trivial shared symbols.
+2. **Shadow-Aware Definitions**: For languages with block scoping, return all shadowed definitions with scope annotations.
+3. **Test-File Reference Boosting**: Increase edge weight between source files and their uncommitted test files so `find_references` surfaces them.
+4. **Semantic Coupling Scoring**: Weight coupling by symbol context (class name, surrounding methods) to reduce false positives from homonymous methods.
+
+---
+
+## Conclusion
+
+`SteleSemanticMutationEngine` successfully creates the kind of semantic ambiguity that would break naive reference-tracking systems. Stele-context's `find_definition` is excellent, but `impact_radius` and `coupling` need significant work to handle new files and symbol-homonym scenarios. The tool works well for stable, committed codebases but struggles with rapidly evolving or experimental code.

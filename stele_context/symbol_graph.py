@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from stele_context.chunkers.base import Chunk
-from stele_context.symbols import SymbolExtractor, Symbol, resolve_symbols
+from stele_context.symbols import SymbolExtractor, Symbol, resolve_symbols, _NOISE_REFS
 
 
 class SymbolGraphManager:
@@ -276,11 +276,19 @@ class SymbolGraphManager:
         snapshot = self._symbol_index_snapshot()
         definitions = self.storage.find_definitions(symbol)
 
-        results = []
+        # Group by document_path to detect shadowed definitions
+        by_doc: dict[str, list[dict[str, Any]]] = {}
         for defn in definitions:
-            chunk = self.storage.get_chunk(defn["chunk_id"])
-            results.append(
-                {
+            by_doc.setdefault(defn["document_path"], []).append(defn)
+
+        results = []
+        for doc_path, doc_defs in by_doc.items():
+            # Sort by line number for stable ordering
+            doc_defs_sorted = sorted(doc_defs, key=lambda d: d.get("line_number") or 0)
+            shadowed = len(doc_defs_sorted) > 1
+            for idx, defn in enumerate(doc_defs_sorted, 1):
+                chunk = self.storage.get_chunk(defn["chunk_id"])
+                entry: dict[str, Any] = {
                     "symbol": defn["name"],
                     "kind": defn["kind"],
                     "chunk_id": defn["chunk_id"],
@@ -289,7 +297,11 @@ class SymbolGraphManager:
                     "content": chunk.get("content") if chunk else None,
                     "token_count": chunk["token_count"] if chunk else 0,
                 }
-            )
+                if shadowed:
+                    entry["definition_index"] = idx
+                    entry["shadowed"] = True
+                    entry["shadow_count"] = len(doc_defs_sorted)
+                results.append(entry)
 
         count = len(results)
         out: dict[str, Any] = {
@@ -304,6 +316,19 @@ class SymbolGraphManager:
             out["guidance"] = None
         return out
 
+    @staticmethod
+    def _is_significant_symbol(
+        symbol_name: str,
+        significance_threshold: float,
+        exclude_symbols: set[str] | None,
+    ) -> bool:
+        """Return True if an edge driven by this symbol should be traversed."""
+        if exclude_symbols and symbol_name in exclude_symbols:
+            return False
+        if significance_threshold > 0.0 and symbol_name in _NOISE_REFS:
+            return False
+        return True
+
     def impact_radius(
         self,
         chunk_id: str | None = None,
@@ -315,6 +340,8 @@ class SymbolGraphManager:
         path_filter: str | None = None,
         summary_mode: bool = False,
         top_n_files: int = 25,
+        significance_threshold: float = 0.0,
+        exclude_symbols: list[str] | None = None,
     ) -> dict[str, Any]:
         """Find all chunks affected by a change to a chunk or file (BFS).
 
@@ -349,6 +376,8 @@ class SymbolGraphManager:
         else:
             return {"error": "Provide chunk_id or document_path"}
 
+        exclude_set = set(exclude_symbols) if exclude_symbols else None
+
         visited: set[str] = set()
         queue = deque((cid, 0) for cid in seed_ids)
 
@@ -368,6 +397,11 @@ class SymbolGraphManager:
             if current_depth < depth:
                 edges = self.storage.get_incoming_edges(current_id)
                 for edge in edges:
+                    sym = edge["symbol_name"]
+                    if not self._is_significant_symbol(
+                        sym, significance_threshold, exclude_set
+                    ):
+                        continue
                     if edge["source_chunk_id"] not in visited:
                         queue.append((edge["source_chunk_id"], current_depth + 1))
 
@@ -416,6 +450,8 @@ class SymbolGraphManager:
             else sum(v["chunk_count"] for v in by_file.values()),
             "affected_files": len(affected_files),
         }
+        if significance_threshold > 0.0:
+            out["significance_threshold"] = significance_threshold
         if compact:
             file_rows = sorted(by_file.values(), key=lambda x: x["path"])
             if summary_mode:
@@ -481,7 +517,12 @@ class SymbolGraphManager:
             "edges": len(edges),
         }
 
-    def coupling(self, document_path: str) -> dict[str, Any]:
+    def coupling(
+        self,
+        document_path: str,
+        significance_threshold: float = 0.0,
+        exclude_symbols: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Find files semantically coupled to a given file via symbol edges.
 
         Queries all symbol edges involving chunks from the target document,
@@ -496,12 +537,18 @@ class SymbolGraphManager:
             }
 
         doc_chunk_ids = {c["chunk_id"] for c in doc_chunks}
+        exclude_set = set(exclude_symbols) if exclude_symbols else None
 
         # Collect edges in both directions
         coupled: dict[str, dict[str, Any]] = {}
         for cid in doc_chunk_ids:
             # Outgoing: this file depends on other files
             for edge in self.storage.get_outgoing_edges(cid):
+                sym = edge["symbol_name"]
+                if not self._is_significant_symbol(
+                    sym, significance_threshold, exclude_set
+                ):
+                    continue
                 target_chunk = self.storage.get_chunk(edge["target_chunk_id"])
                 if not target_chunk:
                     continue
@@ -517,11 +564,16 @@ class SymbolGraphManager:
                         "incoming": 0,
                     },
                 )
-                entry["symbols"].add(edge["symbol_name"])
+                entry["symbols"].add(sym)
                 entry["outgoing"] += 1
 
             # Incoming: other files depend on this file
             for edge in self.storage.get_incoming_edges(cid):
+                sym = edge["symbol_name"]
+                if not self._is_significant_symbol(
+                    sym, significance_threshold, exclude_set
+                ):
+                    continue
                 source_chunk = self.storage.get_chunk(edge["source_chunk_id"])
                 if not source_chunk:
                     continue
@@ -537,7 +589,7 @@ class SymbolGraphManager:
                         "incoming": 0,
                     },
                 )
-                entry["symbols"].add(edge["symbol_name"])
+                entry["symbols"].add(sym)
                 entry["incoming"] += 1
 
         # Build result sorted by total edge count (strongest coupling first)
@@ -550,19 +602,32 @@ class SymbolGraphManager:
                 direction = "depends_on"
             else:
                 direction = "depended_on_by"
+            # Simple semantic score: more unique symbols = higher score,
+            # but penalise if all symbols are generic single words.
+            unique_syms = entry["symbols"]
+            semantic_score: float = float(len(unique_syms))
+            if semantic_score > 0:
+                generic_ratio = sum(
+                    1 for s in unique_syms if s in _NOISE_REFS or len(s) <= 3
+                ) / len(unique_syms)
+                semantic_score = round(semantic_score * (1.0 - generic_ratio), 2)
             results.append(
                 {
                     "path": entry["path"],
-                    "shared_symbols": sorted(entry["symbols"]),
-                    "shared_symbol_count": len(entry["symbols"]),
+                    "shared_symbols": sorted(unique_syms),
+                    "shared_symbol_count": len(unique_syms),
                     "direction": direction,
                     "edge_count": total,
+                    "semantic_score": semantic_score,
                 }
             )
-        results.sort(key=lambda x: x["edge_count"], reverse=True)
+        results.sort(key=lambda x: (-x["semantic_score"], -x["edge_count"]))
 
-        return {
+        out: dict[str, Any] = {
             "document_path": document_path,
             "coupled_files": results,
             "total_coupled": len(results),
         }
+        if significance_threshold > 0.0:
+            out["significance_threshold"] = significance_threshold
+        return out

@@ -154,6 +154,43 @@ class TestSymbolExtractorJavaScript:
         refs = [s for s in syms if s.role == "reference"]
         assert any(s.name == ".active" and s.kind == "css_class" for s in refs)
 
+    def test_bare_function_call_reference(self):
+        """Bare function calls like validatePositiveInt() should be captured."""
+        code = "const result = validatePositiveInt(value);"
+        syms = self.ext.extract(code, "validation.js", "c1", "js")
+        refs = [s for s in syms if s.role == "reference"]
+        assert any(
+            s.name == "validatePositiveInt" and s.kind == "function" for s in refs
+        )
+
+    def test_new_class_reference(self):
+        """new ClassName() should emit a class reference."""
+        code = "const engine = new SteleSemanticMutationEngine();"
+        syms = self.ext.extract(code, "test.js", "c1", "js")
+        refs = [s for s in syms if s.role == "reference"]
+        assert any(
+            s.name == "SteleSemanticMutationEngine" and s.kind == "class" for s in refs
+        )
+
+    def test_bare_call_no_duplicate_with_method_call(self):
+        """obj.method() should only produce one reference, not a duplicate bare call."""
+        code = "algorithms.calculateJaccard(a, b);"
+        syms = self.ext.extract(code, "app.js", "c1", "js")
+        refs = [
+            s for s in syms if s.role == "reference" and s.name == "calculateJaccard"
+        ]
+        assert len(refs) == 1
+        assert refs[0].kind == "function"
+
+    def test_bare_call_skips_keywords(self):
+        """if/for/while/return should not be captured as function references."""
+        code = "if (condition) { return foo(); }"
+        syms = self.ext.extract(code, "app.js", "c1", "js")
+        refs = [s for s in syms if s.role == "reference"]
+        assert not any(s.name == "if" for s in refs)
+        assert not any(s.name == "return" for s in refs)
+        assert any(s.name == "foo" for s in refs)
+
     def test_ts_interface(self):
         code = "export interface Config {}"
         syms = self.ext.extract(code, "types.ts", "c1", "ts")
@@ -614,6 +651,41 @@ class TestEngineSymbolIntegration:
         for row in impact.get("chunks", []):
             assert "user" in row["document_path"]
 
+    def test_impact_radius_significance_threshold(self):
+        """significance_threshold should filter out low-significance edges."""
+        self._write_and_index("lib.js", "function addEdge(a, b) { return true; }\n")
+        self._write_and_index(
+            "app.js", "const { addEdge } = require('./lib');\naddEdge(1, 2);\n"
+        )
+        lib_path = str(Path(self.tmpdir) / "lib.js")
+
+        # Without threshold, we should see the impact
+        impact_all = self.cf.impact_radius(document_path=lib_path, depth=1)
+        assert impact_all["affected_files"] >= 1
+
+        # With threshold, addEdge is filtered out
+        impact_filtered = self.cf.impact_radius(
+            document_path=lib_path, depth=1, significance_threshold=0.1
+        )
+        assert impact_filtered.get("significance_threshold") == 0.1
+        # After filtering the noisy symbol, app.js should no longer appear
+        files = {f["path"] for f in impact_filtered.get("files", [])}
+        assert "app.js" not in files, f"Expected app.js filtered out, got {files}"
+
+    def test_impact_radius_exclude_symbols(self):
+        """exclude_symbols should let users manually suppress specific symbols."""
+        self._write_and_index("lib.js", "function customHelper() { return 1; }\n")
+        self._write_and_index(
+            "app.js",
+            "const { customHelper } = require('./lib');\ncustomHelper();\n",
+        )
+        lib_path = str(Path(self.tmpdir) / "lib.js")
+        impact = self.cf.impact_radius(
+            document_path=lib_path, depth=1, exclude_symbols=["customHelper"]
+        )
+        files = {f["path"] for f in impact.get("files", [])}
+        assert "app.js" not in files
+
     def test_coupling(self):
         self._write_and_index("models.py", "class User:\n    pass\n")
         self._write_and_index(
@@ -633,6 +705,58 @@ class TestEngineSymbolIntegration:
         result = self.cf.coupling("nonexistent.py")
         assert result["total_coupled"] == 0
         assert result["coupled_files"] == []
+
+    def test_coupling_significance_threshold(self):
+        """significance_threshold should reduce false coupling from common symbols."""
+        self._write_and_index("a.js", "function addEdge(x, y) { return x + y; }\n")
+        self._write_and_index("b.js", "function addEdge(x, y) { return x - y; }\n")
+        self._write_and_index(
+            "c.js", "const { addEdge } = require('./a');\naddEdge(1, 2);\n"
+        )
+        a_path = str(Path(self.tmpdir) / "a.js")
+
+        # Without threshold, c.js may couple to both a.js and b.js via addEdge
+        coupled_all = self.cf.coupling(a_path)
+        # With threshold, addEdge is filtered
+        coupled_filtered = self.cf.coupling(a_path, significance_threshold=0.1)
+        assert coupled_filtered.get("significance_threshold") == 0.1
+        # Should have fewer or zero coupled files after filtering
+        assert coupled_filtered["total_coupled"] <= coupled_all["total_coupled"]
+
+    def test_coupling_semantic_score_present(self):
+        """coupling results should include a semantic_score field."""
+        self._write_and_index("models.py", "class User:\n    pass\n")
+        self._write_and_index(
+            "views.py", "from models import User\ndef get_user():\n    return User()\n"
+        )
+        models_path = str(Path(self.tmpdir) / "models.py")
+        result = self.cf.coupling(models_path)
+        assert len(result["coupled_files"]) >= 1
+        first = result["coupled_files"][0]
+        assert "semantic_score" in first
+        assert isinstance(first["semantic_score"], (int, float))
+
+    def test_find_definition_shadow_aware(self):
+        """Multiple definitions of the same symbol in one file should be annotated."""
+        self._write_and_index(
+            "scopes.js",
+            "function mix() { return 1; }\n"
+            "function outer() {\n"
+            "  function mix() { return 2; }\n"
+            "  function inner() {\n"
+            "    function mix() { return 3; }\n"
+            "  }\n"
+            "}\n",
+        )
+        result = self.cf.find_definition("mix")
+        # Should have at least 3 definitions (global + 2 nested)
+        defs = result["definitions"]
+        assert len(defs) >= 3
+        # Each should have shadow annotations
+        for d in defs:
+            assert d.get("shadowed") is True
+            assert "definition_index" in d
+            assert "shadow_count" in d
 
     def test_rebuild_symbol_graph(self):
         self._write_and_index("a.py", "def foo():\n    pass\n")
