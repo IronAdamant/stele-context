@@ -204,22 +204,6 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "project_brief",
-        "description": "Token-efficient orientation: largest files by token count, "
-        "extension histogram, totals, index_health. "
-        "USE WHEN: first pass on a repo before deep search or indexing.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "top_n": {
-                    "type": "integer",
-                    "description": "Max files in largest_files_by_tokens (default 40).",
-                    "default": 40,
-                },
-            },
-        },
-    },
-    {
         "name": "doctor",
         "description": "One-screen health snapshot: version, Python, storage paths, "
         "counts, index_health, environment_check issues, compact map preview. "
@@ -386,16 +370,28 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
     },
     # -- Secondary: Annotations -----------------------------------------------
     {
-        "name": "annotate",
-        "description": "Add a metadata annotation to a document or chunk. "
-        "USE WHEN: tagging code for later retrieval (TODO, deprecated, "
-        "needs-review), recording audit findings.",
+        "name": "annotations",
+        "description": "Unified annotation lifecycle tool. "
+        "Actions: create, get, delete, update, search, bulk_create. "
+        "USE WHEN: tagging code, recording audit findings, or querying notes.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "create",
+                        "get",
+                        "delete",
+                        "update",
+                        "search",
+                        "bulk_create",
+                    ],
+                    "description": "Annotation operation to perform",
+                },
                 "target": {
                     "type": "string",
-                    "description": "Document path or chunk ID to annotate",
+                    "description": "Document path or chunk ID (create/get)",
                 },
                 "target_type": {
                     "type": "string",
@@ -404,103 +400,22 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                 },
                 "content": {
                     "type": "string",
-                    "description": "Annotation text",
+                    "description": "Annotation text (create/update)",
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Optional tags for categorization",
                 },
-            },
-            "required": ["target", "target_type", "content"],
-        },
-    },
-    {
-        "name": "get_annotations",
-        "description": "Retrieve annotations, optionally filtered by target, type, or tags",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "target": {
-                    "type": "string",
-                    "description": "Filter by document path or chunk ID",
-                },
-                "target_type": {
-                    "type": "string",
-                    "enum": ["document", "chunk"],
-                    "description": "Filter by target type",
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Filter by tags (any match)",
-                },
-            },
-        },
-    },
-    {
-        "name": "delete_annotation",
-        "description": "Delete an annotation by ID",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
                 "annotation_id": {
                     "type": "integer",
-                    "description": "Annotation ID to delete",
+                    "description": "Annotation ID (delete/update)",
                 },
-            },
-            "required": ["annotation_id"],
-        },
-    },
-    {
-        "name": "update_annotation",
-        "description": "Update an existing annotation's content and/or tags",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "annotation_id": {
-                    "type": "integer",
-                    "description": "Annotation ID to update",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "New annotation text",
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "New tags (replaces existing)",
-                },
-            },
-            "required": ["annotation_id"],
-        },
-    },
-    {
-        "name": "search_annotations",
-        "description": "Search annotation content text (substring match)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Text to search for in annotation content",
+                    "description": "Search query (search action)",
                 },
-                "target_type": {
-                    "type": "string",
-                    "enum": ["document", "chunk"],
-                    "description": "Filter by target type",
-                },
-            },
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "bulk_annotate",
-        "description": "Annotate multiple targets in one call",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "annotations": {
+                "items": {
                     "type": "array",
                     "items": {
                         "type": "object",
@@ -511,17 +426,14 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                                 "enum": ["document", "chunk"],
                             },
                             "content": {"type": "string"},
-                            "tags": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
+                            "tags": {"type": "array", "items": {"type": "string"}},
                         },
                         "required": ["target", "target_type", "content"],
                     },
-                    "description": "List of annotations to create",
+                    "description": "List of annotations for bulk_create",
                 },
             },
-            "required": ["annotations"],
+            "required": ["action"],
         },
     },
     # -- Secondary: History & Stats -------------------------------------------
@@ -561,19 +473,52 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "stats",
-        "description": "Stele statistics: storage counts, vector index stats, config, "
-        "index_health (same fields as map, including alerts and staleness hints), "
-        "and project_root",
+        "name": "query",
+        "description": "Composite retrieval that merges semantic search, symbol graph lookups, "
+        "and text grep into one result list. Returns deduplicated chunks with source provenance. "
+        "USE WHEN: you want the broadest possible coverage for a natural-language question.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "compact": {
-                    "type": "boolean",
-                    "description": "Smaller payload for quick agent orientation.",
-                    "default": False,
+                "query": {
+                    "type": "string",
+                    "description": "Natural language query",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Max results to return (default: 10)",
+                    "default": 10,
+                },
+                "path_prefix": {
+                    "type": "string",
+                    "description": "Optional project-relative path prefix filter",
                 },
             },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "batch",
+        "description": "Execute multiple engine operations in sequence under a single write lock. "
+        "Each operation is {'method': '...', 'params': {...}}. Unknown methods or errors are captured "
+        "and execution continues. USE WHEN: chaining index + annotate + embed in one round-trip.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "operations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "method": {"type": "string"},
+                            "params": {"type": "object"},
+                        },
+                        "required": ["method"],
+                    },
+                    "description": "List of operations to execute",
+                },
+            },
+            "required": ["operations"],
         },
     },
     # -- Secondary: Session & KV Cache ----------------------------------------

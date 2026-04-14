@@ -281,19 +281,33 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
     },
     # -- Infrastructure: Document Locking -------------------------------------
     {
-        "name": "acquire_document_lock",
-        "description": "Acquire exclusive write lock on a document (multi-agent). "
-        "Auto-acquired by MCP server when agent_id is set.",
+        "name": "document_lock",
+        "description": "Unified document lock lifecycle tool. "
+        "Actions: acquire, release, refresh, status, release_all, reap, conflicts. "
+        "USE WHEN: claiming a file before editing, checking ownership, or cleaning up locks.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "acquire",
+                        "release",
+                        "refresh",
+                        "status",
+                        "release_all",
+                        "reap",
+                        "conflicts",
+                    ],
+                    "description": "Lock operation to perform",
+                },
                 "document_path": {
                     "type": "string",
-                    "description": "Document path to lock",
+                    "description": "Document path (required for acquire/release/refresh/status)",
                 },
                 "agent_id": {
                     "type": "string",
-                    "description": "Agent claiming ownership",
+                    "description": "Agent identifier (required for acquire/release/refresh/release_all)",
                 },
                 "ttl": {
                     "type": "number",
@@ -302,109 +316,16 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
                 },
                 "force": {
                     "type": "boolean",
-                    "description": "Force-steal lock from another agent",
+                    "description": "Force-steal lock from another agent (acquire only)",
                     "default": False,
-                },
-            },
-            "required": ["document_path", "agent_id"],
-        },
-    },
-    {
-        "name": "refresh_document_lock",
-        "description": "Refresh lock TTL without releasing — prevents expiry during long operations",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "document_path": {
-                    "type": "string",
-                    "description": "Document path whose lock to refresh",
-                },
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent that holds the lock",
-                },
-                "ttl": {
-                    "type": "number",
-                    "description": "New TTL in seconds (default: keep current)",
-                },
-            },
-            "required": ["document_path", "agent_id"],
-        },
-    },
-    {
-        "name": "release_document_lock",
-        "description": "Release write lock on a document",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "document_path": {
-                    "type": "string",
-                    "description": "Document path to unlock",
-                },
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent releasing ownership",
-                },
-            },
-            "required": ["document_path", "agent_id"],
-        },
-    },
-    {
-        "name": "get_document_lock_status",
-        "description": "Check if a document is locked and by which agent",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "document_path": {
-                    "type": "string",
-                    "description": "Document path to check",
-                },
-            },
-            "required": ["document_path"],
-        },
-    },
-    {
-        "name": "release_agent_locks",
-        "description": "Release all document locks held by an agent (cleanup on disconnect)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent whose locks to release",
-                },
-            },
-            "required": ["agent_id"],
-        },
-    },
-    {
-        "name": "get_conflicts",
-        "description": "Get lock conflict audit log for documents or agents",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "document_path": {
-                    "type": "string",
-                    "description": "Filter by document path",
-                },
-                "agent_id": {
-                    "type": "string",
-                    "description": "Filter by agent ID",
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Max entries to return",
+                    "description": "Max entries for conflicts action (default: 20)",
                     "default": 20,
                 },
             },
-        },
-    },
-    {
-        "name": "reap_expired_locks",
-        "description": "Clear all expired document locks and return what was reaped",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
+            "required": ["action"],
         },
     },
     # -- Infrastructure: Agent Coordination -----------------------------------
@@ -466,26 +387,6 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
     },
     # -- Secondary: Semantic Enrichment ---------------------------------------
     {
-        "name": "store_semantic_summary",
-        "description": "Store semantic summary for a chunk to improve search quality. "
-        "USE WHEN: you understand what a chunk does and want to improve "
-        "future search results for it.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "chunk_id": {
-                    "type": "string",
-                    "description": "Chunk ID to annotate",
-                },
-                "summary": {
-                    "type": "string",
-                    "description": "Semantic description (e.g. 'JWT middleware that validates tokens')",
-                },
-            },
-            "required": ["chunk_id", "summary"],
-        },
-    },
-    {
         "name": "bulk_store_summaries",
         "description": "Batch-store per-chunk semantic summaries. Each chunk gets "
         "its own agent signature computed from its summary. "
@@ -504,23 +405,6 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "store_chunk_agent_notes",
-        "description": "Attach JSON or text notes to a chunk (facts, invariants, decisions). "
-        "Stored in SQLite; surfaced in get_context. Does not replace Tier 2 summaries. "
-        "USE WHEN: persisting agent scratchpad tied to a specific chunk.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "chunk_id": {"type": "string"},
-                "notes": {
-                    "type": "string",
-                    "description": "JSON string or plain text (null clears).",
-                },
-            },
-            "required": ["chunk_id"],
-        },
-    },
-    {
         "name": "bulk_store_chunk_agent_notes",
         "description": "Batch-set agent_notes for many chunk IDs.",
         "inputSchema": {
@@ -533,26 +417,6 @@ TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
                 },
             },
             "required": ["notes"],
-        },
-    },
-    {
-        "name": "store_embedding",
-        "description": "Store a raw embedding vector for a chunk — for agents with "
-        "embedding API access",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "chunk_id": {
-                    "type": "string",
-                    "description": "Chunk ID to update",
-                },
-                "vector": {
-                    "type": "array",
-                    "items": {"type": "number"},
-                    "description": "Embedding vector (normalized to unit length)",
-                },
-            },
-            "required": ["chunk_id", "vector"],
         },
     },
     {

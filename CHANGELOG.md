@@ -8,9 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`query`** — Composite retrieval tool that merges semantic search, symbol graph lookups, and text grep into a single deduplicated result list with source provenance.
+- **`batch`** — Multi-operation tool that executes a sequence of engine methods in one round-trip.
 - **`bulk_store_embeddings`** — Batch API for storing raw embedding vectors across multiple chunks at once. Useful for large dynamic symbol meshes and Tier-2 semantic enrichment workflows.
 - **`impact_radius(..., symbol=...)`** — Analyze blast radius by symbol name, enabling impact analysis for dynamic/runtime symbols that have no on-disk file (e.g. plugin hooks registered via `register_dynamic_symbols`).
 - **`coupling` dynamic symbol fallback** — When a document_path has no indexed chunks, `coupling` now falls back to dynamic symbols registered for that path, allowing coupling analysis for synthetic/runtime documents.
+
+### Changed
+- **Simplified MCP surface** — Consolidated tool families to reduce LLM cognitive load:
+  - `document_lock` replaces 7 separate locking tools (`acquire_document_lock`, `release_document_lock`, `refresh_document_lock`, `get_document_lock_status`, `release_agent_locks`, `get_conflicts`, `reap_expired_locks`).
+  - `annotations` replaces 6 separate annotation tools (`annotate`, `get_annotations`, `delete_annotation`, `update_annotation`, `search_annotations`, `bulk_annotate`).
+  - Singleton enrichment tools removed from MCP: `store_semantic_summary`, `store_embedding`, `store_chunk_agent_notes` (bulk variants and `llm_embed` remain).
+  - Orientation tools removed from MCP: `stats`, `project_brief` (`doctor` and `map` remain; Python API unchanged).
+  - Standard mode now registers **42 tools** (down from 56).
+- **MCP Lite mode** — Set `STELE_MCP_MODE=lite` to expose only ~15 high-leverage tools for simpler agents.
+- **MCP Full mode** — Set `STELE_MCP_MODE=full` to restore all deprecated singleton tools for backward compatibility.
 
 ### Fixed
 - **MCP `agent_id` injection** — The MCP bridge no longer injects `agent_id` into tools that do not accept it (e.g. `llm_embed`, `store_embedding`, `bulk_store_embeddings`). Fixes `TypeError: got an unexpected keyword argument 'agent_id'` when calling embedding tools through the MCP server.

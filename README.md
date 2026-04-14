@@ -82,7 +82,7 @@ pip install stele-context[mcp]
 
 > **Tip:** If you installed in a virtualenv, use the full path: run `which stele-context` to find it.
 
-Once connected, your agent gets 56+ tools for searching, indexing, and navigating your code — it'll use them automatically when they're helpful.
+Once connected, your agent gets **42 tools** for searching, indexing, and navigating your code — it'll use them automatically when they're helpful. (Set `STELE_MCP_MODE=lite` for ~15 essential tools, or `STELE_MCP_MODE=full` for the complete surface.)
 
 ## Who Is This For?
 
@@ -101,11 +101,12 @@ If you've ever wished your AI coding assistant had a persistent memory for your 
 | What you want | How Stele helps |
 |---------------|-----------------|
 | "Don't re-read files that haven't changed" | `get_context` returns cached content for unchanged files, only re-reads modified ones |
-| "Find where this function is used" | `find_references` traces all imports and usages across your project (including JS bare calls and `new ClassName()`) |
+| "Ask a broad question about my code"" | `query` combines semantic search, symbol graph, and text grep into one deduplicated result list |
 | "What files would break if I change this?" | `impact_radius` follows the dependency chain to find affected files; `significance_threshold` filters out noise from common symbols like `push`/`addEdge`. Also works with `symbol=` for dynamic/runtime hooks |
 | "Which files are tightly coupled?" | `coupling` shows shared symbols with a `semantic_score` that discounts generic boilerplate |
 | "Search my code by what it does, not just keywords" | `search` combines meaning-based and keyword matching |
 | "Find every line matching a pattern" | `agent_grep` does text/regex search with token-budgeted results |
+| "Run several operations in one round-trip" | `batch` executes multiple tool calls under a single write lock |
 
 ### For power users
 

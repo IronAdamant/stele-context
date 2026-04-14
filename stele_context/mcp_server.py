@@ -123,7 +123,8 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
 
     def _build_tool_map(self) -> dict[str, Any]:
         """Build tool name -> callable mapping via tool_registry."""
-        return build_tool_map(self.stele, get_modality_flags())
+        mode = os.environ.get("STELE_MCP_MODE", "standard")
+        return build_tool_map(self.stele, get_modality_flags(), mode=mode)
 
     def _handle_tools_discovery(self) -> None:
         """Return list of available tools.

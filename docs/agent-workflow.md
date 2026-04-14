@@ -16,7 +16,7 @@ Storage is **persistent** (project `.stele-context/` by default), so later sessi
 **Goal**: Get the codebase into the index.
 
 - **MCP / HTTP**: `index` with paths (project root or globs as supported), or CLI: `stele-context index <paths>`.
-- **Orient cheaply** (token-bounded): MCP/CLI **`doctor`** (one-screen health + compact map preview) or **`project_brief`** (largest files, extension counts). CLI: `stele-context doctor`, `stele-context project-brief`.
+- **Orient cheaply** (token-bounded): MCP/CLI **`doctor`** (one-screen health + compact map preview). CLI: `stele-context doctor`.
 - Optionally run **`map`** (`compact=true` for large repos) or **`stats`** (`compact=true`) to confirm **index_health**.
 
 **Python** (`Stele` engine):
@@ -66,7 +66,7 @@ Rough rule: **symbols first** for identifiers; **hybrid search** for concepts; *
 
 ## Tier 2 bootstrap (two passes)
 
-1. **Index** hot paths (or whole repo), then run **`search`** or **`project_brief`** to see where tokens live.
+1. **Index** hot paths (or whole repo), then run **`search`** or **`map`** (`compact=true`) to see where tokens live.
 2. **Enrich**: for top chunks you care about, call **`bulk_store_summaries`** with `{chunk_id: summary}` (or **`index_documents(..., summaries=)`** at file level first). Re-run **`search`** — Tier 2 boosts retrieval quality without new dependencies.
 
 ## Chunk agent notes (non-vector memory)

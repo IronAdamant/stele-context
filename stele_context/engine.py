@@ -928,6 +928,274 @@ class Stele:
         with self._lock.read_lock():
             return self.storage.get_dynamic_symbols(agent_id)
 
+    # -- Unified document locking ---------------------------------------------
+
+    def document_lock(
+        self,
+        action: str,
+        document_path: str | None = None,
+        agent_id: str | None = None,
+        ttl: float | None = None,
+        force: bool = False,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Unified document lock lifecycle tool.
+
+        Actions:
+          - acquire: acquire exclusive lock on document_path
+          - release: release lock on document_path
+          - refresh: refresh TTL on document_path
+          - status: get lock status for document_path
+          - release_all: release all locks held by agent_id
+          - reap: clear expired locks globally
+          - conflicts: get conflict audit log
+        """
+        action = action.lower()
+        if action == "acquire":
+            if not document_path or not agent_id:
+                return {"error": "acquire requires document_path and agent_id"}
+            return self.acquire_document_lock(
+                document_path, agent_id, ttl or 300.0, force
+            )
+        if action == "release":
+            if not document_path or not agent_id:
+                return {"error": "release requires document_path and agent_id"}
+            return self.release_document_lock(document_path, agent_id)
+        if action == "refresh":
+            if not document_path or not agent_id:
+                return {"error": "refresh requires document_path and agent_id"}
+            return self.refresh_document_lock(document_path, agent_id, ttl)
+        if action == "status":
+            if not document_path:
+                return {"error": "status requires document_path"}
+            return self.get_document_lock_status(document_path)
+        if action == "release_all":
+            if not agent_id:
+                return {"error": "release_all requires agent_id"}
+            return self.release_agent_locks(agent_id)
+        if action == "reap":
+            return self.reap_expired_locks()
+        if action == "conflicts":
+            return {
+                "conflicts": self.get_conflicts(
+                    document_path=document_path, agent_id=agent_id, limit=limit
+                )
+            }
+        return {"error": f"Unknown action: {action}"}
+
+    # -- Unified annotations --------------------------------------------------
+
+    def annotations(
+        self,
+        action: str,
+        target: str | None = None,
+        target_type: str | None = None,
+        content: str | None = None,
+        tags: list[str] | None = None,
+        annotation_id: int | None = None,
+        query: str | None = None,
+        items: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Unified annotation lifecycle tool.
+
+        Actions:
+          - create: create a single annotation (requires target, target_type, content)
+          - get: retrieve annotations (optionally filtered by target, target_type, tags)
+          - delete: delete by annotation_id
+          - update: update by annotation_id (content and/or tags)
+          - search: search annotation content by substring query
+          - bulk_create: create many annotations at once (requires items)
+        """
+        action = action.lower()
+        if action == "create":
+            if not target or not target_type or content is None:
+                return {"error": "create requires target, target_type, and content"}
+            return self.annotate(target, target_type, content, tags)
+        if action == "get":
+            return {"annotations": self.get_annotations(target, target_type, tags)}
+        if action == "delete":
+            if annotation_id is None:
+                return {"error": "delete requires annotation_id"}
+            return self.delete_annotation(annotation_id)
+        if action == "update":
+            if annotation_id is None:
+                return {"error": "update requires annotation_id"}
+            return self.update_annotation(annotation_id, content, tags)
+        if action == "search":
+            if not query:
+                return {"error": "search requires query"}
+            return {"annotations": self.search_annotations(query, target_type)}
+        if action == "bulk_create":
+            if not items:
+                return {"error": "bulk_create requires items"}
+            return self.bulk_annotate(items)
+        return {"error": f"Unknown action: {action}"}
+
+    # -- Composite query ------------------------------------------------------
+
+    def query(
+        self,
+        query: str,
+        top_k: int = 10,
+        path_prefix: str | None = None,
+    ) -> dict[str, Any]:
+        """Composite retrieval that merges symbol, semantic, and text search.
+
+        Runs in parallel:
+          1. Semantic search (`search`)
+          2. Symbol lookup (`find_references` / `find_definition` for extracted identifiers)
+          3. Text grep (`agent_grep`) for high-signal matches
+
+        Returns deduplicated chunks with source provenance.
+        """
+        from stele_context.search_engine import extract_query_identifiers
+
+        results: list[dict[str, Any]] = []
+        seen_chunks: set[str] = set()
+
+        # 1. Semantic search
+        try:
+            semantic = self.search(
+                query,
+                top_k=top_k,
+                path_prefix=path_prefix,
+                compact=True,
+            )
+            if isinstance(semantic, dict):
+                semantic = semantic.get("results", [])
+            for r in semantic:
+                cid = r.get("chunk_id")
+                if cid and cid not in seen_chunks:
+                    seen_chunks.add(cid)
+                    results.append({**r, "source": "semantic_search"})
+        except Exception:
+            pass
+
+        # 2. Symbol lookups for identifiers in the query
+        idents = extract_query_identifiers(query)
+        for ident in idents[:3]:  # Limit to top 3 to avoid explosion
+            try:
+                refs = self.find_references(ident)
+                for ref in refs.get("definitions", []):
+                    cid = ref.get("chunk_id")
+                    if cid and cid not in seen_chunks:
+                        seen_chunks.add(cid)
+                        chunk = self.storage.get_chunk(cid)
+                        if chunk:
+                            results.append(
+                                {
+                                    "chunk_id": cid,
+                                    "document_path": ref.get("document_path", ""),
+                                    "content": (chunk.get("content") or "")[:300],
+                                    "source": "symbol_graph",
+                                    "symbol": ident,
+                                }
+                            )
+                for ref in refs.get("references", []):
+                    cid = ref.get("chunk_id")
+                    if cid and cid not in seen_chunks:
+                        seen_chunks.add(cid)
+                        chunk = self.storage.get_chunk(cid)
+                        if chunk:
+                            results.append(
+                                {
+                                    "chunk_id": cid,
+                                    "document_path": ref.get("document_path", ""),
+                                    "content": (chunk.get("content") or "")[:300],
+                                    "source": "symbol_graph",
+                                    "symbol": ident,
+                                }
+                            )
+            except Exception:
+                pass
+
+        # 3. Text grep for the full query phrase (agent-friendly, token-capped)
+        try:
+            grep_res = self.agent_grep(
+                pattern=query,
+                max_tokens=2000,
+                session_id=None,
+            )
+            for file_match in grep_res.get("results", []):
+                for match in file_match.get("matches", []):
+                    cid = match.get("chunk_id")
+                    if cid and cid not in seen_chunks:
+                        seen_chunks.add(cid)
+                        results.append(
+                            {
+                                "chunk_id": cid,
+                                "document_path": file_match.get("document_path", ""),
+                                "content": match.get("line", "")[:300],
+                                "source": "text_match",
+                            }
+                        )
+        except Exception:
+            pass
+
+        return {
+            "query": query,
+            "results": results[:top_k],
+            "sources": {
+                "semantic_search": sum(
+                    1 for r in results if r.get("source") == "semantic_search"
+                ),
+                "symbol_graph": sum(
+                    1 for r in results if r.get("source") == "symbol_graph"
+                ),
+                "text_match": sum(
+                    1 for r in results if r.get("source") == "text_match"
+                ),
+            },
+        }
+
+    # -- Batch operations -----------------------------------------------------
+
+    def batch(
+        self,
+        operations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Execute a sequence of engine operations in one round-trip.
+
+        Each operation: {"method": "index_documents", "params": {"paths": [...]}}
+        Unknown methods or errors are captured and the batch continues.
+
+        Note: individual engine methods manage their own locking, so operations
+        are sequential but not wrapped in a single global lock.
+        """
+        results: list[dict[str, Any]] = []
+        for idx, op in enumerate(operations):
+            method = op.get("method", "")
+            params = op.get("params", {})
+            func = getattr(self, method, None)
+            if not callable(func):
+                results.append(
+                    {
+                        "index": idx,
+                        "method": method,
+                        "error": f"Unknown method: {method}",
+                    }
+                )
+                continue
+            try:
+                result = func(**params)
+                results.append(
+                    {
+                        "index": idx,
+                        "method": method,
+                        "success": True,
+                        "result": result,
+                    }
+                )
+            except Exception as e:
+                results.append(
+                    {
+                        "index": idx,
+                        "method": method,
+                        "error": str(e),
+                    }
+                )
+        return {"operations": results, "total": len(operations)}
+
     # -- Document ownership & conflict prevention -----------------------------
 
     def acquire_document_lock(

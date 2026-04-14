@@ -95,7 +95,8 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
     server_agent_id = f"stele-context-mcp-{os.getpid()}"
 
     # Build tool dispatch map once (not per request)
-    tool_map = build_tool_map(engine, get_modality_flags())
+    mode = os.environ.get("STELE_MCP_MODE", "standard")
+    tool_map = build_tool_map(engine, get_modality_flags(), mode=mode)
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:

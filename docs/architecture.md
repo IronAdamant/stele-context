@@ -146,7 +146,7 @@ Multiple AI agents can share one Stele index safely. Protection is layered:
 |-------|-----------|-----------------|
 | **Thread safety** | Read-write lock (`RWLock`) | Concurrent reads allowed, writes are exclusive |
 | **Process safety** | File locking (`fcntl.flock` on Unix, `msvcrt.locking` on Windows) | Two processes writing the same index file |
-| **Document ownership** | `acquire_document_lock(path, agent_id, ttl)` | Two agents editing the same file — locks auto-expire after TTL |
+| **Document ownership** | `document_lock(action="acquire", document_path, agent_id, ttl)` | Two agents editing the same file — locks auto-expire after TTL |
 | **Optimistic locking** | `doc_version` column, compare-and-swap on write | Silent overwrites — rejects write if version changed since last read |
 | **Cross-worktree coordination** | Shared SQLite DB in git common dir | Agents in different worktrees stepping on each other |
 | **Conflict audit log** | `document_conflicts` table | Forensics — who overwrote what and when |
@@ -155,21 +155,21 @@ MCP servers auto-register an agent ID and inject it into write operations, so co
 
 ## MCP Tool Reference
 
-The HTTP REST server and MCP stdio server expose the same 55 tools via a unified registry (`tool_registry.py`).
+The HTTP REST server and MCP stdio server expose the same tools via a unified registry (`tool_registry.py`). Standard mode registers 42 MCP tools; `STELE_MCP_MODE=lite` registers ~15; `STELE_MCP_MODE=full` restores deprecated singleton tools.
 
 | Category | Tools |
 |----------|-------|
 | **Indexing** | `index`, `remove`, `detect_changes`, `detect_modality`, `get_supported_formats` |
-| **Search** | `agent_grep`, `search_text`, `search`, `get_context`, `get_relevant_kv`, `get_search_history`, `get_session_read_files` |
-| **Annotations** | `annotate`, `get_annotations`, `delete_annotation`, `update_annotation`, `search_annotations`, `bulk_annotate` |
+| **Search** | `query`, `agent_grep`, `search_text`, `search`, `get_context`, `get_relevant_kv`, `get_search_history`, `get_session_read_files` |
+| **Annotations** | `annotations` (create/get/update/delete/search/bulk_create) |
 | **Sessions** | `save_kv_state`, `rollback`, `prune_chunks`, `list_sessions` |
 | **Symbols** | `find_references`, `find_definition`, `impact_radius`, `coupling`, `rebuild_symbols`, `stale_chunks` |
-| **Locking** | `acquire_document_lock`, `release_document_lock`, `refresh_document_lock`, `get_document_lock_status`, `release_agent_locks`, `reap_expired_locks` |
+| **Locking** | `document_lock` (acquire/release/refresh/status/reap/release_agent/conflicts) |
 | **History** | `get_conflicts`, `get_chunk_history`, `get_notifications`, `history`, `prune_history` |
-| **Stats** | `stats`, `map`, `doctor`, `project_brief` |
-| **Embeddings** | `store_semantic_summary`, `store_embedding`, `bulk_store_summaries`, `llm_embed`, `store_chunk_agent_notes`, `bulk_store_chunk_agent_notes` |
+| **Stats** | `map`, `doctor` |
+| **Embeddings** | `bulk_store_summaries`, `llm_embed`, `bulk_store_embeddings`, `bulk_store_chunk_agent_notes` |
 | **Dynamic symbols** | `register_dynamic_symbols`, `get_dynamic_symbols`, `remove_dynamic_symbols` |
-| **Utilities** | `list_agents`, `environment_check`, `clean_bytecache` |
+| **Utilities** | `batch`, `list_agents`, `environment_check`, `clean_bytecache` |
 
 ## Performance Benchmarks
 

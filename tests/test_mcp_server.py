@@ -74,8 +74,8 @@ class TestHTTPServer:
             assert "remove_dynamic_symbols" in tool_names
             assert "get_dynamic_symbols" in tool_names
             assert (
-                len(tool_names) == 56
-            )  # +3: get_search_history, get_session_read_files, bulk_store_embeddings
+                len(tool_names) == 42
+            )  # simplified surface: annotations, document_lock, query, batch
         finally:
             server.stop()
 
@@ -369,6 +369,131 @@ class TestHTTPServer:
             assert status == 200
             assert data["success"] is True
             assert data["result"]["stored"] >= 1
+        finally:
+            server.stop()
+
+    def test_document_lock(self, tmp_path):
+        """document_lock unified tool via HTTP."""
+        server, url, _ = self._start_server(tmp_path)
+        try:
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "document_lock",
+                    "parameters": {
+                        "action": "acquire",
+                        "document_path": "test.py",
+                        "agent_id": "test-agent",
+                    },
+                },
+            )
+            assert status == 200
+            assert data["success"] is True
+
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "document_lock",
+                    "parameters": {
+                        "action": "status",
+                        "document_path": "test.py",
+                    },
+                },
+            )
+            assert status == 200
+            assert data["success"] is True
+        finally:
+            server.stop()
+
+    def test_annotations(self, tmp_path):
+        """annotations unified tool via HTTP."""
+        server, url, cf = self._start_server(tmp_path)
+        try:
+            test_file = tmp_path / "note.py"
+            test_file.write_text("x = 1\n")
+            cf.index_documents([str(test_file)])
+
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "annotations",
+                    "parameters": {
+                        "action": "create",
+                        "target": str(test_file),
+                        "target_type": "document",
+                        "content": "Test note",
+                    },
+                },
+            )
+            assert status == 200
+            assert data["success"] is True
+
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "annotations",
+                    "parameters": {
+                        "action": "search",
+                        "query": "Test",
+                    },
+                },
+            )
+            assert status == 200
+            assert data["success"] is True
+            assert len(data["result"]["annotations"]) >= 1
+        finally:
+            server.stop()
+
+    def test_query(self, tmp_path):
+        """query composite tool via HTTP."""
+        server, url, cf = self._start_server(tmp_path)
+        try:
+            test_file = tmp_path / "helper.py"
+            test_file.write_text("def helper():\n    pass\n")
+            cf.index_documents([str(test_file)])
+
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "query",
+                    "parameters": {"query": "helper function", "top_k": 5},
+                },
+            )
+            assert status == 200
+            assert data["success"] is True
+            assert "results" in data["result"]
+            assert "sources" in data["result"]
+        finally:
+            server.stop()
+
+    def test_batch(self, tmp_path):
+        """batch multi-operation tool via HTTP."""
+        server, url, _ = self._start_server(tmp_path)
+        try:
+            test_file = tmp_path / "batch.py"
+            test_file.write_text("y = 2\n")
+
+            status, data = self._post(
+                f"{url}/call",
+                {
+                    "tool": "batch",
+                    "parameters": {
+                        "operations": [
+                            {
+                                "method": "index_documents",
+                                "params": {"paths": [str(test_file)]},
+                            },
+                            {
+                                "method": "search",
+                                "params": {"query": "y = 2", "top_k": 5},
+                            },
+                        ]
+                    },
+                },
+            )
+            assert status == 200
+            assert data["success"] is True
+            assert len(data["result"]["operations"]) == 2
         finally:
             server.stop()
 

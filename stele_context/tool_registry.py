@@ -24,19 +24,64 @@ WRITE_TOOLS = frozenset(
         "detect_changes",
         "remove",
         "save_kv_state",
-        "store_semantic_summary",
-        "store_embedding",
         "bulk_store_embeddings",
         "llm_embed",
         "bulk_store_summaries",
-        "store_chunk_agent_notes",
         "bulk_store_chunk_agent_notes",
-        "acquire_document_lock",
-        "release_document_lock",
-        "refresh_document_lock",
-        "release_agent_locks",
+        "document_lock",
         "register_dynamic_symbols",
         "remove_dynamic_symbols",
+        "annotations",
+        "batch",
+    }
+)
+
+# Deprecated singleton tools kept in "full" mode for backward compatibility.
+_FULL_MODE_ONLY_TOOLS = frozenset(
+    {
+        "stats",
+        "project_brief",
+        "annotate",
+        "get_annotations",
+        "delete_annotation",
+        "update_annotation",
+        "search_annotations",
+        "bulk_annotate",
+        "acquire_document_lock",
+        "refresh_document_lock",
+        "release_document_lock",
+        "get_document_lock_status",
+        "release_agent_locks",
+        "get_conflicts",
+        "reap_expired_locks",
+        "store_semantic_summary",
+        "store_embedding",
+        "store_chunk_agent_notes",
+    }
+)
+
+# Lite mode: highest-leverage tools only.
+_LITE_TOOLS = frozenset(
+    {
+        "index",
+        "remove",
+        "detect_changes",
+        "search",
+        "agent_grep",
+        "search_text",
+        "query",
+        "find_references",
+        "find_definition",
+        "impact_radius",
+        "coupling",
+        "get_context",
+        "doctor",
+        "map",
+        "document_lock",
+        "annotations",
+        "register_dynamic_symbols",
+        "remove_dynamic_symbols",
+        "llm_embed",
     }
 )
 
@@ -44,6 +89,7 @@ WRITE_TOOLS = frozenset(
 def build_tool_map(
     engine: Any,
     modality_flags: dict[str, bool] | None = None,
+    mode: str = "standard",
 ) -> dict[str, Callable[..., Any]]:
     """Build a {tool_name: callable} dispatch map from a Stele engine.
 
@@ -56,6 +102,9 @@ def build_tool_map(
         ``{"image": True, "pdf": False}``.  When provided, the
         ``detect_modality`` and ``get_supported_formats`` utility
         tools are included.
+    mode:
+        "standard" (default, simplified surface), "lite" (~15 core tools),
+        or "full" (includes deprecated singleton tools for backward compat).
     """
     tool_map: dict[str, Callable[..., Any]] = {
         # Core operations
@@ -64,20 +113,13 @@ def build_tool_map(
         "search": engine.search,
         "get_context": engine.get_context,
         "detect_changes": engine.detect_changes_and_update,
-        # Annotations
-        "annotate": engine.annotate,
-        "get_annotations": engine.get_annotations,
-        "delete_annotation": engine.delete_annotation,
-        "update_annotation": engine.update_annotation,
-        "search_annotations": engine.search_annotations,
-        "bulk_annotate": engine.bulk_annotate,
-        # History & stats
+        # Unified annotations
+        "annotations": engine.annotations,
+        # History
         "prune_history": engine.prune_history,
         "map": engine.get_map,
-        "project_brief": engine.get_project_brief,
         "doctor": engine.doctor_snapshot,
         "history": engine.get_history,
-        "stats": engine.get_stats,
         # Session
         "get_relevant_kv": engine.get_relevant_kv,
         "save_kv_state": engine.save_kv_state,
@@ -95,27 +137,18 @@ def build_tool_map(
         "register_dynamic_symbols": engine.register_dynamic_symbols,
         "remove_dynamic_symbols": engine.remove_dynamic_symbols,
         "get_dynamic_symbols": engine.get_dynamic_symbols,
-        # Document locking
-        "acquire_document_lock": engine.acquire_document_lock,
-        "refresh_document_lock": engine.refresh_document_lock,
-        "release_document_lock": engine.release_document_lock,
-        "get_document_lock_status": engine.get_document_lock_status,
-        "release_agent_locks": engine.release_agent_locks,
-        "get_conflicts": engine.get_conflicts,
-        "reap_expired_locks": engine.reap_expired_locks,
+        # Unified document locking
+        "document_lock": engine.document_lock,
         # Agent coordination
         "list_agents": engine.list_agents,
         "get_notifications": engine.get_notifications,
         # Environment
         "environment_check": engine.check_environment,
         "clean_bytecache": engine.clean_bytecache,
-        # Embeddings
-        "store_semantic_summary": engine.store_semantic_summary,
-        "store_embedding": engine.store_embedding,
+        # Embeddings (bulk only in standard mode)
         "bulk_store_embeddings": engine.bulk_store_embeddings,
         "llm_embed": engine.llm_embed,
         "bulk_store_summaries": engine.bulk_store_summaries,
-        "store_chunk_agent_notes": engine.store_chunk_agent_notes,
         "bulk_store_chunk_agent_notes": engine.bulk_store_chunk_agent_notes,
         # Chunk history
         "get_chunk_history": engine.get_chunk_history,
@@ -126,7 +159,38 @@ def build_tool_map(
         # Session provenance (grep-to-cache workflow)
         "get_search_history": engine.get_search_history,
         "get_session_read_files": engine.get_session_read_files,
+        # Composite tools
+        "query": engine.query,
+        "batch": engine.batch,
     }
+
+    # Full mode: restore deprecated singleton tools
+    if mode == "full":
+        tool_map.update(
+            {
+                "stats": engine.get_stats,
+                "project_brief": engine.get_project_brief,
+                "annotate": engine.annotate,
+                "get_annotations": engine.get_annotations,
+                "delete_annotation": engine.delete_annotation,
+                "update_annotation": engine.update_annotation,
+                "search_annotations": engine.search_annotations,
+                "bulk_annotate": engine.bulk_annotate,
+                "acquire_document_lock": engine.acquire_document_lock,
+                "refresh_document_lock": engine.refresh_document_lock,
+                "release_document_lock": engine.release_document_lock,
+                "get_document_lock_status": engine.get_document_lock_status,
+                "release_agent_locks": engine.release_agent_locks,
+                "get_conflicts": engine.get_conflicts,
+                "reap_expired_locks": engine.reap_expired_locks,
+                "store_semantic_summary": engine.store_semantic_summary,
+                "store_embedding": engine.store_embedding,
+                "store_chunk_agent_notes": engine.store_chunk_agent_notes,
+            }
+        )
+
+    if mode == "lite":
+        tool_map = {k: v for k, v in tool_map.items() if k in _LITE_TOOLS}
 
     # Utility tools backed by chunker metadata (not engine methods)
     if modality_flags is not None:
