@@ -225,6 +225,30 @@ def migrate_database(db_path: Path) -> None:
             "CREATE INDEX IF NOT EXISTS idx_chunks_staleness ON chunks(staleness_score)"
         )
 
+        # Staleness decay: track when a chunk became stale
+        cursor = conn.execute("PRAGMA table_info(chunks)")
+        chunk_columns = {row[1] for row in cursor.fetchall()}
+        if "stale_since" not in chunk_columns:
+            conn.execute("ALTER TABLE chunks ADD COLUMN stale_since REAL")
+
+        # Operation telemetry log (zero-dep observability)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS operation_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tool_name TEXT NOT NULL,
+                success BOOLEAN NOT NULL,
+                error_type TEXT,
+                duration_ms REAL NOT NULL,
+                timestamp REAL NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_operation_log_tool ON operation_log(tool_name, timestamp)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_operation_log_time ON operation_log(timestamp)"
+        )
+
         # Conflict log table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS document_conflicts (

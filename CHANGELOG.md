@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`WriterQueue` single-writer queue** — New zero-dependency `stele_context/storage_writer.py` serializes all SQLite write operations through a single daemon thread, eliminating "unable to open database file" errors under heavy concurrent load.
 - **`sqlite_retry` decorator** — `connection_pool.py` now provides a zero-dependency retry decorator with exponential backoff for SQLite busy/locked errors.
+- **Doctor DB health & search quality** — `doctor_snapshot` now includes `db_health` (WAL size, busy ratio, recommended action) and `search_quality` (Tier-2 coverage, HNSW span, advice).
+- **Search result provenance** — `search` results now include `source` (`hnsw`, `bm25`, `symbol_boost`) and `tier2_present` so callers can see why each result ranked where it did.
+- **`file_dependencies` fallback graph** — New table stores file-level import dependencies extracted from symbols. `impact_radius` now unions the symbol-edge graph with `file_dependencies` when the symbol graph is sparse, eliminating zero-result false negatives for heavily-imported modules.
+- **Barrel-module expansion** — `extract_file_dependencies` detects re-exported symbols and creates synthetic barrel edges, enabling `impact_radius` to trace one hop through intermediate index files.
+- **Time-decayed staleness** — `propagate_staleness` now stores `stale_since` timestamps. `stale_chunks` accepts `max_age_seconds` (default `None`) to ignore ancient transitive staleness.
+- **`query` smart defaults** — `query` now auto-enables `working_tree` when `session_id` is provided and the git working tree is dirty. On projects with >500 files, it auto-restricts `path_prefix` to the most recently modified 25% unless the query contains global-scope keywords.
+- **Operation telemetry (`operation_log`)** — Zero-dependency observability table tracks every tool invocation (success, error type, duration). Wrapped via `build_tool_map` so both HTTP and stdio MCP servers log automatically.
+- **Self-healing error hints** — MCP servers now append an actionable `hint` field to error responses for known failure patterns (SQLite busy, empty impact radius, low HNSW signal).
 - **`impact_radius(..., direction=...)`** — New `direction` parameter supporting `dependents` (default, incoming edges), `dependencies` (outgoing edges), and `both`. Also adds hybrid seeding for `document_path` mode: when the symbol edge graph is sparse for base classes, raw symbol references are used as a fallback so high fan-in files no longer report zero affected chunks.
 - **`coupling(..., mode="co_consumers")`** — New `co_consumers` mode that detects files co-imported or co-referenced by the same consumers as the target file, catching tight coupling invisible to shared-outgoing-edge analysis.
 - **`working_tree` auto-indexing** — `agent_grep`, `search_text`, `search`, and `query` now accept `working_tree=True` to auto-index modified and untracked files from the git working tree before searching.
@@ -20,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Storage write paths refactored** — `storage.py` and `storage_delegates.py` now route all mutations through the single-writer queue. Reads continue to use the existing connection pool/context manager, preserving SQLite WAL concurrent-reader behavior.
 - **WAL auto-checkpoint tuning** — `PRAGMA wal_autocheckpoint=1000` added to writer and schema connections to reduce WAL growth under write-heavy workloads.
+- **MCP Standard mode reduced to ~32 tools** — Moved `get_chunk_history`, `list_sessions`, `environment_check`, `clean_bytecache`, `prune_history`, `get_dynamic_symbols`, and `get_notifications` to Full-mode only. `query` is now the explicitly recommended universal starting point.
 
 ### Fixed
 - **AttributeError in storage refactor** — Restored the `_write()` helper on `StorageBackend` to bridge legacy write-method calls to the new `WriterQueue`, fixing test regressions introduced during the partial refactor.

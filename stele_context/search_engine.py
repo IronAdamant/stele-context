@@ -21,6 +21,7 @@ from stele_context.index_store import (
     load_bm25_if_fresh,
 )
 from stele_context.index import VectorIndex
+from stele_context.storage_schema import connect
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +335,8 @@ def search_unlocked(
 
     rank_limit = top_k * 10 if path_prefix else top_k
 
+    bm25_fallback = mode == "keyword"
+    tier2_ids: set[str] = set()
     if mode == "keyword":
         bm25_ranked = bm25_index.search(query, top_k=max(1, max(top_k, rank_limit) * 2))
         candidate_ids = list(dict.fromkeys(cid for cid, _ in bm25_ranked))
@@ -420,6 +423,7 @@ def search_unlocked(
             or low_semantic
         ) and max(bm25_scores.values(), default=0.0) > 0.0:
             combined = {cid: bm25_norm.get(cid, 0.0) for cid in candidate_ids}
+            bm25_fallback = True
 
         ranked = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:rank_limit]
 
@@ -439,6 +443,8 @@ def search_unlocked(
             "token_count": chunk_meta["token_count"],
             "start_pos": chunk_meta["start_pos"],
             "end_pos": chunk_meta["end_pos"],
+            "source": "bm25" if bm25_fallback else "hnsw",
+            "tier2_present": chunk_id in tier2_ids,
         }
 
         symbol_manager.attach_edges(entry, chunk_id)
@@ -472,6 +478,8 @@ def search_unlocked(
                 "start_pos": chunk_meta["start_pos"],
                 "end_pos": chunk_meta["end_pos"],
                 "symbol_match": sym["name"],
+                "source": "symbol_boost",
+                "tier2_present": cid in tier2_ids,
             }
             symbol_manager.attach_edges(entry, cid)
             results.append(entry)
@@ -501,6 +509,7 @@ def search_unlocked(
                     r["relevance_score"] * (1.0 - prox_w) + prox * prox_w,
                     6,
                 )
+                r["proximity_boosted"] = True
         # Final re-sort after proximity nudge
         results.sort(key=lambda r: r["relevance_score"], reverse=True)
         results = results[:top_k]
@@ -869,6 +878,42 @@ def init_chunkers(chunk_size: int, max_chunk_size: int) -> dict[str, Any]:
     if HAS_VIDEO_CHUNKER:
         chunkers["video"] = VideoChunker()
     return chunkers
+
+
+def get_search_quality_snapshot(storage: Any, vector_index: Any) -> dict[str, Any]:
+    """Return diagnostic metrics about search quality and Tier-2 coverage."""
+    with connect(storage.db_path) as conn:
+        total = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        tier2 = conn.execute(
+            "SELECT COUNT(*) FROM chunks WHERE agent_signature IS NOT NULL"
+        ).fetchone()[0]
+        # Probe query to measure HNSW span
+        probe_vec = [0.1] * 128
+        hnsw_results = (
+            vector_index.search(probe_vec, k=10)
+            if hasattr(vector_index, "search")
+            else []
+        )
+        hnsw_scores = [s for _, s in hnsw_results if s is not None]
+        hnsw_span = (
+            (max(hnsw_scores) - min(hnsw_scores)) if len(hnsw_scores) >= 2 else 0.0
+        )
+
+    tier2_pct = (tier2 / max(total, 1)) * 100.0
+    advice = None
+    if tier2_pct < 5.0:
+        advice = (
+            "Tier-2 coverage is low. Consider adding summaries or calling "
+            "llm_embed for key concepts to improve semantic relevance."
+        )
+
+    return {
+        "total_chunks": total,
+        "tier2_chunks": tier2,
+        "tier2_coverage_percent": round(tier2_pct, 2),
+        "hnsw_span": round(hnsw_span, 4),
+        "advice": advice,
+    }
 
 
 def get_stats_unlocked(

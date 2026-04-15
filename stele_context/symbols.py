@@ -578,3 +578,62 @@ def resolve_symbols(symbols: list[Symbol]) -> list[tuple[str, str, str, str]]:
             edges.append((sym.chunk_id, def_chunk_id, edge_type, sym.name))
 
     return edges
+
+
+def extract_file_dependencies(
+    symbols: list[Symbol],
+) -> list[tuple[str, str, str, str | None]]:
+    """Extract file-level import dependencies from module-reference symbols.
+
+    Returns list of (source_document_path, target_document_path, dependency_type, symbol_name).
+    """
+    # Build doc path -> first chunk_id for module matching
+    doc_chunks: dict[str, str] = {}
+    for sym in symbols:
+        if sym.role == "definition" and sym.document_path not in doc_chunks:
+            doc_chunks[sym.document_path] = sym.chunk_id
+
+    deps: list[tuple[str, str, str, str | None]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for sym in symbols:
+        if sym.kind != "module" or sym.role != "reference":
+            continue
+        for dp in doc_chunks:
+            if _module_matches_path(sym.name, dp):
+                key = (sym.document_path, dp)
+                if key in seen:
+                    continue
+                seen.add(key)
+                deps.append((sym.document_path, dp, "import", sym.name))
+                break
+
+    # Barrel-module pass-through: if a document re-exports a symbol it imports,
+    # create a synthetic dependency from the re-exporting doc to the origin doc.
+    # We approximate by looking for reference symbols in a doc that match a
+    # definition in an imported module.
+    definitions: dict[str, list[str]] = {}
+    for sym in symbols:
+        if sym.role == "definition":
+            definitions.setdefault(sym.name, []).append(sym.document_path)
+
+    for sym in symbols:
+        if sym.role != "reference" or not sym.name:
+            continue
+        # Only consider references that look like re-exports (same name as a
+        # definition elsewhere, in a doc that also has module imports).
+        if sym.name not in definitions:
+            continue
+        for def_dp in definitions[sym.name]:
+            if def_dp == sym.document_path:
+                continue
+            key = (sym.document_path, def_dp)
+            if key in seen:
+                continue
+            # Verify that sym.document_path imports something from def_dp
+            has_import = any(d[0] == sym.document_path and d[1] == def_dp for d in deps)
+            if has_import:
+                seen.add(key)
+                deps.append((sym.document_path, def_dp, "barrel", sym.name))
+
+    return deps

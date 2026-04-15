@@ -27,7 +27,12 @@ from typing import Any
 
 from stele_context import __version__ as _version
 from stele_context.mcp_tool_defs import TOOL_DEFINITIONS
-from stele_context.tool_registry import WRITE_TOOLS, build_tool_map, get_modality_flags
+from stele_context.tool_registry import (
+    WRITE_TOOLS,
+    build_tool_map,
+    get_modality_flags,
+    self_healing_hint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +103,8 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
     mode = os.environ.get("STELE_MCP_MODE", "standard")
     tool_map = build_tool_map(engine, get_modality_flags(), mode=mode)
 
+    tool_names = set(tool_map.keys())
+
     @server.list_tools()
     async def list_tools() -> list[Tool]:
         return [
@@ -107,6 +114,7 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
                 inputSchema=td["inputSchema"],
             )
             for td in TOOL_DEFINITIONS
+            if td["name"] in tool_names
         ]
 
     @server.call_tool()
@@ -134,10 +142,14 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
                 )
             ]
         except Exception as e:
+            payload: dict[str, Any] = {"error": str(e)}
+            hint = self_healing_hint(name, e)
+            if hint:
+                payload["hint"] = hint
             return [
                 TextContent(
                     type="text",
-                    text=json.dumps({"error": str(e)}),
+                    text=json.dumps(payload),
                 )
             ]
 

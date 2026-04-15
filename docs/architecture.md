@@ -155,7 +155,7 @@ MCP servers auto-register an agent ID and inject it into write operations, so co
 
 ## MCP Tool Reference
 
-The HTTP REST server and MCP stdio server expose the same tools via a unified registry (`tool_registry.py`). Standard mode registers 42 MCP tools; `STELE_MCP_MODE=lite` registers ~15; `STELE_MCP_MODE=full` restores deprecated singleton tools.
+The HTTP REST server and MCP stdio server expose the same tools via a unified registry (`tool_registry.py`). Standard mode registers ~32 MCP tools; `STELE_MCP_MODE=lite` registers ~15; `STELE_MCP_MODE=full` restores deprecated singleton tools.
 
 | Category | Tools |
 |----------|-------|

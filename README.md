@@ -82,7 +82,7 @@ pip install stele-context[mcp]
 
 > **Tip:** If you installed in a virtualenv, use the full path: run `which stele-context` to find it.
 
-Once connected, your agent gets **42 tools** for searching, indexing, and navigating your code — it'll use them automatically when they're helpful. (Set `STELE_MCP_MODE=lite` for ~15 essential tools, or `STELE_MCP_MODE=full` for the complete surface.)
+Once connected, your agent gets **~32 tools** for searching, indexing, and navigating your code — it'll use them automatically when they're helpful. (Set `STELE_MCP_MODE=lite` for ~15 essential tools, or `STELE_MCP_MODE=full` for the complete surface.)
 
 ## Who Is This For?
 

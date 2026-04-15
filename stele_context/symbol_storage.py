@@ -77,6 +77,23 @@ class SymbolStorage:
             if "container" not in cols:
                 conn.execute("ALTER TABLE symbols ADD COLUMN container TEXT")
 
+            # File-level dependency fallback graph
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS file_dependencies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_document_path TEXT NOT NULL,
+                    target_document_path TEXT NOT NULL,
+                    dependency_type TEXT NOT NULL DEFAULT 'import',
+                    symbol_name TEXT
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_file_deps_source ON file_dependencies(source_document_path)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_file_deps_target ON file_dependencies(target_document_path)"
+            )
+
     # -- Bulk operations -----------------------------------------------------
 
     def store_symbols(self, symbols: list[Any]) -> None:
@@ -184,7 +201,57 @@ class SymbolStorage:
         with connect(self.db_path) as conn:
             conn.execute("DELETE FROM symbol_edges")
 
-    # -- Query operations ----------------------------------------------------
+    def store_file_dependencies(
+        self, deps: list[tuple[str, str, str, str | None]]
+    ) -> None:
+        """Store file-level dependencies.
+
+        Each dep: (source_document_path, target_document_path, dependency_type, symbol_name).
+        """
+        if not deps:
+            return
+        with connect(self.db_path) as conn:
+            conn.executemany(
+                "INSERT INTO file_dependencies "
+                "(source_document_path, target_document_path, dependency_type, symbol_name) "
+                "VALUES (?, ?, ?, ?)",
+                deps,
+            )
+
+    def clear_document_file_dependencies(self, document_path: str) -> None:
+        """Remove file dependencies for a document (as source or target)."""
+        with connect(self.db_path) as conn:
+            conn.execute(
+                "DELETE FROM file_dependencies WHERE source_document_path = ? OR target_document_path = ?",
+                (document_path, document_path),
+            )
+
+    def clear_all_file_dependencies(self) -> None:
+        """Remove all file-level dependencies."""
+        with connect(self.db_path) as conn:
+            conn.execute("DELETE FROM file_dependencies")
+
+    def get_file_dependencies(self, document_path: str) -> list[dict[str, Any]]:
+        """Get file dependencies where this document is the source."""
+        with connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM file_dependencies WHERE source_document_path = ?",
+                (document_path,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_file_dependents(self, document_path: str) -> list[dict[str, Any]]:
+        """Get file dependencies where this document is the target."""
+        with connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM file_dependencies WHERE target_document_path = ?",
+                (document_path,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    # -- Query operations ---------------------------------------------------
 
     def get_all_symbols(self) -> list[dict[str, Any]]:
         """Get all symbols (for resolution)."""

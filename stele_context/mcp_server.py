@@ -30,6 +30,7 @@ from stele_context.tool_registry import (
     build_tool_map,
     get_http_schemas,
     get_modality_flags,
+    self_healing_hint,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,11 @@ def execute_tool(
     except TypeError as e:
         return {"error": f"Invalid parameters for {tool_name}: {e}"}
     except Exception as e:
-        return {"error": f"Tool execution failed: {e}"}
+        payload: dict[str, Any] = {"error": f"Tool execution failed: {e}"}
+        hint = self_healing_hint(tool_name, e)
+        if hint:
+            payload["hint"] = hint
+        return payload
 
 
 DEFAULT_MCP_PORT = 9876

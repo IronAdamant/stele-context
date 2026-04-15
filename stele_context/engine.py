@@ -455,6 +455,43 @@ class Stele:
             pass
         return []
 
+    def _git_working_tree_is_dirty(self) -> bool:
+        """Return True if the git working tree has uncommitted changes."""
+        if self._project_root is None:
+            return False
+        try:
+            import subprocess
+
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(self._project_root),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return result.returncode == 0 and bool(result.stdout.strip())
+        except Exception:
+            return False
+
+    def _recent_files_path_prefix(self) -> str | None:
+        """Return a path prefix covering the most recently modified 25% of files."""
+        docs = self.storage.get_recent_documents(limit=0)
+        if not docs:
+            return None
+        cutoff = max(1, len(docs) // 4)
+        recent = docs[:cutoff]
+        # Find longest common path prefix among recent files
+        paths = [d["document_path"] for d in recent]
+        if not paths:
+            return None
+        prefix = paths[0]
+        for p in paths[1:]:
+            while not p.startswith(prefix):
+                prefix = prefix[: prefix.rfind("/")]
+                if not prefix:
+                    break
+        return prefix if prefix else None
+
     def search_text(
         self,
         pattern: str,
@@ -800,6 +837,9 @@ class Stele:
                 max_documents=8,
                 max_annotation_chars=120,
             )
+            search_quality = _se.get_search_quality_snapshot(
+                self.storage, self.vector_index
+            )
         env = self.check_environment()
         stats["project_root"] = (
             str(self._project_root) if self._project_root is not None else None
@@ -813,6 +853,8 @@ class Stele:
             "document_count": (stats.get("storage") or {}).get("document_count"),
             "chunk_count": (stats.get("storage") or {}).get("chunk_count"),
             "index_health": stats.get("index_health"),
+            "db_health": self.storage.get_db_health_snapshot(),
+            "search_quality": search_quality,
             "environment": env,
             "map_preview": m,
         }
@@ -858,9 +900,11 @@ class Stele:
 
     # -- Symbol graph (delegated to SymbolGraphManager) ----------------------
 
-    def stale_chunks(self, threshold: float = 0.3) -> dict[str, Any]:
+    def stale_chunks(
+        self, threshold: float = 0.3, max_age_seconds: float | None = None
+    ) -> dict[str, Any]:
         with self._lock.read_lock():
-            return self.symbol_manager.stale_chunks(threshold)
+            return self.symbol_manager.stale_chunks(threshold, max_age_seconds)
 
     def find_references(self, symbol: str) -> dict[str, Any]:
         with self._lock.read_lock():
@@ -1108,6 +1152,23 @@ class Stele:
         Returns deduplicated chunks with source provenance.
         """
         from stele_context.search_engine import extract_query_identifiers
+
+        # Smart default: auto-enable working_tree when session_id is given and tree is dirty
+        if not working_tree and session_id:
+            working_tree = self._git_working_tree_is_dirty()
+
+        # Smart default: restrict large projects unless query asks for global scope
+        if path_prefix is None:
+            doc_count = self.storage.get_document_count()
+            if doc_count > 500:
+                global_keywords = {
+                    "everywhere",
+                    "all files",
+                    "project-wide",
+                    "entire project",
+                }
+                if not any(kw in query.lower() for kw in global_keywords):
+                    path_prefix = self._recent_files_path_prefix()
 
         if working_tree:
             self._index_working_tree(agent_id=session_id)

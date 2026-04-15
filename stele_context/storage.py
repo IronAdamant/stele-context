@@ -124,6 +124,100 @@ class StorageBackend(StorageDelegatesMixin):
         with connect(self.db_path) as conn:
             return _vacuum(conn)
 
+    def get_db_health_snapshot(self) -> dict[str, Any]:
+        """Return SQLite database health metrics."""
+        db_size = self.db_path.stat().st_size
+        wal_size = 0
+        wal_path = Path(str(self.db_path) + "-wal")
+        if wal_path.exists():
+            wal_size = wal_path.stat().st_size
+
+        with connect(self.db_path) as conn:
+            journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            synchronous = conn.execute("PRAGMA synchronous").fetchone()[0]
+            page_count = conn.execute("PRAGMA page_count").fetchone()[0]
+            page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+            wal_autocheckpoint = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
+            busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+
+            # Approximate busy-ratio from operation_log if available
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM operation_log WHERE success = 0 AND timestamp >= ?",
+                (time.time() - 3600,),
+            )
+            recent_failures = cursor.fetchone()[0]
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM operation_log WHERE timestamp >= ?",
+                (time.time() - 3600,),
+            )
+            recent_total = cursor.fetchone()[0]
+
+        busy_ratio = recent_failures / max(recent_total, 1)
+        if busy_ratio < 0.01:
+            recommended_action = "idle"
+        elif busy_ratio < 0.1:
+            recommended_action = "vacuum"
+        else:
+            recommended_action = "rebuild_symbols"
+
+        return {
+            "journal_mode": journal_mode,
+            "synchronous": synchronous,
+            "page_count": page_count,
+            "page_size": page_size,
+            "database_size_bytes": db_size,
+            "wal_size_bytes": wal_size,
+            "wal_autocheckpoint": wal_autocheckpoint,
+            "busy_timeout_ms": busy_timeout,
+            "recent_operations_1h": recent_total,
+            "recent_failures_1h": recent_failures,
+            "busy_ratio": round(busy_ratio, 4),
+            "recommended_action": recommended_action,
+        }
+
+    def log_operation(
+        self,
+        tool_name: str,
+        success: bool,
+        error_type: str | None,
+        duration_ms: float,
+    ) -> None:
+        """Write an operation telemetry entry."""
+
+        def _do_write(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                "INSERT INTO operation_log (tool_name, success, error_type, duration_ms, timestamp) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (tool_name, success, error_type, duration_ms, time.time()),
+            )
+
+        self._write(_do_write)
+
+    def get_operation_log(
+        self,
+        tool_name: str | None = None,
+        limit: int = 100,
+        since: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Retrieve recent operation telemetry."""
+        query = (
+            "SELECT tool_name, success, error_type, duration_ms, timestamp "
+            "FROM operation_log WHERE 1=1"
+        )
+        params: list[Any] = []
+        if tool_name is not None:
+            query += " AND tool_name = ?"
+            params.append(tool_name)
+        if since is not None:
+            query += " AND timestamp >= ?"
+            params.append(since)
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        with connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
     def _write(self, func, *args, **kwargs):
         """Execute a write callable through the single-writer queue."""
         if self._writer is not None:
@@ -402,6 +496,24 @@ class StorageBackend(StorageDelegatesMixin):
             cursor = conn.execute("SELECT * FROM documents ORDER BY document_path")
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_document_count(self) -> int:
+        """Return the number of indexed documents."""
+        with connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM documents")
+            return cursor.fetchone()[0]
+
+    def get_recent_documents(self, limit: int = 0) -> list[dict[str, Any]]:
+        """Get documents ordered by most recently indexed."""
+        with connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            query = "SELECT * FROM documents ORDER BY indexed_at DESC"
+            params: list[Any] = []
+            if limit > 0:
+                query += " LIMIT ?"
+                params.append(limit)
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
     # -- Agent-supplied semantic embedding methods ----------------------------
 
     def store_semantic_summary(
@@ -646,15 +758,24 @@ class StorageBackend(StorageDelegatesMixin):
         self._write(_do_write)
 
     def set_staleness_batch(self, updates: list[tuple]) -> None:
-        """Set staleness for multiple chunks. Each: (score, chunk_id)."""
+        """Set staleness for multiple chunks.
+
+        Supports 2-tuples (score, chunk_id) or 3-tuples (score, chunk_id, stale_since).
+        """
         if not updates:
             return
 
         def _do_write(conn):
-            conn.executemany(
-                "UPDATE chunks SET staleness_score = ? WHERE chunk_id = ?",
-                updates,
-            )
+            if len(updates[0]) == 3:
+                conn.executemany(
+                    "UPDATE chunks SET staleness_score = ?, stale_since = ? WHERE chunk_id = ?",
+                    [(score, stale_since, cid) for score, cid, stale_since in updates],
+                )
+            else:
+                conn.executemany(
+                    "UPDATE chunks SET staleness_score = ? WHERE chunk_id = ?",
+                    updates,
+                )
 
         self._write(_do_write)
 
@@ -666,16 +787,27 @@ class StorageBackend(StorageDelegatesMixin):
 
         self._write(_do_write)
 
-    def get_stale_chunks(self, threshold: float = 0.3) -> list[dict[str, Any]]:
-        """Get chunks with staleness_score >= threshold."""
+    def get_stale_chunks(
+        self, threshold: float = 0.3, max_age_seconds: float | None = None
+    ) -> list[dict[str, Any]]:
+        """Get chunks with staleness_score >= threshold.
+
+        If max_age_seconds is provided, only return chunks where stale_since is
+        within the given window (or NULL, treated as now for backward compat).
+        """
+        query = (
+            "SELECT chunk_id, document_path, staleness_score, token_count, content "
+            "FROM chunks WHERE staleness_score >= ?"
+        )
+        params: list[Any] = [threshold]
+        if max_age_seconds is not None:
+            cutoff = time.time() - max_age_seconds
+            query += " AND (stale_since IS NULL OR stale_since >= ?)"
+            params.append(cutoff)
+        query += " ORDER BY staleness_score DESC"
         with connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT chunk_id, document_path, staleness_score, token_count, content "
-                "FROM chunks WHERE staleness_score >= ? "
-                "ORDER BY staleness_score DESC",
-                (threshold,),
-            )
+            cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
     # -- Aggregate stats ------------------------------------------------------

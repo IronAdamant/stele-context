@@ -8,6 +8,7 @@ and symbol-based queries (find_references, find_definition, impact_radius).
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from stele_context.chunkers.base import Chunk
 from stele_context.symbols import (
     SymbolExtractor,
     Symbol,
+    extract_file_dependencies,
     resolve_symbols,
     _NOISE_REFS,
     _module_matches_path,
@@ -222,10 +224,13 @@ class SymbolGraphManager:
         all_syms = self._dicts_to_symbols(all_syms_raw)
         all_edges = resolve_symbols(all_syms)
         all_edges.extend(_resolve_test_edges(all_syms))
+        file_deps = extract_file_dependencies(all_syms)
 
         if affected_chunk_ids is None:
             self.storage.clear_all_edges()
             self.storage.store_edges(all_edges)
+            self.storage.clear_all_file_dependencies()
+            self.storage.store_file_dependencies(file_deps)
         else:
             affected_list = list(affected_chunk_ids)
             old_names = self.storage.get_edge_symbol_names_for_chunks(affected_list)
@@ -240,6 +245,19 @@ class SymbolGraphManager:
                 or e[3] in affected_names
             ]
             self.storage.store_edges(scoped)
+            # Incremental file deps: clear for affected docs and re-add scoped deps
+            affected_docs = {
+                s["document_path"]
+                for s in all_syms_raw
+                if s["chunk_id"] in affected_chunk_ids
+            }
+            for doc_path in affected_docs:
+                self.storage.clear_document_file_dependencies(doc_path)
+            scoped_deps = [
+                d for d in file_deps if d[0] in affected_docs or d[1] in affected_docs
+            ]
+            if scoped_deps:
+                self.storage.store_file_dependencies(scoped_deps)
 
     def propagate_staleness(
         self,
@@ -253,7 +271,8 @@ class SymbolGraphManager:
         Score decays by ``decay`` per hop.  Changed chunks get score 0.
         Returns the number of chunks marked stale.
         """
-        self.storage.set_staleness_batch([(0.0, cid) for cid in changed_chunk_ids])
+        now = time.time()
+        self.storage.set_staleness_batch([(0.0, cid, now) for cid in changed_chunk_ids])
 
         visited: dict[str, float] = {}
         queue = deque((cid, 0) for cid in changed_chunk_ids)
@@ -275,16 +294,18 @@ class SymbolGraphManager:
 
         if visited:
             self.storage.set_staleness_batch(
-                [(score, cid) for cid, score in visited.items()]
+                [(score, cid, now) for cid, score in visited.items()]
             )
 
         return len(visited)
 
     # -- Queries --------------------------------------------------------------
 
-    def stale_chunks(self, threshold: float = 0.3) -> dict[str, Any]:
+    def stale_chunks(
+        self, threshold: float = 0.3, max_age_seconds: float | None = None
+    ) -> dict[str, Any]:
         """Get chunks with staleness_score >= threshold, grouped by file."""
-        stale = self.storage.get_stale_chunks(threshold)
+        stale = self.storage.get_stale_chunks(threshold, max_age_seconds)
 
         by_doc: dict[str, list[dict[str, Any]]] = {}
         for chunk in stale:
@@ -590,6 +611,49 @@ class SymbolGraphManager:
                     row["content"] = meta.get("content")
                 result_chunks.append(row)
                 depth_counts[current_depth] = depth_counts.get(current_depth, 0) + 1
+
+        # Fallback: if symbol graph is sparse, union with file_dependencies
+        if (
+            document_path
+            and len(affected_files) < 3
+            and direction in ("dependents", "both")
+        ):
+            file_deps = self.storage.get_file_dependents(document_path)
+            for dep in file_deps:
+                dep_doc = dep["source_document_path"]
+                if path_filter is not None and path_filter not in dep_doc:
+                    continue
+                if dep_doc in affected_files:
+                    continue
+                affected_files.add(dep_doc)
+                if compact:
+                    by_file.setdefault(
+                        dep_doc,
+                        {
+                            "path": dep_doc,
+                            "chunk_count": 0,
+                            "depth_min": 1,
+                            "depth_max": 1,
+                        },
+                    )
+                    by_file[dep_doc]["chunk_count"] += 1
+                    depth_counts[1] = depth_counts.get(1, 0) + 1
+                else:
+                    # Add first chunk of the dependent file as a proxy
+                    doc_chunks = self.storage.get_document_chunks(dep_doc)
+                    if doc_chunks:
+                        meta = doc_chunks[0]
+                        row = {
+                            "chunk_id": meta["chunk_id"],
+                            "document_path": dep_doc,
+                            "depth": 1,
+                            "token_count": meta.get("token_count", 0),
+                            "fallback": "file_dependency",
+                        }
+                        if include_content:
+                            row["content"] = meta.get("content")
+                        result_chunks.append(row)
+                        depth_counts[1] = depth_counts.get(1, 0) + 1
 
         out: dict[str, Any] = {
             "origin": origin,

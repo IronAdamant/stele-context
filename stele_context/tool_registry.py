@@ -57,6 +57,14 @@ _FULL_MODE_ONLY_TOOLS = frozenset(
         "store_semantic_summary",
         "store_embedding",
         "store_chunk_agent_notes",
+        # Moved to full mode to reduce standard surface (Phase 4 rationalisation)
+        "get_chunk_history",
+        "list_sessions",
+        "environment_check",
+        "clean_bytecache",
+        "prune_history",
+        "get_dynamic_symbols",
+        "get_notifications",
     }
 )
 
@@ -86,6 +94,36 @@ _LITE_TOOLS = frozenset(
 )
 
 
+def _wrap_with_telemetry(
+    tool_name: str,
+    func: Callable[..., Any],
+    storage: Any,
+) -> Callable[..., Any]:
+    """Wrap a tool callable so every invocation is logged to operation_log."""
+    import time as _time
+    import functools
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        start = _time.time()
+        success = True
+        error_type: str | None = None
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            success = False
+            error_type = type(e).__name__
+            raise
+        finally:
+            try:
+                duration_ms = (_time.time() - start) * 1000.0
+                storage.log_operation(tool_name, success, error_type, duration_ms)
+            except Exception:
+                pass
+
+    return wrapper
+
+
 def build_tool_map(
     engine: Any,
     modality_flags: dict[str, bool] | None = None,
@@ -106,6 +144,7 @@ def build_tool_map(
         "standard" (default, simplified surface), "lite" (~15 core tools),
         or "full" (includes deprecated singleton tools for backward compat).
     """
+    _log = getattr(engine, "storage", None) is not None
     tool_map: dict[str, Callable[..., Any]] = {
         # Core operations
         "index": engine.index_documents,
@@ -211,6 +250,10 @@ def build_tool_map(
         tool_map["detect_modality"] = _detect_modality
         tool_map["get_supported_formats"] = _get_supported_formats
 
+    if _log:
+        storage = engine.storage
+        tool_map = {k: _wrap_with_telemetry(k, v, storage) for k, v in tool_map.items()}
+
     return tool_map
 
 
@@ -229,6 +272,29 @@ def get_modality_flags() -> dict[str, bool]:
         "audio": HAS_AUDIO_CHUNKER,
         "video": HAS_VIDEO_CHUNKER,
     }
+
+
+def self_healing_hint(tool_name: str, error: Exception) -> str | None:
+    """Return an actionable next-step hint for known failure patterns."""
+    err = str(error).lower()
+    if (
+        "database is locked" in err
+        or "busy" in err
+        or "unable to open database file" in err
+    ):
+        return "SQLite is under load. Run detect_changes or wait a moment and retry."
+    if tool_name in ("impact_radius", "coupling") and "0 affected" in err:
+        return (
+            "This file may be a base class with high fan-in. "
+            "Consider also running find_references on its exported symbols."
+        )
+    if tool_name == "search" and "hnsw" not in err and "0" in str(error):
+        return (
+            "Tier-1 semantic search returned no strong matches. "
+            "Results may fall back to BM25 keyword ranking. "
+            "Consider adding Tier-2 summaries for this topic."
+        )
+    return None
 
 
 def get_http_schemas() -> dict[str, dict[str, Any]]:

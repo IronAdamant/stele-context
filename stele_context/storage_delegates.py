@@ -129,6 +129,25 @@ class StorageDelegatesMixin:
     def clear_all_edges(self) -> None:
         self._delegate_write(self._symbol_storage.clear_all_edges)
 
+    def store_file_dependencies(
+        self, deps: list[tuple[str, str, str, str | None]]
+    ) -> None:
+        self._delegate_write(self._symbol_storage.store_file_dependencies, deps)
+
+    def clear_document_file_dependencies(self, document_path: str) -> None:
+        self._delegate_write(
+            self._symbol_storage.clear_document_file_dependencies, document_path
+        )
+
+    def clear_all_file_dependencies(self) -> None:
+        self._delegate_write(self._symbol_storage.clear_all_file_dependencies)
+
+    def get_file_dependencies(self, document_path: str) -> list[dict[str, Any]]:
+        return self._symbol_storage.get_file_dependencies(document_path)
+
+    def get_file_dependents(self, document_path: str) -> list[dict[str, Any]]:
+        return self._symbol_storage.get_file_dependents(document_path)
+
     def get_all_symbols(self) -> list[dict[str, Any]]:
         return self._symbol_storage.get_all_symbols()
 
