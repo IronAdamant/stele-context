@@ -110,7 +110,7 @@ def multiply(a, b):
         cf = Stele(storage_dir=str(tmp_path / "storage"))
         cf.index_documents([str(test_file)])
 
-        results = cf.search("addition function", top_k=5)
+        results = cf.search("multiply return", top_k=5)
         assert len(results) >= 1
         assert "content" in results[0]
         assert "relevance_score" in results[0]

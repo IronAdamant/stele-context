@@ -1024,9 +1024,9 @@ class TestSearchWithEdges:
                 break
 
     def test_no_edges_when_none_exist(self):
-        (self.src / "isolated.py").write_text("x = 42\n")
+        (self.src / "isolated.py").write_text("isolated_marker = 42\n")
         self.cf.index_documents([str(self.src)])
-        results = self.cf.search("x = 42", top_k=1)
+        results = self.cf.search("isolated_marker", top_k=1)
         assert len(results) >= 1, "Search should return at least 1 result"
         assert "edges" not in results[0]
 

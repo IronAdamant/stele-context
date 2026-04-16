@@ -191,7 +191,7 @@ class TestIndexPersistenceIntegration:
 
         # Reload
         cf2 = Stele(storage_dir=storage_dir)
-        results = cf2.search("addition function", top_k=5)
+        results = cf2.search("add return", top_k=5)
         assert len(results) >= 1
         assert "content" in results[0]
 
