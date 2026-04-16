@@ -1,6 +1,6 @@
 # Stele Context - Complete Project Documentation
 
-**Last updated:** 2026-03-27 · **Release:** v1.0.7
+**Last updated:** 2026-04-17 · **Release:** v1.2.0
 
 ## Documentation (root)
 
@@ -8,8 +8,8 @@
 |------|---------|
 | `AGENTS.md` | Short agent entry: orientation tools, session vs index, trust, Tier 2 vs chunk notes |
 | `docs/philosophy.md` | Design philosophy: zero deps, Tier 1 vs Tier 2, LLM-as-embedder, cross-session retrieval, comparison by design |
+| `docs/architecture.md` | Technical architecture + Design Decisions Log (historical bullets moved from CLAUDE.md) |
 | `docs/agent-workflow.md` | Agent-oriented workflow: index → enrich → retrieve, tool choice, Tier 2 APIs, sessions |
-| `stele_context/agent_response.py` | Token-bounded search/map/stats helpers, `project_brief` builder, chunk content trim |
 
 ## File Table
 
@@ -17,15 +17,21 @@
 |------|---------|---------------|-------|
 | `stele_context/__init__.py` | Package root, exports `__version__`, `Stele`, `Chunk` | None | test_core.py |
 | `stele_context/core.py` | Backward-compat re-exports (`Stele`, `Chunk`) | engine, chunkers.base | test_core.py |
-| `stele_context/engine.py` | Main orchestrator, thin `Stele` facade class | indexing, search_engine, change_detection, engine_utils, config, rwlock, session, storage, symbol_graph | test_engine.py |
-| `stele_context/engine_utils.py` | Path normalization, lock routing, env checks | coordination, env_checks | (via test_engine.py, test_worktree_safety.py) |
+| `stele_context/engine.py` | Main orchestrator — `Stele` facade inherits from 5 mixins; retains __init__, plumbing, cross-domain ops (query, batch), session lifecycle | all engine_*_mixin modules, config, rwlock, session, storage, symbol_graph | test_engine.py |
+| `stele_context/engine_index_mixin.py` | Mixin: index_documents, detect_changes, remove_document, annotations CRUD, Tier-2 writes, prune_history | indexing, change_detection, search_engine, engine_utils | (via test_engine.py, test_batch_summaries.py) |
+| `stele_context/engine_info_mixin.py` | Mixin: get_map, get_stats, get_history, doctor_snapshot, project_brief, list_sessions, environment checks | search_engine, engine_utils | (via test_engine.py, test_mcp_server.py) |
+| `stele_context/engine_search_mixin.py` | Mixin: search, agent_grep, search_text, get_context, session history helpers, working-tree indexing | search_engine, agent_grep, engine_utils | (via test_engine.py, test_search_engine.py) |
+| `stele_context/engine_symbol_mixin.py` | Mixin: find_references, find_definition, impact_radius, coupling, dynamic symbols | (self-contained; uses symbol_manager via self) | (via test_symbols.py) |
+| `stele_context/engine_lock_mixin.py` | Mixin: document_lock (unified) + per-op lock methods, agent registry, notifications | (self-contained; uses _coordination/storage via self) | (via test_conflicts.py, test_worktree_safety.py) |
+| `stele_context/engine_utils.py` | Path normalization, lock routing, read_and_hash, env checks | coordination, env_checks | (via test_engine.py, test_worktree_safety.py) |
 | `stele_context/indexing.py` | Document indexing: chunk, store, merge, expand | chunkers.base, chunkers.numpy_compat | test_engine.py |
 | `stele_context/search_engine.py` | Hybrid search (HNSW+BM25, weak-cosine BM25 fallback, path_prefix), get_context, map/stats, project_brief, search bounds | bm25, index, index_store, agent_response, chunkers | test_engine.py, test_search_engine.py |
 | `stele_context/index_health.py` | `compute_index_health_snapshot()` — alerts, staleness for map/stats | None | test_index_health.py |
 | `stele_context/change_detection.py` | Detect file changes, re-index modified chunks | chunkers.base, chunkers.numpy_compat | test_engine.py |
 | `stele_context/config.py` | `.stele-context.toml` loader with minimal TOML parser | None | test_config.py |
-| `stele_context/storage.py` | `StorageBackend` - SQLite + filesystem persistence | storage_schema, storage_delegates, all sub-storages | test_engine.py, test_storage_migration.py |
+| `stele_context/storage.py` | `StorageBackend` - SQLite + filesystem persistence | storage_schema, storage_delegates, storage_writer, all sub-storages | test_engine.py, test_storage_migration.py |
 | `stele_context/storage_schema.py` | Database init and migration SQL | connection_pool | test_storage_migration.py |
+| `stele_context/storage_writer.py` | `WriterQueue` - single daemon thread serializing SQLite writes for zero-dep concurrency | connection_pool | test_sqlite_resilience.py |
 | `stele_context/connection_pool.py` | Thread-local SQLite connection reuse | None | (via test_engine.py) |
 | `stele_context/storage_delegates.py` | `StorageDelegatesMixin` - forwarding methods | None (mixin) | (via test_engine.py) |
 | `stele_context/session_storage.py` | Session table, KV-cache, search history, file-read provenance | None | test_session.py |
@@ -47,6 +53,10 @@
 | `stele_context/env_checks.py` | Stale bytecache + editable install detection | None | test_env_checks.py |
 | `stele_context/protocols.py` | Typing protocols for delegation boundaries | None | (static analysis only) |
 | `stele_context/stemmer.py` | Pure-Python Porter stemmer, identifier splitting | None | test_stemmer.py |
+| `stele_context/agent_response.py` | Token-bounded search/map/stats helpers, `project_brief` builder, chunk content trim | chunkers.base | test_agent_response.py |
+| `stele_context/agent_grep.py` | LLM-optimized search: scope annotation, classification, dedup, token budget | chunkers.base (estimate_tokens only) | test_agent_grep.py |
+| `stele_context/llm_embedding.py` | Semantic fingerprint computation + 32-dim to 128-dim vector mapping for Tier 2 embeddings | chunkers.numpy_compat | test_agent_embeddings.py |
+| `stele_context/index_health.py` | `compute_index_health_snapshot()` — documents/chunks/symbol counts, alerts, staleness | None | test_index_health.py |
 | `stele_context/chunkers/__init__.py` | Chunker registry, auto-detection | all chunkers | test_chunkers.py |
 | `stele_context/chunkers/base.py` | `Chunk` dataclass, `BaseChunker` ABC, `estimate_tokens()` | None | test_base_chunker.py |
 | `stele_context/chunkers/numpy_compat.py` | Pure-Python `sig_to_bytes`, `cosine_similarity` | None | test_numpy_compat.py |
@@ -61,10 +71,10 @@
 | `stele_context/cli_metadata.py` | CLI metadata/annotation subcommands | engine | (manual testing) |
 | `stele_context/mcp_server.py` | HTTP REST server (unified tool registry, threaded) + tool dispatch | tool_registry | test_mcp_server.py |
 | `stele_context/mcp_handlers.py` | Backward-compat shim (re-exports from mcp_server) | mcp_server, tool_registry | test_mcp_server.py |
-| `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas, modality flags | mcp_tool_defs | (via test_mcp_server.py, test_mcp_stdio.py) |
-| `stele_context/mcp_stdio.py` | MCP stdio server (JSON-RPC for Claude Desktop) | mcp_tool_defs, tool_registry | test_mcp_stdio.py |
-| `stele_context/mcp_tool_defs.py` | MCP tool definitions (core; combined with ext = 55 tools) | mcp_tool_defs_ext | (via test_mcp_stdio.py) |
-| `stele_context/mcp_tool_defs_ext.py` | MCP tool definitions (extended) | None | (via test_mcp_stdio.py) |
+| `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas, modality flags (40 tools combined) | mcp_tools_primary | (via test_mcp_server.py, test_mcp_stdio.py) |
+| `stele_context/mcp_stdio.py` | MCP stdio server (JSON-RPC for Claude Desktop) | mcp_tools_primary, tool_registry | test_mcp_stdio.py |
+| `stele_context/mcp_tools_primary.py` | MCP tool schemas — primary tools (search, index, context, sessions, locks, Tier-2, env) | mcp_tools_symbols | (via test_mcp_stdio.py, test_batch_summaries.py) |
+| `stele_context/mcp_tools_symbols.py` | MCP tool schemas — symbol-graph tools (find_references, impact_radius, coupling, dynamic symbols) | None (standalone) | (via test_mcp_stdio.py) |
 
 ## Test Files
 
@@ -103,5 +113,8 @@
 | `tests/test_agent_response.py` | Token bounds, compact map, project_brief helper | ~4 |
 | `tests/test_connection_pool.py` | Thread-local pool, connect() context manager, search_text edges | ~40 |
 | `tests/test_media_chunkers.py` | Media chunker extensions, HAS_* flags, modality detection | ~30 |
+| `tests/test_batch_summaries.py` | Inline summaries during indexing, bulk_store_summaries, has_agent_signatures | ~19 |
+| `tests/test_fastpath.py` | mtime+size fast-path for index/detect/get_context | ~17 |
+| `tests/test_sqlite_resilience.py` | `WriterQueue` single-writer, sqlite_retry decorator | ~2 |
 
-**Total: 862+ tests (1 skipped without MCP SDK)**
+**Total: 891 tests pass, 1 skipped without MCP SDK (as of 2026-04-17)**

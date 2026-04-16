@@ -1,22 +1,25 @@
 """
-Tool definitions for the Stele MCP stdio server (core tools).
+MCP tool schemas — primary (non-symbol-graph) tools.
 
-Part 1: index, search, context, annotations, history, stats.
-Each entry is a dict with name, description, and inputSchema.
-These are converted to MCP Tool objects at server startup.
-Depends only on mcp_tool_defs_ext (sibling data module).
+Contains schemas for: search (agent_grep, search_text, semantic search), indexing,
+context retrieval, annotations, sessions, document locks, Tier-2 writes, history,
+stats, dynamic symbols, and environment utilities.
 
-Extended tools (symbols, locking, agents, etc.) are in mcp_tool_defs_ext.py.
-The combined list is available as TOOL_DEFINITIONS.
+**Inclusion criterion:** add a tool here if it does not operate on the symbol
+graph (symbol_manager). Symbol-graph tools (find_references, find_definition,
+impact_radius, coupling) live in `mcp_tools_symbols.py`.
+
+These dicts are converted to MCP Tool objects at server startup.
+The combined list (this file + symbols) is available as `TOOL_DEFINITIONS`.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from stele_context.mcp_tool_defs_ext import TOOL_DEFINITIONS_EXT
+from stele_context.mcp_tools_symbols import TOOL_DEFINITIONS_SYMBOLS
 
-_TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
+_TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
     # -- Primary: Agent Search (exact + structured) ---------------------------
     {
         "name": "agent_grep",
@@ -154,8 +157,8 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
                 "search_mode": {
                     "type": "string",
                     "enum": ["hybrid", "keyword"],
-                    "description": "hybrid = HNSW+BM25 (default); keyword = BM25 only",
-                    "default": "hybrid",
+                    "description": "keyword = BM25-only (default, deterministic); hybrid = HNSW+BM25 (use when Tier-2 summaries are populated)",
+                    "default": "keyword",
                 },
                 "max_result_tokens": {
                     "type": "integer",
@@ -656,5 +659,8 @@ _TOOL_DEFINITIONS_CORE: list[dict[str, Any]] = [
     },
 ]
 
-# Combined list: core + extended (symbols, locking, agents, env, embeddings)
-TOOL_DEFINITIONS: list[dict[str, Any]] = _TOOL_DEFINITIONS_CORE + TOOL_DEFINITIONS_EXT
+# Combined list: primary tools + symbol-graph tools.
+# Public export consumed by tool_registry and mcp_stdio.
+TOOL_DEFINITIONS: list[dict[str, Any]] = (
+    _TOOL_DEFINITIONS_PRIMARY + TOOL_DEFINITIONS_SYMBOLS
+)

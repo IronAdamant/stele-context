@@ -149,8 +149,8 @@ Examples:
     search_parser.add_argument(
         "--search-mode",
         choices=("hybrid", "keyword"),
-        default="hybrid",
-        help="hybrid = HNSW+BM25 (default); keyword = BM25 keyword search only",
+        default="keyword",
+        help="keyword = BM25-only (default); hybrid = HNSW+BM25 (use when Tier-2 summaries are populated)",
     )
     search_parser.add_argument(
         "--compact",
@@ -658,7 +658,7 @@ def cmd_search(args: argparse.Namespace, stele: Stele) -> int:
     raw = stele.search(
         query=args.query,
         top_k=args.top_k,
-        search_mode=getattr(args, "search_mode", "hybrid"),
+        search_mode=getattr(args, "search_mode", "keyword"),
         max_result_tokens=getattr(args, "max_result_tokens", None),
         compact=getattr(args, "compact", False),
         return_response_meta=want_meta,

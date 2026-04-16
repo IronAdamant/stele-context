@@ -43,8 +43,8 @@ Chunker Layer
 
 API Layer
   tool_registry.py    -- unified tool dispatch, WRITE_TOOLS, schemas, modality flags
-  mcp_tool_defs.py    -- MCP tool definitions (core)
-  mcp_tool_defs_ext.py -- MCP tool definitions (extended)
+  mcp_tools_primary.py -- MCP tool schemas (non-symbol-graph tools)
+  mcp_tools_symbols.py -- MCP tool schemas (symbol-graph tools)
   mcp_handlers.py     -- backward-compat shim
 
 Agent docs (repo root)

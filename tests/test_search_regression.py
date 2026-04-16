@@ -41,7 +41,7 @@ class TestSearchKeywordRegression:
         ), f"expected feature file in keyword results, got {paths_kw}"
 
     def test_hybrid_returns_hits_for_indexed_content(self, tmp_path):
-        """Sanity: default hybrid search still returns chunks from a tiny index."""
+        """Sanity: opt-in hybrid search still returns chunks from a tiny index."""
         (tmp_path / ".git").mkdir()
         f = tmp_path / "note.txt"
         f.write_text("authentication session cookie handling\n" * 5)

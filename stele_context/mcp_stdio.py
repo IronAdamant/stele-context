@@ -26,7 +26,7 @@ import sys
 from typing import Any
 
 from stele_context import __version__ as _version
-from stele_context.mcp_tool_defs import TOOL_DEFINITIONS
+from stele_context.mcp_tools_primary import TOOL_DEFINITIONS
 from stele_context.tool_registry import (
     WRITE_TOOLS,
     build_tool_map,

@@ -7,15 +7,16 @@ Single source of truth for:
 - get_http_schemas(): converts tool definitions to HTTP format
 
 Both servers import from here instead of maintaining independent
-tool maps and write-tool sets. Schemas remain in mcp_tool_defs.py
-(the canonical source for all tool definitions).
+tool maps and write-tool sets. Schemas live in `mcp_tools_primary.py`
+(non-symbol tools) and `mcp_tools_symbols.py` (symbol-graph tools),
+combined and re-exported as `TOOL_DEFINITIONS`.
 """
 
 from __future__ import annotations
 
 from typing import Any, Callable
 
-from stele_context.mcp_tool_defs import TOOL_DEFINITIONS
+from stele_context.mcp_tools_primary import TOOL_DEFINITIONS
 
 # Tools that modify state and should receive auto-injected agent_id.
 WRITE_TOOLS = frozenset(

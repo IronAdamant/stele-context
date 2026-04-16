@@ -1,9 +1,14 @@
 """
-Tool definitions for the Stele MCP stdio server (extended tools).
+MCP tool schemas — symbol-graph tools.
 
-Part 2: search (agent-optimized), symbols, sessions, document locking,
-agents, environment, embeddings, chunk history, and notifications.
-Each entry is a dict with name, description, and inputSchema.
+Contains schemas for tools that operate on the symbol graph:
+find_references, find_definition, impact_radius, coupling, stale_chunks,
+rebuild_symbols, get_chunk_history, and dynamic-symbol registration.
+
+**Inclusion criterion:** add a tool here only if it operates on the symbol
+graph (symbol_manager). Everything else — search, index, context, locks,
+Tier-2 writes, environment — lives in `mcp_tools_primary.py`.
+
 Standalone module with zero internal dependencies.
 """
 
@@ -11,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-TOOL_DEFINITIONS_EXT: list[dict[str, Any]] = [
+TOOL_DEFINITIONS_SYMBOLS: list[dict[str, Any]] = [
     # -- Primary: Symbol Graph ------------------------------------------------
     {
         "name": "find_references",

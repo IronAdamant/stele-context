@@ -6,8 +6,22 @@ Standalone functions -- no circular imports back to engine.py.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
+
+
+def read_and_hash(path: Path, modality: str) -> tuple:
+    """Read file content and compute SHA-256 hash.
+
+    Binary modalities (image/audio/video) read as bytes; everything else
+    reads as UTF-8 text. Returns `(content, sha256_hex)`.
+    """
+    if modality in ("image", "audio", "video"):
+        raw = path.read_bytes()
+        return raw, hashlib.sha256(raw).hexdigest()
+    content = path.read_text(encoding="utf-8", errors="replace")
+    return content, hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def file_unchanged(abs_path: Path, stored_doc: dict) -> bool:

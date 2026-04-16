@@ -317,16 +317,16 @@ def search_unlocked(
     search_alpha: float,
     symbol_manager: Any,
     do_ensure_bm25: Any,
-    search_mode: str = "hybrid",
+    search_mode: str = "keyword",
     max_result_tokens: int | None = None,
     compact: bool = False,
     return_response_meta: bool = False,
     path_prefix: str | None = None,
 ) -> list[dict[str, Any]] | dict[str, Any]:
     """Hybrid (HNSW+BM25) or keyword-only (BM25) search across chunks."""
-    mode = (search_mode or "hybrid").strip().lower()
+    mode = (search_mode or "keyword").strip().lower()
     if mode not in ("hybrid", "keyword"):
-        mode = "hybrid"
+        mode = "keyword"
 
     do_ensure_bm25()
     bm25_index = get_bm25()

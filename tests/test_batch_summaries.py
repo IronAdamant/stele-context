@@ -56,9 +56,11 @@ class TestInlineSummariesDuringIndex:
 
         engine = Stele(project_root=str(tmp_path), enable_coordination=False)
 
-        # Index without summary
+        # Index without summary (hybrid mode — summaries affect HNSW ranking only)
         engine.index_documents([str(f)])
-        before = engine.search("role-based access control", top_k=1)
+        before = engine.search(
+            "role-based access control", top_k=1, search_mode="hybrid"
+        )
         score_before = before[0]["relevance_score"] if before else 0
 
         # Re-index with summary
@@ -69,7 +71,9 @@ class TestInlineSummariesDuringIndex:
                 str(f): "Role-based access control that checks user permissions"
             },
         )
-        after = engine.search("role-based access control", top_k=1)
+        after = engine.search(
+            "role-based access control", top_k=1, search_mode="hybrid"
+        )
         score_after = after[0]["relevance_score"] if after else 0
 
         assert score_after >= score_before
@@ -220,13 +224,13 @@ class TestToolRegistryIntegration:
         assert "bulk_store_summaries" in WRITE_TOOLS
 
     def test_tool_definitions_include_bulk(self):
-        from stele_context.mcp_tool_defs import TOOL_DEFINITIONS
+        from stele_context.mcp_tools_primary import TOOL_DEFINITIONS
 
         names = {t["name"] for t in TOOL_DEFINITIONS}
         assert "bulk_store_summaries" in names
 
     def test_index_schema_has_summaries(self):
-        from stele_context.mcp_tool_defs import TOOL_DEFINITIONS
+        from stele_context.mcp_tools_primary import TOOL_DEFINITIONS
 
         index_tool = next(t for t in TOOL_DEFINITIONS if t["name"] == "index")
         props = index_tool["inputSchema"]["properties"]

@@ -71,8 +71,10 @@ class TestEngineSemanticSummary:
         chunks = engine.storage.search_chunks(document_path="auth.py")
         chunk_id = chunks[0]["chunk_id"]
 
-        # Search before summary
-        before = engine.search("role-based access control", top_k=1)
+        # Search before summary (hybrid mode — Tier-2 summaries only affect HNSW ranking)
+        before = engine.search(
+            "role-based access control", top_k=1, search_mode="hybrid"
+        )
         score_before = before[0]["relevance_score"] if before else 0
 
         # Add semantic summary
@@ -83,7 +85,9 @@ class TestEngineSemanticSummary:
         assert result["stored"] is True
 
         # Search after summary — should be better
-        after = engine.search("role-based access control", top_k=1)
+        after = engine.search(
+            "role-based access control", top_k=1, search_mode="hybrid"
+        )
         score_after = after[0]["relevance_score"] if after else 0
         assert score_after >= score_before
 
@@ -178,7 +182,9 @@ class TestIndexRebuildWithAgentSignatures:
 
         engine.vector_index = load_or_rebuild_index(engine.storage)
 
-        # Verify the rebuilt index uses agent signature
-        results = engine.search("data processing pipeline", top_k=1)
+        # Verify the rebuilt index uses agent signature (hybrid mode exercises HNSW)
+        results = engine.search(
+            "data processing pipeline", top_k=1, search_mode="hybrid"
+        )
         assert len(results) >= 1
         assert results[0]["chunk_id"] == chunk_id

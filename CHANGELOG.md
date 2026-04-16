@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-17
+
+### Changed
+- **⚠️ `search` default mode flipped from `hybrid` to `keyword`.** Behavior change for any caller that did not pass an explicit `search_mode`. BM25-only ranking is now the default for `Stele.search()`, the `search` CLI command, and the `search` MCP tool. Hybrid (HNSW+BM25) remains available via `search_mode="hybrid"` or `--search-mode hybrid`, but is only useful when Tier-2 agent-supplied summaries are populated — otherwise statistical signatures mis-rank. Aligns with the documented guidance that semantic search is a refinement layer, not a retrieval layer.
+- **Docs** — CLAUDE.md no longer instructs agents to prefer Stele MCP tools over native Grep/Glob/Read. Stele's tools complement native tools; agents choose the right tool for the job.
+- **`engine.py` split into 5 mixins.** The `Stele` facade now inherits from `_IndexMixin`, `_InfoMixin`, `_SearchMixin`, `_SymbolMixin`, `_LockMixin` (in `engine_<domain>_mixin.py`). engine.py shrank from 1450 → 463 LOC. Zero behavior change; all public method signatures preserved; zero new dependencies. Matches the existing delegate/mixin pattern used by `StorageDelegatesMixin`. Designed to reduce per-session context load for LLM maintainers.
+- **MCP tool definition files renamed for clarity.** `mcp_tool_defs.py` → `mcp_tools_primary.py`; `mcp_tool_defs_ext.py` → `mcp_tools_symbols.py`. Inclusion criterion is now documented: symbol-graph tools live in `mcp_tools_symbols.py`, everything else in `mcp_tools_primary.py`. Internal variable `_TOOL_DEFINITIONS_CORE` → `_TOOL_DEFINITIONS_PRIMARY`; `TOOL_DEFINITIONS_EXT` → `TOOL_DEFINITIONS_SYMBOLS`. Public `TOOL_DEFINITIONS` export unchanged.
+- **CLAUDE.md slimmed to invariants and workflow.** Historical design bullets (140+) moved to `docs/architecture.md#design-decisions-log`. CLAUDE.md now fits in ~150 lines: architecture diagram, load-bearing invariants, SQLite tables, module boundaries, agent workflow.
+- **Version source of truth restored.** `stele_context/__init__.__version__` was stuck at `1.0.9` while `pyproject.toml` had advanced to `1.2.0`. Both now agree on `1.3.0`.
+
+### Fixed
+- **`Chunk._compute_semantic_signature` returns Python floats.** The normalized branch was returning `np.float32` values because `x / norm` preserves the numpy type. Fixes `test_returns_list_of_128_floats` and prevents downstream JSON-serialization surprises.
+
+### Moved
+- `_read_and_hash` moved from `engine.py` module scope to `engine_utils.py` as `read_and_hash`. Needed for both `engine.py` and the new mixin modules without creating import cycles.
+
 ## [1.2.0] - 2026-04-15
 
 ### Added
@@ -125,7 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Stele.get_context`** — `include_trust`, `max_chunk_content_tokens`; **trust** hints (mtime vs index, staleness); **`agent_notes`** on chunks (JSON or text)
 - **SQLite `chunks.agent_notes`** — `store_chunk_agent_notes`, `bulk_store_chunk_agent_notes` (MCP + engine)
 - **CLI**: `doctor`, `project-brief`, `search --compact|--max-result-tokens|--meta`, `stats --compact`, `map --compact|--max-documents`
-- **MCP tools** — `doctor`, `project_brief`, chunk-notes tools; extended schemas for `search`, `map`, `stats`, `get_context` (53 tools total)
+- **MCP tools** — `doctor`, `project_brief`, chunk-notes tools; extended schemas for `search`, `map`, `stats`, `get_context`
 - **Tests** — `tests/test_agent_response.py`
 
 ### Documentation
