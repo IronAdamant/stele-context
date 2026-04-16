@@ -33,7 +33,7 @@ After this, **`search`**, **`get_context`**, **`find_references`**, etc. have ma
 |------|--------|
 | Exact string / regex proof | `search_text` or **`agent_grep`** (scoped, token budget, dedup; auto-indexes + session history) |
 | “Where is X defined / used?” | **`find_definition`**, **`find_references`** (symbol graph) |
-| Exploratory “what talks about Y?” | **`search`** (hybrid HNSW + BM25), stronger if Tier 2 is populated |
+| Exploratory “what talks about Y?” | **`search`** (BM25 keyword by default; pass `search_mode="hybrid"` for HNSW+BM25 — only worthwhile when Tier 2 is populated) |
 | Current chunk text | **`get_context`** (optional **trust** + **agent_notes** per chunk; records reads in session) |
 
 ### Grep-first: searching = caching
@@ -52,7 +52,7 @@ get_session_read_files --session-id S # all files fully read this session
 This makes **`get_search_history`** the “post-it note” — it tells the LLM what it
 already looked at before re-running a search or re-reading a file.
 
-Rough rule: **symbols first** for identifiers; **hybrid search** for concepts; **grep-style** for exhaustive verification.
+Rough rule: **symbols first** for identifiers; **`search`** for concepts (keyword-only by default — add `search_mode="hybrid"` when you have Tier-2 summaries); **grep-style** for exhaustive verification.
 
 ### Bounded context on `search` / `map` / `stats`
 
