@@ -71,10 +71,13 @@ Thumbs.db
 # Stele specific
 .stele/
 *.db
+*.db-shm
+*.db-wal
 *.kv
 
 # GitHub Action logs
 GitHub Logs/
+github_issues/
 
 # mypy
 .mypy_cache/
