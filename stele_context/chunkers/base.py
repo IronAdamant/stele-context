@@ -241,7 +241,7 @@ class Chunk:
         # Normalize to unit vector
         norm = np.linalg.norm(signature)
         if norm > 0:
-            return [x / norm for x in signature]
+            return [float(x / norm) for x in signature]
 
         return [float(x) for x in signature]
 
