@@ -101,6 +101,7 @@ def detect_changes_unlocked(
     scan_new: bool = False,
     project_root: Any = None,
     skip_dirs: set[str] | None = None,
+    limit: int = 200,
 ) -> dict[str, Any]:
     """Core body of detect_changes_and_update, extracted for engine delegation."""
     storage.create_session(session_id, agent_id=agent_id)
@@ -276,6 +277,21 @@ def detect_changes_unlocked(
             symbol_manager.propagate_staleness(modified_chunk_ids)
 
     storage.record_change(summary=results, session_id=session_id, reason=reason)
+
+    # Bound the response for MCP token caps. Full results were already
+    # persisted via record_change above, so truncation only affects what
+    # the caller sees — not what's stored.
+    if limit is not None and limit > 0:
+        totals = {
+            key: len(results[key])
+            for key in ("unchanged", "modified", "new", "removed", "conflicts")
+        }
+        truncated = any(count > limit for count in totals.values())
+        if truncated:
+            for key in ("unchanged", "modified", "new", "removed", "conflicts"):
+                if len(results[key]) > limit:
+                    results[key] = results[key][:limit]
+            results["totals"] = {**totals, "truncated": True, "limit": limit}
 
     # Notify other agents about changes
     if coordination:

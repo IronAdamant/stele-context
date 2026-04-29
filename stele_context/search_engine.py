@@ -903,8 +903,15 @@ def get_search_quality_snapshot(storage: Any, vector_index: Any) -> dict[str, An
     advice = None
     if tier2_pct < 5.0:
         advice = (
-            "Tier-2 coverage is low. Consider adding summaries or calling "
-            "llm_embed for key concepts to improve semantic relevance."
+            "Tier-2 coverage is critically low. Most semantic searches will "
+            "fall back to BM25. Run llm_embed on representative chunks or "
+            "populate semantic_summary fields to enable Tier-2 ranking."
+        )
+    elif tier2_pct < 80.0:
+        advice = (
+            f"Tier-2 coverage is {round(tier2_pct, 1)}% — below the 80% target "
+            "for sharp semantic search. Run llm_embed or populate "
+            "semantic_summary on the remaining chunks."
         )
 
     return {

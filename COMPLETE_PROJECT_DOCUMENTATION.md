@@ -1,6 +1,6 @@
 # Stele Context - Complete Project Documentation
 
-**Last updated:** 2026-04-17 · **Release:** v1.2.0
+**Last updated:** 2026-04-29 · **Release:** v1.3.0 (+ unreleased fixes)
 
 ## Documentation (root)
 

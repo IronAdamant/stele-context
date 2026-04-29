@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`get_context` AttributeError** — `StorageBackend` was missing the `get_recent_search_for_file` delegation, causing `get_context` to raise `'StorageBackend' object has no attribute 'get_recent_search_for_file'` over the MCP boundary. Added the forwarding method to `storage_delegates.py`.
+- **`history` payload overflow when filtered by `document_path`** — the `limit` parameter capped row count but each row's `summary` JSON contained the full batch (e.g. all 31 files in an indexing session), making `history limit=5` return 60 KB+ payloads. When `document_path` is set, the response is now compacted to only the matching entry per category, with full counts preserved under `summary.totals`.
+- **`detect_changes` unbounded response** — first scan after a large index returned 1,700+ lines and overflowed the MCP token cap. Added a `limit` parameter (default 200) that bounds the response per category (`unchanged`/`modified`/`new`/`removed`/`conflicts`); when a category exceeds the cap, `totals.truncated: true` is set with original counts. Full results are still persisted via `record_change` — only the response is bounded.
+- **`coupling` generic-symbol pollution** — common names like `current`, `history`, `acquire`, `release`, `snapshot` produced 50+ false-positive coupled files because every shared symbol contributed equally to `semantic_score`. Per-symbol weight is now `1 / (1 + log2(file_count))` so a name defined in 1 file scores 1.0 while a name defined in 32 files scores ~0.17. Uniqueness counts are batch-fetched via the new `SymbolStorage.get_definition_file_counts(names)`.
+- **`query` (composite search) ignored `path_prefix` for symbol_graph and text_match branches** — semantic search filtered by prefix but identifier lookups and grep results leaked unrelated files. All three sources now respect `path_prefix` consistently.
+- **Doctor advice silent between 5% and 80% Tier-2 coverage** — `search_quality.advice` only fired below 5% (critical). Now emits a target-threshold warning between 5–80% suggesting `llm_embed` / summary population, distinct from the critical message.
+
 ## [1.3.0] - 2026-04-17
 
 ### Changed

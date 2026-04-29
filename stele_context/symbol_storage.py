@@ -271,6 +271,32 @@ class SymbolStorage:
                 ).fetchall()
             ]
 
+    def get_definition_file_counts(self, names: list[str]) -> dict[str, int]:
+        """Return {name: distinct_document_count} for symbols defined as definitions.
+
+        Used by ``coupling`` to weight ``semantic_score`` by uniqueness — a name
+        like ``current`` defined in 50 files is much weaker evidence of coupling
+        than a name like ``RegionStore`` defined in one. Names not present
+        return 0.
+        """
+        if not names:
+            return {}
+        counts: dict[str, int] = {n: 0 for n in names}
+        unique_names = list(set(names))
+        with connect(self.db_path) as conn:
+            for chunk_start in range(0, len(unique_names), 500):
+                batch = unique_names[chunk_start : chunk_start + 500]
+                placeholders = ",".join("?" * len(batch))
+                rows = conn.execute(
+                    f"SELECT name, COUNT(DISTINCT document_path) AS c "
+                    f"FROM symbols WHERE role = 'definition' "
+                    f"AND name IN ({placeholders}) GROUP BY name",
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    counts[row[0]] = int(row[1])
+        return counts
+
     def find_references_by_name(self, name: str) -> list[dict[str, Any]]:
         """Find all references to a symbol name."""
         with connect(self.db_path) as conn:

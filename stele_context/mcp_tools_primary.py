@@ -370,6 +370,11 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                     "description": "When true and document_paths is omitted, scan project root for new files matching chunker extensions not yet in the index; reported under new with reason New file (scan) (default: true)",
                     "default": True,
                 },
+                "limit": {
+                    "type": "integer",
+                    "description": "Cap on entries returned per category (unchanged/modified/new/removed/conflicts). When the limit is hit, totals.<category> reports the full count and totals.truncated is true. All processing still happens — only the response is bounded. Default 200.",
+                    "default": 200,
+                },
             },
             "required": ["session_id"],
         },

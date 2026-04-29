@@ -304,20 +304,30 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
             errors.append(f"semantic_search: {e}")
 
         # 2. Symbol lookups for identifiers in the query
+        # Apply path_prefix consistently with the semantic and text branches —
+        # without it, a generic name (e.g. ``release``) drags in unrelated
+        # files when the caller scoped the query to a subdirectory.
         idents = extract_query_identifiers(query)
+
+        def _matches_prefix(doc_path: str) -> bool:
+            if not path_prefix:
+                return True
+            return doc_path.startswith(path_prefix)
+
         for ident in idents[:3]:  # Limit to top 3 to avoid explosion
             try:
                 refs = self.find_references(ident)
                 for ref in refs.get("definitions", []):
                     cid = ref.get("chunk_id")
-                    if cid and cid not in seen_chunks:
+                    ref_path = ref.get("document_path", "")
+                    if cid and cid not in seen_chunks and _matches_prefix(ref_path):
                         seen_chunks.add(cid)
                         chunk = self.storage.get_chunk(cid)
                         if chunk:
                             results.append(
                                 {
                                     "chunk_id": cid,
-                                    "document_path": ref.get("document_path", ""),
+                                    "document_path": ref_path,
                                     "content": (chunk.get("content") or "")[:300],
                                     "source": "symbol_graph",
                                     "symbol": ident,
@@ -325,14 +335,15 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
                             )
                 for ref in refs.get("references", []):
                     cid = ref.get("chunk_id")
-                    if cid and cid not in seen_chunks:
+                    ref_path = ref.get("document_path", "")
+                    if cid and cid not in seen_chunks and _matches_prefix(ref_path):
                         seen_chunks.add(cid)
                         chunk = self.storage.get_chunk(cid)
                         if chunk:
                             results.append(
                                 {
                                     "chunk_id": cid,
-                                    "document_path": ref.get("document_path", ""),
+                                    "document_path": ref_path,
                                     "content": (chunk.get("content") or "")[:300],
                                     "source": "symbol_graph",
                                     "symbol": ident,
@@ -353,6 +364,8 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
                 for match in group.get("matches", []):
                     file_path = match.get("file", "")
                     if not file_path:
+                        continue
+                    if not _matches_prefix(file_path):
                         continue
                     # Find the chunk for this file/line
                     chunk_meta = self._chunk_for_line(file_path, match.get("line", 0))

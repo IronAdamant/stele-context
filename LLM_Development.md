@@ -2,6 +2,20 @@
 
 Chronological record of development activity on Stele Context, maintained for LLM agent context.
 
+## 2026-04-29 - RecipeLab review _open findings — 6 fixes
+
+Findings from `RecipeLab_alt/MCP_Findings/stele-context_open.md` (now `_closed`).
+
+- **`storage_delegates.py`**: Added `get_recent_search_for_file` forwarding to `_session_storage`. Fixes `get_context` AttributeError observed over the MCP boundary.
+- **`metadata_storage.py`**: When `document_path` filter is set, `get_change_history` now compacts each row's `summary` to only entries matching that path, with full counts preserved under `summary.totals`. Prevents `history limit=5` from returning 60 KB+ when each batch summary lists 30+ files. New helper `_compact_summary_for_document`.
+- **`change_detection.py` + `engine_index_mixin.py` + `mcp_tools_primary.py`**: Added `limit` parameter (default 200) to `detect_changes`. Categories larger than `limit` are truncated in the response with `totals.truncated=true` and original counts; full results still persist via `record_change`. Schema documents the new param.
+- **`symbol_storage.py`**: New `get_definition_file_counts(names: list[str]) -> dict[str, int]` — batch SQL `COUNT(DISTINCT document_path)` grouped by name. Forwarded via `storage_delegates.py`. Used by coupling.
+- **`symbol_graph.py`**: Added `_weighted_semantic_score(unique_syms, def_counts)`. Per-symbol weight is `1 / (1 + log2(max(1, file_count)))`. Both `coupling` (depends_on/incoming) and `_coupling_co_consumers` now pre-fetch counts once and use the weighted score. Common names (`current`, `history`, `acquire`, `release`, `snapshot`) get downweighted instead of treated equal to unique class names.
+- **`engine.py`**: Composite `query` method now applies `path_prefix` to symbol_graph results (`find_references` returns) and to text_match results (`agent_grep` matches), matching the existing semantic_search behavior. Defined a local `_matches_prefix(doc_path)` helper.
+- **`search_engine.py`**: `get_search_quality_snapshot` now emits a target-threshold advice message when Tier-2 coverage is between 5% and 80%, distinct from the critical-level message below 5%.
+- **Tests**: 891 pass (+1 skipped, mcp SDK optional). ruff clean. mypy errors are pre-existing optional-dep imports unrelated to the change.
+- **Findings**: `MCP_Findings/stele-context_open.md` → `MCP_Findings/stele-context_open_closed.md`.
+
 ## 2026-04-10 - JS symbol extraction improvements (Review Eleven findings)
 
 - **`symbol_patterns.py`**: Added const alias tracking — `const Alias = Class` now emits RHS as variable reference. Added content pre-pass for destructured `module.exports = { X, Y, Alias: Original, ...require('./path') }` — parses simple re-exports, aliased re-exports, and spread requires.

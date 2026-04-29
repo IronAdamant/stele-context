@@ -8,6 +8,7 @@ and symbol-based queries (find_references, find_definition, impact_radius).
 
 from __future__ import annotations
 
+import math
 import time
 from collections import deque
 from pathlib import Path
@@ -453,6 +454,32 @@ class SymbolGraphManager:
             return False
         return True
 
+    def _weighted_semantic_score(
+        self,
+        unique_syms: set[str],
+        def_counts: dict[str, int] | None = None,
+    ) -> float:
+        """Score coupling strength, downweighting common symbol names.
+
+        A symbol defined in many files (``current``, ``history``, ``acquire``)
+        is weak evidence of coupling — it just means both files happen to use
+        a popular name. A symbol defined in one file is strong evidence.
+        Per-symbol weight: ``1 / (1 + log2(max(1, file_count)))`` so a name
+        defined in 1 file scores 1.0, in 4 files ~0.33, in 32 files ~0.17.
+        Generic noise refs and short names still contribute 0.
+        """
+        if not unique_syms:
+            return 0.0
+        if def_counts is None:
+            def_counts = self.storage.get_definition_file_counts(list(unique_syms))
+        total = 0.0
+        for s in unique_syms:
+            if s in _NOISE_REFS or len(s) <= 3:
+                continue
+            n = max(1, def_counts.get(s, 1))
+            total += 1.0 / (1.0 + math.log2(n))
+        return round(total, 2)
+
     def impact_radius(
         self,
         chunk_id: str | None = None,
@@ -835,7 +862,15 @@ class SymbolGraphManager:
                 entry["symbols"].add(sym)
                 entry["incoming"] += 1
 
-        # Build result sorted by total edge count (strongest coupling first)
+        # Pre-compute uniqueness weights for every shared symbol once, so a
+        # name defined in many files (current/history/acquire) gets scaled
+        # down and rare names dominate the score.
+        all_syms: set[str] = set()
+        for entry in coupled.values():
+            all_syms.update(entry["symbols"])
+        def_counts = self.storage.get_definition_file_counts(list(all_syms))
+
+        # Build result sorted by uniqueness-weighted score (strongest first)
         results = []
         for entry in coupled.values():
             total = entry["outgoing"] + entry["incoming"]
@@ -845,15 +880,8 @@ class SymbolGraphManager:
                 direction = "depends_on"
             else:
                 direction = "depended_on_by"
-            # Simple semantic score: more unique symbols = higher score,
-            # but penalise if all symbols are generic single words.
             unique_syms = entry["symbols"]
-            semantic_score: float = float(len(unique_syms))
-            if semantic_score > 0:
-                generic_ratio = sum(
-                    1 for s in unique_syms if s in _NOISE_REFS or len(s) <= 3
-                ) / len(unique_syms)
-                semantic_score = round(semantic_score * (1.0 - generic_ratio), 2)
+            semantic_score = self._weighted_semantic_score(unique_syms, def_counts)
             results.append(
                 {
                     "path": entry["path"],
@@ -934,15 +962,16 @@ class SymbolGraphManager:
                 entry["symbols"].add(sym)
                 entry["shared_consumers"].add(consumer_path)
 
+        # Pre-compute uniqueness weights once for all shared symbols.
+        all_syms: set[str] = set()
+        for entry in other_file_refs.values():
+            all_syms.update(entry["symbols"])
+        def_counts = self.storage.get_definition_file_counts(list(all_syms))
+
         results = []
         for entry in other_file_refs.values():
             unique_syms = entry["symbols"]
-            semantic_score: float = float(len(unique_syms))
-            if semantic_score > 0:
-                generic_ratio = sum(
-                    1 for s in unique_syms if s in _NOISE_REFS or len(s) <= 3
-                ) / len(unique_syms)
-                semantic_score = round(semantic_score * (1.0 - generic_ratio), 2)
+            semantic_score = self._weighted_semantic_score(unique_syms, def_counts)
             # Boost score by number of shared consumers (Jaccard-style proxy)
             consumer_score = round(len(entry["shared_consumers"]) * 0.5, 2)
             results.append(

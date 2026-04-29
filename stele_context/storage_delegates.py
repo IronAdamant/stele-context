@@ -154,6 +154,9 @@ class StorageDelegatesMixin:
     def find_definitions(self, name: str) -> list[dict[str, Any]]:
         return self._symbol_storage.find_definitions(name)
 
+    def get_definition_file_counts(self, names: list[str]) -> dict[str, int]:
+        return self._symbol_storage.get_definition_file_counts(names)
+
     def find_references_by_name(self, name: str) -> list[dict[str, Any]]:
         return self._symbol_storage.find_references_by_name(name)
 
@@ -272,6 +275,13 @@ class StorageDelegatesMixin:
 
     def get_search_history(self, session_id: str) -> list[dict[str, Any]]:
         return self._session_storage.get_search_history(session_id)
+
+    def get_recent_search_for_file(
+        self, session_id: str, document_path: str
+    ) -> dict[str, Any] | None:
+        return self._session_storage.get_recent_search_for_file(
+            session_id, document_path
+        )
 
     def record_file_read(
         self,

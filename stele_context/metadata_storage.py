@@ -192,11 +192,14 @@ class MetadataStorage:
             del row["summary_json"]
 
         if document_path:
-            rows = [
-                r
-                for r in rows
-                if self._summary_mentions_document(r["summary"], document_path)
-            ][:limit]
+            filtered: list[dict[str, Any]] = []
+            for r in rows:
+                if self._summary_mentions_document(r["summary"], document_path):
+                    r["summary"] = self._compact_summary_for_document(
+                        r["summary"], document_path
+                    )
+                    filtered.append(r)
+            rows = filtered[:limit]
 
         return rows
 
@@ -236,3 +239,43 @@ class MetadataStorage:
                 if isinstance(entry, str) and entry == document_path:
                     return True
         return False
+
+    @staticmethod
+    def _compact_summary_for_document(
+        summary: dict[str, Any], document_path: str
+    ) -> dict[str, Any]:
+        """Reduce a batch summary to only the entries mentioning ``document_path``.
+
+        Keeps aggregate counts under ``totals`` so callers can see the original
+        batch size without paying the full payload (which could be hundreds of
+        files for a force-reindex). This is what lets ``limit`` translate into
+        a bounded response size when filtering by path.
+        """
+        compact: dict[str, Any] = {}
+        totals: dict[str, int] = {}
+        for key in ("unchanged", "removed"):
+            entries = summary.get(key, [])
+            if not isinstance(entries, list):
+                continue
+            totals[key] = len(entries)
+            if document_path in entries:
+                compact[key] = [document_path]
+        for key in ("modified", "new"):
+            entries = summary.get(key, [])
+            if not isinstance(entries, list):
+                continue
+            totals[key] = len(entries)
+            matched = [
+                e
+                for e in entries
+                if (isinstance(e, dict) and e.get("path") == document_path)
+                or (isinstance(e, str) and e == document_path)
+            ]
+            if matched:
+                compact[key] = matched
+        for key, value in summary.items():
+            if key in ("unchanged", "removed", "modified", "new"):
+                continue
+            compact[key] = value
+        compact["totals"] = totals
+        return compact

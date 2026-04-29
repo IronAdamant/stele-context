@@ -408,6 +408,7 @@ class _IndexMixin:
         agent_id: str | None = None,
         *,
         scan_new: bool = True,
+        limit: int = 200,
     ) -> dict[str, Any]:
         with self._lock.write_lock():
             return _cd.detect_changes_unlocked(
@@ -437,4 +438,5 @@ class _IndexMixin:
                 scan_new=scan_new,
                 project_root=self._project_root,
                 skip_dirs=self.skip_dirs,
+                limit=limit,
             )
