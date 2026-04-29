@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-04-29
+
 ### Fixed
 - **`get_context` AttributeError** — `StorageBackend` was missing the `get_recent_search_for_file` delegation, causing `get_context` to raise `'StorageBackend' object has no attribute 'get_recent_search_for_file'` over the MCP boundary. Added the forwarding method to `storage_delegates.py`.
 - **`history` payload overflow when filtered by `document_path`** — the `limit` parameter capped row count but each row's `summary` JSON contained the full batch (e.g. all 31 files in an indexing session), making `history limit=5` return 60 KB+ payloads. When `document_path` is set, the response is now compacted to only the matching entry per category, with full counts preserved under `summary.totals`.
