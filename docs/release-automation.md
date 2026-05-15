@@ -118,6 +118,27 @@ If you are a maintainer or Grok Build platform engineer, the two highest-leverag
 
 ---
 
+## Standard Release Process (Going Forward)
+
+**After any significant change or batch of changes, the following must be followed:**
+
+1. Run quality gates locally (`ruff check`, `ruff format`, `mypy`, `pytest`).
+2. Use the release tooling:
+   ```bash
+   stele-context release --version X.Y.Z --message "..." --push
+   ```
+   or
+   ```bash
+   python -m scripts.release --version X.Y.Z --message "..." --push
+   ```
+3. The tag push will automatically trigger the PyPI publish workflow.
+
+This ensures consistent versioning, changelog maintenance, testing, tagging, and PyPI updates.
+
+**v1.3.3** was the first release performed entirely with this new Grok Build automation.
+
+---
+
 *This document was created during a Grok Build iteration to make future releases first-class and agent-friendly.*
 
-Last updated: 2026-05-15 (v1.3.2 release cycle)
+Last updated: 2026-05-15 (v1.3.3 release)
