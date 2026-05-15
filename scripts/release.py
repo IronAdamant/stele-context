@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
 INIT_FILE = ROOT / "stele_context" / "__init__.py"
 CHANGELOG = ROOT / "CHANGELOG.md"
+COMPLETE_DOCS = ROOT / "COMPLETE_PROJECT_DOCUMENTATION.md"
 
 
 def get_current_version() -> str:
@@ -113,6 +114,29 @@ def update_changelog(new_version: str, message: str | None) -> None:
 
     CHANGELOG.write_text(new_content)
     print(f"✓ Updated CHANGELOG.md with [{new_version}] section")
+
+
+def update_complete_docs(new_version: str) -> None:
+    """Update the header in COMPLETE_PROJECT_DOCUMENTATION.md."""
+    if not COMPLETE_DOCS.exists():
+        return
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    content = COMPLETE_DOCS.read_text()
+
+    # Update the first line that has "Last updated" and "Release"
+    new_line = f"**Last updated:** {today} · **Release:** v{new_version} (Grok Build)"
+
+    new_content = re.sub(
+        r"\*\*Last updated:\*\*.*?\*\*Release:\*\*.*",
+        new_line,
+        content,
+        count=1,
+    )
+
+    if new_content != content:
+        COMPLETE_DOCS.write_text(new_content)
+        print(f"✓ Updated COMPLETE_PROJECT_DOCUMENTATION.md header → v{new_version}")
 
 
 def run_quality_gates(skip_tests: bool = False) -> bool:
@@ -220,6 +244,7 @@ def main() -> int:
         update_pyproject(new_version)
         update_init_file(new_version)
         update_changelog(new_version, args.message)
+        update_complete_docs(new_version)
 
         if not run_quality_gates(skip_tests=args.skip_tests):
             print("\n✗ Quality gates failed. Fix issues and try again.")

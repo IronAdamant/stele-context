@@ -314,3 +314,14 @@ By contributing, you agree that your contributions will be licensed under the MI
 ---
 
 Thank you for contributing to Stele Context! 🚀
+
+## Releases & Grok Build Automation
+
+See [docs/release-automation.md](docs/release-automation.md) for the current release process and the capabilities needed for full Grok Build autonomous releases.
+
+The key files are:
+- `scripts/release.py` — one-command release helper
+- `.github/workflows/publish.yml` — dual-trigger (tag push + manual Release) PyPI publisher using Trusted Publishing
+- `stele-context release` CLI command (new in 1.3.2+)
+
+We are actively working with the Grok team to enable zero-touch releases via the `grok_com_github` MCP tools.
