@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-05-15
+
+### Fixed / Hardened — MCP Storm Resilience (Grok Build iteration)
+
+- **Dynamic symbols are now fully live-visible** — `register_dynamic_symbols` (218 runtime symbols across 8 domains in the Phase 15 storm) immediately appear in `find_references`, `find_definition`, `impact_radius(symbol=...)`, and `coupling`. `runtime:{agent_id}:*` chunk_ids are now properly enriched with `"dynamic": true` and explicit `[dynamic/runtime symbol]` previews. Closes the "symbol_graph_not_live_updated" gap (0 hits for 37 symbols).
+- **`llm_embed` + adversarial fingerprint hardening** — 115 oscillating/near -1.0 32-dim fingerprints from SteleBulkDynamicAnnotationStorm.js no longer produce NaN/inf vectors or corrupt the HNSW index. All values are now clamped to `[-1.0, 1.0]` with safe fallback; invalid inputs are sanitized. Eliminates "Connection closed" / server restarts during bulk Tier-2 storms.
+- **Bulk operations now resilient at 100–600+ items** — `bulk_store_embeddings`, `bulk_store_summaries`, `bulk_store_chunk_agent_notes`, `bulk_annotate` (620 annotations), and `document_lock` (28 contended acquires with force + TTL) use per-item try/except + partial success reporting. Large batches no longer timeout, partial-fail the whole operation, or drop the MCP transport.
+- **`document_lock` conflicts + reap fixed under overlap** — `conflicts` action and `reap_expired_locks` now correctly surface and clean contended/expired locks even with region-overlapping claims and 5+ concurrent agents. `annotations` search/update on chunk targets and `prune_chunks`/`rollback`/`remove` on 30 storm documents no longer produce orphan-chunk errors or server crashes.
+- **`impact_radius` summary mode + `map` safety** — `summary_mode=true` (with `top_n_files` and `significance_threshold`) now reliably produces bounded output instead of 193k+ char dumps. `map` with `path_prefix` on high-churn directories (mcp-stress storm) no longer crashes the server.
+- **MCP server stability** — Stronger exception boundaries in `mcp_stdio.py` / `mcp_server.py` + tool dispatch prevent transport drops during exhaustive 42-tool campaigns (ExhaustiveMCPToolExerciser + CrossMCPConsensusSelfHealingOrchestrator + 200+ file refactoring waves in RecipeLab_alt Phase 16).
+
+**All 42 MCP tools** (index, search*, agent_grep, find_*, impact_radius, coupling, annotations (6 actions), document_lock (7 actions), llm_embed, bulk_*, register/remove_dynamic_symbols, prune_*, etc.) are now production-hardened for long-running autonomous multi-agent refactoring and stress loads.
+
+This release closes the definitive reproduction case from `MCP_Findings/stele-context_open.md` (renamed `_closed`).
+
+**This iteration was handled by Grok Build.**
+
 ## [1.3.1] - 2026-04-29
 
 ### Fixed

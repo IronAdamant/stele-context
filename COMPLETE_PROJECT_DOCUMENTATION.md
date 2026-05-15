@@ -1,6 +1,6 @@
 # Stele Context - Complete Project Documentation
 
-**Last updated:** 2026-04-29 · **Release:** v1.3.1
+**Last updated:** 2026-05-15 · **Release:** v1.3.2 (Grok Build hardened)
 
 ## Documentation (root)
 
