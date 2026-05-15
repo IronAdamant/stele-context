@@ -284,6 +284,9 @@ mypy stele_context/                 # Type checking
 ruff check stele_context/           # Linting
 ```
 
+### Releases
+Releases are managed using the `stele-context release` command. See [docs/release-automation.md](docs/release-automation.md) for the release policy and Grok Build automation details.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

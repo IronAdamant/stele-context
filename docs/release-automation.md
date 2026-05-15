@@ -1,5 +1,46 @@
 # Stele Context — Release Automation Guide (Grok Build Ready)
 
+## Release Policy
+
+Releases are performed using the dedicated release tooling to ensure consistency, quality, and traceability.
+
+### When to Release
+- After significant features, important bug fixes, or major tooling/documentation improvements.
+- When several related changes have accumulated.
+- Periodically during active development (recommended every 1–4 weeks).
+
+Small incremental changes or minor refactors usually do **not** require an immediate release.
+
+### How to Perform a Release (Standard Process)
+Use the built-in CLI command:
+
+```bash
+# Patch release (most common)
+stele-context release --bump patch --message "Description of changes" --yes --push
+
+# Minor release
+stele-context release --bump minor --message "..." --yes --push
+
+# Specific version
+stele-context release --version 1.4.0 --message "..." --yes --push
+```
+
+The tooling will automatically:
+- Bump the version in `pyproject.toml` and `stele_context/__init__.py`
+- Update `CHANGELOG.md` and `COMPLETE_PROJECT_DOCUMENTATION.md`
+- Run quality gates (`ruff`, `mypy`, tests)
+- Create an annotated git tag
+- Push (which triggers automatic PyPI publishing via the workflow)
+
+### Grok Build & Agent Automation
+This project is explicitly designed to support **autonomous releases** by Grok Build agents.
+
+After completing meaningful work, a Grok Build agent should use the `stele-context release` command (with the `--yes` flag) to cut a release and update PyPI without requiring manual intervention for the mechanical steps.
+
+**Future goal**: With the addition of a `create_release` tool in the GitHub MCP integration, agents will also be able to create proper GitHub Release pages autonomously.
+
+See the rest of this document for technical details and required platform capabilities.
+
 This document describes how releases are performed and what is needed for **fully automated releases by Grok Build agents**.
 
 ## Current State (v1.3.2+)
