@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-05-15
+
+### Changed
+- Formalize Grok Build release automation (scripts/release.py + stele-context release command + improved PyPI workflow). Going forward, all releases will use this tooling to ensure consistent build, testing, tagging, and PyPI updates.
+
+
+## [1.3.3] - 2026-05-15
+
+### Changed
+- Formalize Grok Build release automation (scripts/release.py + stele-context release command + improved PyPI workflow). Going forward, all releases will use this tooling to ensure consistent build, testing, tagging, and PyPI updates.
+
+
+## [1.3.3] - 2026-05-15
+
+### Changed
+- Formalize Grok Build release automation (scripts/release.py + stele-context release command + improved PyPI workflow). Going forward, all releases will use this tooling to ensure consistent build, testing, tagging, and PyPI updates.
+
+
 ## [1.3.2] - 2026-05-15
 
 ### Fixed / Hardened — MCP Storm Resilience (Grok Build iteration)

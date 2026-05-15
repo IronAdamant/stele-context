@@ -17,6 +17,7 @@ import sys
 import time
 
 from stele_context import __version__ as stele_version
+from stele_context.cli_release import add_release_parser, cmd_release
 from stele_context.engine import Stele
 from stele_context.mcp_server import DEFAULT_MCP_PORT, MCPServer
 
@@ -484,6 +485,9 @@ Examples:
         help="Output as JSON",
     )
 
+    # Release automation (Grok Build)
+    add_release_parser(subparsers)
+
     return parser
 
 
@@ -866,6 +870,7 @@ def main(argv: list[str] | None = None) -> int:
         "update-annotation": cmd_update_annotation,
         "map": cmd_map,
         "history": cmd_history,
+        "release": cmd_release,
     }
 
     handler = command_handlers.get(args.command)

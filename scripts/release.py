@@ -27,7 +27,6 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
@@ -108,9 +107,7 @@ def update_changelog(new_version: str, message: str | None) -> None:
     if message:
         extra = f"\n\n### Changed\n- {message}\n"
 
-    new_content = content.replace(
-        unreleased_header, new_header + extra, 1
-    )
+    new_content = content.replace(unreleased_header, new_header + extra, 1)
 
     CHANGELOG.write_text(new_content)
     print(f"✓ Updated CHANGELOG.md with [{new_version}] section")
@@ -145,7 +142,10 @@ def run_quality_gates(skip_tests: bool = False) -> bool:
 
     commands = [
         ("ruff check", ["ruff", "check", "stele_context/", "scripts/"]),
-        ("ruff format --check", ["ruff", "format", "--check", "stele_context/", "scripts/"]),
+        (
+            "ruff format --check",
+            ["ruff", "format", "--check", "stele_context/", "scripts/"],
+        ),
         ("mypy", ["mypy", "stele_context/"]),
     ]
 
@@ -213,7 +213,9 @@ def main() -> int:
         "--message", "-m", help="Short release message for CHANGELOG and tag"
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Show what would happen without making changes"
+        "--dry-run",
+        action="store_true",
+        help="Show what would happen without making changes",
     )
     parser.add_argument(
         "--skip-tests", action="store_true", help="Skip running the test suite"
@@ -223,6 +225,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--no-push-main", action="store_true", help="When --push, only push the tag"
+    )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip the confirmation prompt (useful for automation / Grok Build agents)",
     )
 
     args = parser.parse_args()
@@ -236,9 +244,12 @@ def main() -> int:
         print("\n[DRY RUN] No files will be modified.")
         return 0
 
-    if input(f"\nProceed with release v{new_version}? [y/N] ").lower() != "y":
-        print("Aborted.")
-        return 1
+    if not args.yes:
+        if input(f"\nProceed with release v{new_version}? [y/N] ").lower() != "y":
+            print("Aborted.")
+            return 1
+    else:
+        print("Running in non-interactive mode (--yes). Proceeding with release.")
 
     try:
         update_pyproject(new_version)

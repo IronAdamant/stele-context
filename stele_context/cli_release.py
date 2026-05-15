@@ -39,6 +39,8 @@ def cmd_release(args: Any, stele: Any) -> int:
         cmd += ["--push"]
     if getattr(args, "no_push_main", False):
         cmd += ["--no-push-main"]
+    if getattr(args, "yes", False):
+        cmd += ["--yes"]
 
     print("Delegating to scripts/release.py ...")
     result = subprocess.run(cmd)
@@ -86,6 +88,12 @@ def add_release_parser(subparsers: Any) -> None:
         "--no-push-main",
         action="store_true",
         help="Only push the tag when using --push",
+    )
+    release_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip confirmation prompt (for automation / Grok Build)",
     )
 
     release_parser.set_defaults(func=cmd_release)
