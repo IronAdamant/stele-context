@@ -3,10 +3,18 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  push:
+    tags:
+      - 'v*'          # Enables fully automated releases from agents (Grok Build, etc.)
   workflow_dispatch:
 
 # PyPI Trusted Publishing: short-lived OIDC token from GitHub — no PYPI_API_TOKEN secret.
-# One-time: pypi.org → project → Publishing → add trusted publisher (GitHub + this repo + publish.yml).
+# One-time setup: pypi.org → project → Publishing → add trusted publisher (GitHub + this repo + publish.yml).
+#
+# Trigger modes (for Grok Build / agent automation):
+#   - Manual: Create a GitHub Release from a v* tag (current recommended for review)
+#   - Automated: Push a `v*` tag (e.g. `git tag -a v1.3.2 -m "..." && git push origin v1.3.2`)
+#     The workflow will build & publish automatically.
 permissions:
   contents: read
   id-token: write
@@ -15,7 +23,18 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+    - name: Determine release trigger
+      run: |
+        echo "Triggered by: ${{ github.event_name }}"
+        if [[ "${{ github.ref_type }}" == "tag" ]]; then
+          echo "Tag: ${{ github.ref_name }}"
+        elif [[ "${{ github.event_name }}" == "release" ]]; then
+          echo "Release: ${{ github.event.release.tag_name }}"
+        fi
+
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Good for release tagging / changelog tooling in future
 
     - name: Set up Python
       uses: actions/setup-python@v5

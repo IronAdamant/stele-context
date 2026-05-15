@@ -34,3 +34,18 @@ No changes to your existing workflows are required. This project was built to be
 See README.md for full setup.
 
 For questions or to contribute Grok-specific adapters, open an issue.
+
+## Automated Releases (for Grok Build agents)
+
+As of v1.3.2, the PyPI publish workflow supports two modes:
+
+1. **Manual (recommended for review)**: Create a GitHub Release from a `v*` tag.
+2. **Fully automated**: Push an annotated version tag (`git tag -a vX.Y.Z ... && git push origin vX.Y.Z`).
+
+The workflow (`.github/workflows/publish.yml`) now triggers on both `release: published` and `push: tags: ['v*']`.
+
+Future Grok Build agents can perform complete releases (version bump + changelog + tag + PyPI) with minimal human intervention once:
+- A `create_release` action becomes available in the GitHub MCP tools, or
+- The agent is granted appropriate repository permissions.
+
+This setup was prepared during a Grok Build iteration.
