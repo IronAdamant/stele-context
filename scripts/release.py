@@ -164,7 +164,7 @@ def run_quality_gates(skip_tests: bool = False) -> bool:
 
 
 def create_git_tag(version: str, message: str) -> None:
-    """Create an annotated git tag."""
+    """Create an annotated git tag (after ensuring changes are committed)."""
     tag_name = f"v{version}"
     tag_message = f"Stele Context {tag_name}\n\n{message}"
 
@@ -176,12 +176,34 @@ def create_git_tag(version: str, message: str) -> None:
         print(f"⚠ Tag {tag_name} already exists. Skipping tag creation.")
         return
 
+    # Safety: Auto-commit pending release changes if any (very important for correct tagging)
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], capture_output=True, text=True, cwd=ROOT
+    )
+    if status.stdout.strip():
+        print("Detected uncommitted release changes — auto-committing them first...")
+        subprocess.run(
+            [
+                "git",
+                "add",
+                "pyproject.toml",
+                "stele_context/__init__.py",
+                "CHANGELOG.md",
+                "COMPLETE_PROJECT_DOCUMENTATION.md",
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+        commit_msg = message or f"Release v{version}"
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=ROOT, check=True)
+        print("✓ Auto-committed release changes")
+
     subprocess.run(
         ["git", "tag", "-a", tag_name, "-m", tag_message],
         cwd=ROOT,
         check=True,
     )
-    print(f"✓ Created annotated tag: {tag_name}")
+    print(f"✓ Created annotated tag: {tag_name} (on correct commit with new version)")
 
 
 def push_release(version: str, push_main: bool = True) -> None:
