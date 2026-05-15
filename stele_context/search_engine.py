@@ -808,22 +808,39 @@ def bulk_store_embeddings_unlocked(
     vector_index: Any,
     save_index: Any,
 ) -> dict[str, Any]:
-    """Normalize and store raw embedding vectors for multiple chunks."""
+    """Normalize and store raw embedding vectors for multiple chunks.
+    Resilient to per-item errors (e.g. bad vectors from adversarial llm_embed storms).
+    """
     normalized: dict[str, list[float]] = {}
+    errors: list[str] = []
     for cid, vector in embeddings.items():
-        norm = sum(x * x for x in vector) ** 0.5
-        if norm > 0:
-            normalized[cid] = [x / norm for x in vector]
-        else:
-            normalized[cid] = vector
+        try:
+            if not isinstance(vector, (list, tuple)) or len(vector) == 0:
+                raise ValueError("invalid vector")
+            norm = sum(x * x for x in vector) ** 0.5
+            if norm > 0:
+                normalized[cid] = [x / norm for x in vector]
+            else:
+                normalized[cid] = [0.0] * len(vector)
+        except Exception as e:
+            errors.append(f"{cid}: {e}")
+            continue
 
     result = storage.bulk_store_agent_signatures(normalized)
-    stored_ids = [cid for cid in embeddings if cid not in result.get("errors", [])]
+    stored_ids = [cid for cid in normalized if cid not in result.get("errors", [])]
     for cid in stored_ids:
-        vector_index.remove_chunk(cid)
-        vector_index.add_chunk(cid, normalized[cid])
+        try:
+            vector_index.remove_chunk(cid)
+            vector_index.add_chunk(cid, normalized[cid])
+        except Exception:
+            errors.append(f"{cid}: index update failed")
     if stored_ids:
-        save_index()
+        try:
+            save_index()
+        except Exception:
+            errors.append("save_index failed")
+    if errors:
+        result.setdefault("errors", []).extend(errors)
     return result
 
 

@@ -354,6 +354,12 @@ class SymbolGraphManager:
             results = []
             for sym in syms:
                 chunk = self.storage.get_chunk(sym["chunk_id"])
+                is_dynamic = str(sym["chunk_id"]).startswith("runtime:")
+                preview = ""
+                if chunk:
+                    preview = (chunk.get("content") or "")[:200]
+                elif is_dynamic:
+                    preview = "[dynamic/runtime symbol - no static chunk content]"
                 results.append(
                     {
                         "symbol": sym["name"],
@@ -361,9 +367,8 @@ class SymbolGraphManager:
                         "chunk_id": sym["chunk_id"],
                         "document_path": sym["document_path"],
                         "line_number": sym.get("line_number"),
-                        "content_preview": (
-                            (chunk.get("content") or "")[:200] if chunk else ""
-                        ),
+                        "content_preview": preview,
+                        "dynamic": is_dynamic,
                     }
                 )
             return results
@@ -413,14 +418,18 @@ class SymbolGraphManager:
             shadowed = len(doc_defs_sorted) > 1
             for idx, defn in enumerate(doc_defs_sorted, 1):
                 chunk = self.storage.get_chunk(defn["chunk_id"])
+                is_dynamic = str(defn["chunk_id"]).startswith("runtime:")
                 entry: dict[str, Any] = {
                     "symbol": defn["name"],
                     "kind": defn["kind"],
                     "chunk_id": defn["chunk_id"],
                     "document_path": defn["document_path"],
                     "line_number": defn.get("line_number"),
-                    "content": chunk.get("content") if chunk else None,
+                    "content": chunk.get("content")
+                    if chunk
+                    else ("[dynamic/runtime symbol]" if is_dynamic else None),
                     "token_count": chunk["token_count"] if chunk else 0,
+                    "dynamic": is_dynamic,
                 }
                 if shadowed:
                     entry["definition_index"] = idx

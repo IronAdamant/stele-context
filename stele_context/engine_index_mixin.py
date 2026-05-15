@@ -349,7 +349,15 @@ class _IndexMixin:
                     "error": f"Expected {len(FINGERPRINT_NAMES)} fingerprint values, "
                     f"got {len(fingerprint_values)}",
                 }
-            fp = dict(zip(FINGERPRINT_NAMES, fingerprint_values))
+            # Sanitize adversarial/oscillating inputs from bulk llm_embed storms
+            sanitized = []
+            for v in fingerprint_values:
+                try:
+                    fv = float(v)
+                except (TypeError, ValueError):
+                    fv = 0.0
+                sanitized.append(max(-1.0, min(1.0, fv)))
+            fp = dict(zip(FINGERPRINT_NAMES, sanitized))
         else:
             fp = semantic_fingerprint(text[:4000])
 
