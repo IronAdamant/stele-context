@@ -32,6 +32,20 @@ class TestReconstructCachedText:
         chunks = _chunks_for(text, [(3, 6), (0, 3)])
         assert reconstruct_cached_text(chunks) == text
 
+    def test_stripped_trailing_whitespace_restored_from_end_pos(self):
+        # Chunkers strip content but end_pos spans the raw region.
+        text = "def f():\n    pass\n"
+        chunks = [{"content": "def f():\n    pass", "start_pos": 0, "end_pos": 18}]
+        assert reconstruct_cached_text(chunks) == text
+
+    def test_blank_line_seam_between_regions_restored(self):
+        text = "def a():\n    pass\n\ndef b():\n    pass\n"
+        chunks = [
+            {"content": "def a():\n    pass", "start_pos": 0, "end_pos": 19},
+            {"content": "def b():\n    pass", "start_pos": 19, "end_pos": len(text)},
+        ]
+        assert reconstruct_cached_text(chunks) == text
+
     def test_empty_chunks_returns_none(self):
         assert reconstruct_cached_text([]) is None
 
@@ -53,14 +67,37 @@ class TestBuildChangeDiff:
         assert "+    return 'planet'" in diff["diff"]
         assert diff["diff_truncated"] is False
 
-    def test_inexact_reconstruction_is_flagged(self):
+    def test_newline_gap_between_chunks_is_recovered(self):
         old = "alpha\n\nbeta\n"
-        # Chunks rebuilt without the blank line — hash won't match.
+        # Blank line lost from content but recoverable from the offset gap.
         chunks = [
             {"content": "alpha\n", "start_pos": 0},
             {"content": "beta\n", "start_pos": 7},
         ]
-        diff = build_change_diff(chunks, _hash(old), "alpha\ngamma\n")
+        diff = build_change_diff(chunks, _hash(old), "alpha\n\ngamma\n")
+        assert diff is not None
+        assert diff["diff_exact"] is True
+        assert diff["added_lines"] == 1
+        assert diff["removed_lines"] == 1
+
+    def test_legacy_missing_trailing_newline_is_recovered(self):
+        # Legacy rows: last chunk's end_pos used the stripped length, so
+        # the file's final newline isn't in the offsets — the +"\n"
+        # candidate catches it.
+        old = "def f():\n    pass\n"
+        chunks = [{"content": "def f():\n    pass", "start_pos": 0, "end_pos": 17}]
+        diff = build_change_diff(chunks, _hash(old), "def f():\n    return 1\n")
+        assert diff is not None
+        assert diff["diff_exact"] is True
+
+    def test_inexact_reconstruction_is_flagged(self):
+        # Separator was a space, not newlines — genuinely unrecoverable.
+        old = "alpha beta\n"
+        chunks = [
+            {"content": "alpha", "start_pos": 0, "end_pos": 5},
+            {"content": "beta\n", "start_pos": 6, "end_pos": 11},
+        ]
+        diff = build_change_diff(chunks, _hash(old), "alpha gamma\n")
         assert diff is not None
         assert diff["diff_exact"] is False
 
@@ -111,7 +148,29 @@ class TestGetContextDiffIntegration:
         assert "diff_since_cache" in entry
         diff = entry["diff_since_cache"]
         assert "+    return 'planet'" in diff["diff"]
+        assert diff["diff_exact"] is True
         assert diff["recommendation"] in ("read_diff", "reread_file")
+
+    def test_multi_function_file_small_edit_has_no_phantom_changes(self, tmp_path):
+        engine = Stele(storage_dir=str(tmp_path / "storage"))
+        f = tmp_path / "big.py"
+        funcs = [
+            f"def func_{i}():\n    return 'stable value number {i}'\n\n"
+            for i in range(40)
+        ]
+        f.write_text("".join(funcs))
+        engine.index_documents([str(f)])
+
+        f.write_text(
+            f.read_text().replace("stable value number 20", "EDITED value number 20")
+        )
+        self._touch_mtime(str(f))
+
+        diff = engine.get_context([str(f)])["changed"][0]["diff_since_cache"]
+        assert diff["diff_exact"] is True
+        assert diff["added_lines"] == 1
+        assert diff["removed_lines"] == 1
+        assert diff["recommendation"] == "read_diff"
 
     def test_include_diff_false_omits_diff(self, tmp_path):
         engine = Stele(storage_dir=str(tmp_path / "storage"))

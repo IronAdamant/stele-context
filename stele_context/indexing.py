@@ -79,7 +79,12 @@ def merge_similar_chunks(
             and isinstance(current.content, str)
             and isinstance(chunk.content, str)
         ):
-            merged_content = current.content + "\n\n" + chunk.content
+            # Join with the true inter-content distance from offsets when
+            # available, so merged chunks stay reconstruction-faithful
+            # (context_diff rebuilds cached text from content + offsets).
+            pad = chunk.start_pos - current.start_pos - len(current.content)
+            separator = "\n" * pad if pad >= 1 else "\n\n"
+            merged_content = current.content + separator + chunk.content
             merged[-1] = Chunk(
                 content=merged_content,
                 modality=current.modality,

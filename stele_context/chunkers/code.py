@@ -269,14 +269,17 @@ class CodeChunker(BaseChunker):
             current_parts.append(content[last_end:])
 
         if current_parts:
-            chunk_content = "".join(current_parts).strip()
+            raw = "".join(current_parts)
+            chunk_content = raw.strip()
             if chunk_content:
+                # end_pos spans the raw region (like the mid-chunk branch) so
+                # stripped trailing whitespace stays recoverable from offsets.
                 chunks.append(
                     Chunk(
                         content=chunk_content,
                         modality="code",
                         start_pos=current_start,
-                        end_pos=current_start + len(chunk_content),
+                        end_pos=current_start + len(raw),
                         document_path=document_path,
                         chunk_index=chunk_index,
                         metadata={"language": language},
@@ -384,7 +387,8 @@ class CodeChunker(BaseChunker):
 
         for i in range(0, len(lines), lines_per_chunk):
             chunk_lines = lines[i : i + lines_per_chunk]
-            chunk_content = "".join(chunk_lines).strip()
+            raw = "".join(chunk_lines)
+            chunk_content = raw.strip()
 
             if chunk_content:
                 start_pos = sum(len(line) for line in lines[:i])
@@ -393,7 +397,7 @@ class CodeChunker(BaseChunker):
                         content=chunk_content,
                         modality="code",
                         start_pos=start_pos,
-                        end_pos=start_pos + len(chunk_content),
+                        end_pos=start_pos + len(raw),
                         document_path=document_path,
                         chunk_index=chunk_index,
                         metadata={"language": language},

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`diff_since_cache` reconstruction is now offset-aware and usually hash-exact.** Cached text is rebuilt by padding to each chunk's `start_pos`/`end_pos` (chunkers strip content but offsets span the raw region), with multiple hash-validated candidates and a least-churn fallback for legacy rows. A one-line edit in a multi-chunk file now diffs as exactly +1/-1 with `diff_exact: true` instead of phantom blank-line edits at old chunk boundaries.
+- `CodeChunker`: final chunk and line-fallback chunks now set `end_pos` from the raw region length (consistent with mid-chunks), so stripped trailing whitespace — including the file's final newline — is recoverable from offsets. New chunk IDs apply only when a file is re-chunked; legacy rows degrade gracefully to best-effort diffs.
+- `merge_similar_chunks` joins with the true inter-content distance from offsets (`"\n" * gap`) instead of a hardcoded `"\n\n"`, keeping merged chunks reconstruction-faithful.
+
 ## [1.4.0] - 2026-06-11
 
 ### Added
