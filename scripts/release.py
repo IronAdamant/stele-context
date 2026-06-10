@@ -69,10 +69,13 @@ def bump_version(current: str, bump_type: str | None, new_version: str | None) -
 
 def update_pyproject(new_version: str) -> None:
     content = PYPROJECT.read_text()
+    # Anchor to line start and replace only the first match: pyproject also
+    # contains `target-version` (ruff) and `python_version` (mypy).
     new_content = re.sub(
-        r'(version\s*=\s*["\'])([^"\']+)(["\'])',
+        r'(?m)^(version\s*=\s*["\'])([^"\']+)(["\'])',
         rf"\g<1>{new_version}\g<3>",
         content,
+        count=1,
     )
     PYPROJECT.write_text(new_content)
     print(f"✓ Updated pyproject.toml → {new_version}")
@@ -93,6 +96,12 @@ def update_changelog(new_version: str, message: str | None) -> None:
     """Update CHANGELOG.md with the new version section."""
     today = datetime.now().strftime("%Y-%m-%d")
     content = CHANGELOG.read_text()
+
+    # Idempotency guard: a re-run after failed quality gates must not insert
+    # a duplicate section (this caused triplicated 1.3.3 entries).
+    if f"## [{new_version}]" in content:
+        print(f"✓ CHANGELOG.md already has a [{new_version}] section; skipping")
+        return
 
     # Replace [Unreleased] with the new version header
     unreleased_header = "## [Unreleased]"

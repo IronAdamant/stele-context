@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-11
+
 ### Added
 - **Diff-since-cache** — `get_context` now returns `diff_since_cache` on changed files: a token-bounded unified diff between the cached version and what's on disk (pure stdlib `difflib`). Includes `diff_exact` (hash-verified reconstruction fidelity), `added_lines`/`removed_lines`, `diff_tokens`, and a `read_diff`/`reread_file` recommendation so agents read only the delta instead of re-reading whole files. New params: `include_diff` (default true), `max_diff_tokens` (default 2000). New module `context_diff.py`.
 - **.gitignore-aware indexing** — directory expansion now skips files matched by the project root's `.gitignore` (supports negation, dir-only, anchored, `**` patterns; pure stdlib). Explicitly listed files always win. Config: `respect_gitignore` (default true) in `.stele-context.toml` or `Stele(respect_gitignore=False)`. New module `gitignore.py`.
