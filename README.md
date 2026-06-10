@@ -1,6 +1,6 @@
 # Stele Context
 
-**Persistent memory for AI coding agents. An MCP server that helps Claude Code, Claude Desktop, Cursor, and other AI tools remember your codebase between conversations.**
+**Persistent memory for AI coding agents. A zero-dependency MCP server that lets Claude Code, Claude Desktop, Cursor, and any MCP-compatible AI coding assistant remember your codebase between conversations — instead of re-reading every file from scratch.**
 
 [![PyPI](https://img.shields.io/pypi/v/stele-context.svg)](https://pypi.org/project/stele-context/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -8,20 +8,21 @@
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/stele-context)
 [![Tests](https://github.com/IronAdamant/stele-context/actions/workflows/test.yml/badge.svg)](https://github.com/IronAdamant/stele-context/actions)
 
-## The Problem
+## The Problem: AI Agents Re-Read Everything
 
-Every time you start a new conversation with Claude Code, Cursor, or any AI coding assistant, it has to read your files from scratch. For a medium-sized project, that's thousands of tokens spent re-reading code that hasn't changed since last time. Your AI agent has no memory of what it already knows about your project.
+Every new conversation with Claude Code, Cursor, or any other LLM coding tool starts from zero. The agent re-reads the same files it read yesterday, burning thousands of tokens on code that hasn't changed. On a medium-sized project that's real money and real context-window space spent re-learning what the agent already knew.
 
-## What Stele Context Does
+Stele Context is a local context cache that fixes this: index once, then only pay for what actually changed.
 
-Stele Context gives your AI coding agent persistent memory across conversations. It:
+## What It Does
 
-1. **Indexes your project files** once — code, docs, configs, even images and PDFs
-2. **Detects what changed** since last time — only changed files get re-read
-3. **Searches your code** by meaning or keywords, not just filenames
-4. **Tracks how your code connects** — knows which files import from which, so it can tell your agent "if you change this file, these other files might break"
+1. **Indexes your project files once** — code, docs, configs, even images and PDFs — into a local SQLite database
+2. **Detects file changes** with an mtime+size fast path and SHA-256 verification — unchanged files cost zero re-reads
+3. **Returns a diff instead of the whole file** when something did change — a 1-line edit in a 600-line file comes back as a ~60-token unified diff, not a 10,000-token re-read
+4. **Searches your codebase** by meaning, keyword, or exact pattern — semantic code search, BM25, and token-budgeted grep in one tool
+5. **Maps how your code connects** — a symbol graph for find-references, go-to-definition, and "what breaks if I change this file?" impact analysis
 
-Everything runs **locally on your machine**. No internet, no API calls, no cloud. Just Python and SQLite.
+Everything runs **100% offline on your machine**. No internet, no API keys, no cloud, no telemetry. Just Python's standard library and SQLite.
 
 ![Semantic search demo](docs/semantic-search-demo.png)
 
@@ -39,18 +40,19 @@ pip install stele-context
 stele-context index src/ docs/ README.md
 ```
 
-This reads your files, breaks them into meaningful chunks, and stores them locally in a `.stele-context/` folder in your project.
+This chunks your files and stores them in a `.stele-context/` folder in your project root. Indexing **respects your `.gitignore`** out of the box, so `node_modules/`, build output, and secrets stay out of the index.
 
 ### Search your code
 
 ```bash
 stele-context search "how does authentication work"
-stele-context search "database connection" --top-k 10
+stele-context search-text "TODO" --regex
+stele-context agent-grep "createApp" --group-by file
 ```
 
-### Connect it to Claude Code or Claude Desktop
+### Connect it to Claude Code, Claude Desktop, or Cursor
 
-Stele Context works as an [MCP server](https://modelcontextprotocol.io/) — a plugin that gives your AI agent extra tools.
+Stele Context runs as an [MCP server](https://modelcontextprotocol.io/) — the standard protocol for giving AI agents extra tools.
 
 ```bash
 pip install stele-context[mcp]
@@ -80,19 +82,21 @@ pip install stele-context[mcp]
 }
 ```
 
+**Cursor, Windsurf, and other MCP clients** — point them at the same `stele-context serve-mcp` command; the configuration shape is the same.
+
 > **Tip:** If you installed in a virtualenv, use the full path: run `which stele-context` to find it.
 
-Once connected, your agent gets **~32 tools** for searching, indexing, and navigating your code — it'll use them automatically when they're helpful. (Set `STELE_MCP_MODE=lite` for ~15 essential tools, or `STELE_MCP_MODE=full` for the complete surface.)
+Once connected, your agent gets **~32 tools** for caching, searching, and navigating your code — it uses them automatically when they're helpful. (Set `STELE_MCP_MODE=lite` for ~15 essential tools, or `STELE_MCP_MODE=full` for the complete surface.)
 
 ## Who Is This For?
 
-- You use **Claude Code**, **Claude Desktop**, **Cursor**, or another AI coding tool
-- You're tired of your agent re-reading the same files at the start of every conversation
-- You want your AI to **remember your codebase** and know how your code connects
-- You want a **code search tool** that understands your project, not just filenames
-- You want something that runs **100% offline** with **no API keys** and **no cloud**
+- You use **Claude Code**, **Claude Desktop**, **Cursor**, or another AI pair-programming tool
+- You're tired of watching your agent re-read the same files at the start of every session
+- You want to **cut token costs** and stop wasting context window on unchanged code
+- You want **local code search** that understands your project — not a cloud RAG pipeline
+- You care about **supply chain security** and want tooling you can audit end to end
 
-If you've ever wished your AI coding assistant had a persistent memory for your project, that's what this does.
+If you've ever wished your AI coding assistant had a memory of your project, that's exactly what this is.
 
 ## What Can It Do?
 
@@ -100,37 +104,69 @@ If you've ever wished your AI coding assistant had a persistent memory for your 
 
 | What you want | How Stele helps |
 |---------------|-----------------|
-| "Don't re-read files that haven't changed" | `get_context` returns cached content for unchanged files, only re-reads modified ones |
-| "Show me only what changed in a file I already read" | Changed files come back with `diff_since_cache` — a token-bounded unified diff against the cached version, so you read the delta instead of the whole file |
-| "Don't index my build output and vendored deps" | Indexing respects your project's `.gitignore` by default (`respect_gitignore = false` to opt out) |
-| "Ask a broad question about my code"" | `query` combines semantic search, symbol graph, and text grep into one deduplicated result list |
-| "What files would break if I change this?" | `impact_radius` follows the dependency chain to find affected files; `significance_threshold` filters out noise from common symbols like `push`/`addEdge`. Also works with `symbol=` for dynamic/runtime hooks and `direction=` for outgoing or bidirectional traversal |
-| "Which files are tightly coupled?" | `coupling` shows shared symbols with a `semantic_score` that discounts generic boilerplate. `mode=co_consumers` catches files imported together by the same consumers |
-| "Search my code by what it does, not just keywords" | `search` combines meaning-based and keyword matching |
-| "Find every line matching a pattern" | `agent_grep` does text/regex search with token-budgeted results |
+| "Don't re-read files that haven't changed" | `get_context` returns cached content for unchanged files — change detection via mtime+size fast path with SHA-256 verification |
+| "Show me only what changed in a file I already read" | Changed files come back with `diff_since_cache` — a hash-exact, token-bounded unified diff against the cached version, with a `read_diff`/`reread_file` cost recommendation |
+| "Don't index my build output and vendored deps" | Directory indexing respects your project's `.gitignore` by default (`respect_gitignore = false` to opt out) |
+| "Ask a broad question about my code" | `query` combines semantic search, the symbol graph, and text grep into one deduplicated result list |
+| "What files would break if I change this?" | `impact_radius` follows the dependency chain to find affected files; `significance_threshold` filters noise from common symbols. Works with `symbol=` for dynamic/runtime hooks and `direction=` for outgoing or bidirectional traversal |
+| "Which files are tightly coupled?" | `coupling` shows shared symbols with a `semantic_score` that discounts generic boilerplate; `mode=co_consumers` catches files imported together |
+| "Find where this function is defined and used" | `find_references` / `find_definition` walk the symbol graph with a clear verdict: referenced, unreferenced, external, or not found |
+| "Find every line matching a pattern" | `agent_grep` does text/regex search with scope annotation, classification, and a token budget |
 | "Run several operations in one round-trip" | `batch` executes multiple tool calls under a single write lock |
 
 ### For power users
 
-- **Multi-agent safe** — Multiple AI agents can share the same index without stepping on each other (document locking, version tracking, conflict detection)
-- **Works with git worktrees** — Each worktree gets its own index, with shared coordination across all of them
-- **Session management** — Save and restore agent state between conversations (rollback, pruning)
-- **Supports many file types** — Code (12 languages), text, Markdown, images, PDFs, audio, video (some need optional packages)
+- **Multi-agent safe** — multiple AI agents share one index without stepping on each other (document locking, optimistic versioning, conflict detection)
+- **Git worktree aware** — each worktree gets its own index, with shared coordination across all of them
+- **Session management** — save and restore agent state between conversations (rollback, pruning, read-history)
+- **Self-maintaining** — change history and telemetry auto-prune to configurable bounds; `doctor` reports index health and database growth
+- **Many file types** — code (12 languages built in), text, Markdown, images, PDFs, audio, video (media types need optional packages)
 
-## How Much Does It Save?
+## How Many Tokens Does It Save?
 
 | What changed | Tokens without Stele | Tokens with Stele | Savings |
 |--------------|---------------------|-------------------|---------|
 | Nothing (same code) | 10,000 | 0 | 100% |
-| A typo fix | 10,000 | ~100 (via `diff_since_cache`) | 99% |
-| Edited a few functions | 10,000 | ~1,000 (via `diff_since_cache`) | 90% |
+| A typo fix | 10,000 | ~60 (the diff) | 99% |
+| Edited a few functions | 10,000 | ~1,000 (the diff) | 90% |
 | Rewrote the whole file | 10,000 | 10,000 | 0% |
 
-The less your code changes between conversations, the more tokens you save.
+The diff numbers aren't aspirational: `diff_since_cache` reconstructs the cached version from stored chunks, verifies it against the file's stored hash, and returns a unified diff the agent reads instead of the file. When the diff would cost more than re-reading (tiny files, total rewrites), it says so explicitly.
+
+## Zero Dependencies, By Design
+
+`pip install stele-context` installs **exactly one package: this one.** The core runs on Python's standard library alone — the vector index (HNSW), BM25 ranking, Porter stemmer, TOML parser, diffing, and storage are all stdlib or hand-rolled and auditable in-repo.
+
+This is a security posture, not a packaging quirk. Every dependency in an AI-agent toolchain is a supply chain attack surface — a tool your agent runs on every conversation should not pull in a dependency tree you can't read. There is no pickle anywhere (JSON-only serialization), no network code in the cache path, and ~17,000 lines of Python you can audit yourself.
+
+Optional extras add capabilities **only if you opt in**:
+
+```bash
+pip install stele-context[tree-sitter]   # Better parsing for 9 more languages
+pip install stele-context[image,pdf]     # Image and PDF support
+pip install stele-context[performance]   # Faster math with numpy
+pip install stele-context[all]           # Everything
+```
+
+<details>
+<summary>Full extras list</summary>
+
+| Extra | What it adds |
+|-------|-------------|
+| `performance` | Faster math for search (numpy, msgspec) |
+| `tree-sitter` | Better code parsing for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP |
+| `image` | Index and search images (Pillow) |
+| `pdf` | Extract text from PDFs (pymupdf) |
+| `audio` | Index audio files (librosa) |
+| `video` | Index video keyframes (opencv) |
+| `mcp` | MCP server for Claude Desktop/Code |
+| `all` | All of the above |
+
+</details>
 
 ## Python API
 
-You can also use Stele Context directly in Python scripts:
+You can also use Stele Context directly as a Python library:
 
 ```python
 from stele_context import Stele
@@ -141,13 +177,19 @@ engine = Stele()
 result = engine.index_documents(["src/", "README.md"])
 print(f"Indexed {result['total_chunks']} chunks")
 
+# Cached read: unchanged files come back from cache,
+# changed files come back with a diff
+ctx = engine.get_context(["src/main.py"])
+for entry in ctx["changed"]:
+    print(entry["diff_since_cache"]["diff"])
+
 # Search by meaning or keywords
 results = engine.search("authentication logic", top_k=5)
 for r in results:
     print(f"{r['document_path']}: {r['content'][:100]}...")
 
 # Check what changed since last time
-changes = engine.detect_changes_and_update()
+changes = engine.detect_changes_and_update("my-session")
 print(f"{len(changes['modified'])} files changed, {len(changes['new'])} new files")
 
 # Find where a function/class is used
@@ -156,10 +198,6 @@ print(f"Verdict: {refs['verdict']}")  # referenced, unreferenced, external, or n
 
 # What breaks if I change this file?
 impact = engine.impact_radius(document_path="src/main.py")
-print(f"{impact['affected_files']} files could be affected")
-
-# Analyze impact of a dynamic/runtime symbol
-impact = engine.impact_radius(symbol="onRecipeCreate")
 print(f"{impact['affected_files']} files could be affected")
 ```
 
@@ -201,33 +239,6 @@ Priority: Python arguments > `.stele-context.toml` > environment variables > def
 
 </details>
 
-## Optional Extras
-
-The core package has **zero dependencies** — it runs on Python's standard library alone. Optional packages add support for more file types and better performance:
-
-```bash
-pip install stele-context[tree-sitter]   # Better code understanding (9 languages)
-pip install stele-context[image,pdf]     # Image and PDF support
-pip install stele-context[performance]   # Faster search with numpy
-pip install stele-context[all]           # Everything
-```
-
-<details>
-<summary>Full extras list</summary>
-
-| Extra | What it adds |
-|-------|-------------|
-| `performance` | Faster math for search (numpy, msgspec) |
-| `tree-sitter` | Better code parsing for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP |
-| `image` | Index and search images (Pillow) |
-| `pdf` | Extract text from PDFs (pymupdf) |
-| `audio` | Index audio files (librosa) |
-| `video` | Index video keyframes (opencv) |
-| `mcp` | MCP server for Claude Desktop/Code |
-| `all` | All of the above |
-
-</details>
-
 ## Supported File Types
 
 **Built-in (no extra packages needed):**
@@ -245,30 +256,39 @@ Make sure it's installed: `pip install stele-context`. If using a virtualenv, ac
 Use the full path to the binary. Run `which stele-context` and put that path in your config.
 
 **`PermissionError` when indexing**
-Another agent might be holding a lock. Run `stele-context` with the `reap_expired_locks` tool to clean up.
+Another agent might be holding a lock. Run the `reap_expired_locks` action of the `document_lock` tool to clean up.
+
+**`diff_exact: false` on files indexed by an older version**
+Caches built before v1.4.1 reconstruct diffs on a best-effort basis. Re-index the file once (`stele-context index <file>`) and diffs become hash-exact from then on. No migration needed.
 
 ## FAQ
 
 **How do I make Claude Code remember my project between conversations?**
-Install Stele Context and add it as an MCP server (see Quick Start above). Once connected, Claude Code can index your project and recall file contents, symbol locations, and code structure across conversations without re-reading everything.
+Install Stele Context and add it as an MCP server (see Quick Start). Once connected, Claude Code can index your project and recall file contents, symbol locations, and code structure across conversations — without re-reading everything.
 
-**Does this work with Cursor / other AI coding tools?**
-Yes. Stele Context runs as an MCP server, which is a standard protocol. Any AI tool that supports MCP can use it. It also has an HTTP REST API and a Python library for direct integration.
+**How does this reduce AI token costs on a large codebase?**
+Unchanged files are served from the local cache at zero read cost, and changed files come back as a unified diff instead of full content. The agent's context window holds what's new, not what it already saw.
+
+**Does this work with Cursor, Windsurf, or other AI coding tools?**
+Yes. Stele Context speaks MCP, the standard protocol for agent tools — any MCP-compatible client can use it. There's also an HTTP REST API and a plain Python library for direct integration.
+
+**Does it replace grep, file reads, or my editor's search?**
+No — it complements them. Native tools stay best for one-off lookups; Stele adds the memory layer: what was already read, what changed since, and how symbols connect across files. Its `agent_grep` also auto-caches every file it searches, so searching and caching happen in one step.
 
 **Does it need an internet connection or API keys?**
-No. Everything runs locally on your machine. No API calls, no cloud, no model downloads, no telemetry. Zero dependencies — just Python's standard library.
+No. Everything runs locally — local-first by design. No API calls, no cloud, no model downloads, no telemetry.
 
 **Is my code safe?**
-Yes. Your code never leaves your machine. No data is sent anywhere. Zero third-party dependencies means no supply chain risk. ~13,000 lines of Python you can read and audit yourself.
+Your code never leaves your machine. Zero third-party dependencies means no dependency tree to trust — about 17,000 lines of stdlib-only Python you can read and audit yourself, with JSON-only serialization (no pickle).
 
 **Can multiple AI agents use it at the same time?**
-Yes. Built-in document locking and version tracking prevent agents from stepping on each other.
+Yes. Built-in document locking, optimistic version tracking, and a conflict log let parallel agents share one index safely — including across git worktrees.
 
 **Where is the data stored?**
-In a `.stele-context/` folder in your project root. It's just a SQLite database and some index files. Each git worktree gets its own.
+In a `.stele-context/` folder in your project root. It's a SQLite database plus index files. Each git worktree gets its own, and history tables auto-prune so it doesn't grow unbounded.
 
-**How is this different from just using CLAUDE.md or project memory?**
-CLAUDE.md gives your agent instructions. Stele Context gives it a searchable index of your entire codebase — every function, every import, every file relationship. It knows what changed since last time and can answer "where is this function used?" or "what breaks if I change this file?" without reading everything again.
+**How is this different from CLAUDE.md or project memory files?**
+CLAUDE.md gives your agent instructions. Stele Context gives it a searchable index of your entire codebase — every function, every import, every file relationship — plus change tracking, so it can answer "where is this used?" or "what changed since I last read this?" without re-reading anything.
 
 ## Learn More
 
@@ -282,7 +302,7 @@ CLAUDE.md gives your agent instructions. Stele Context gives it a searchable ind
 
 ```bash
 pip install -e ".[dev]"
-pytest                              # 880+ tests
+pytest                              # 930+ tests
 pytest --cov=stele_context           # With coverage
 mypy stele_context/                 # Type checking
 ruff check stele_context/           # Linting
