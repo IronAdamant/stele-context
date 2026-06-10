@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-06-11
+
+### Changed
+- README rewritten around the v1.4.x feature set: measured token-savings numbers (~60-token diffs for 1-line edits), a "Zero Dependencies, By Design" supply-chain section, expanded FAQ, corrected test/LOC counts, and a troubleshooting entry for legacy-cache `diff_exact: false`. Docs-only release so the PyPI project page shows the current README.
+
 ## [1.4.1] - 2026-06-11
 
 ### Fixed
