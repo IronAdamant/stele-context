@@ -27,7 +27,7 @@ def _to_float_array(vec: Any) -> array.array:
     return array.array("f", vec)
 
 
-@dataclass
+@dataclass(slots=True)
 class IndexNode:
     """A node in the HNSW graph."""
 
@@ -223,7 +223,7 @@ class HNSWIndex:
 
         # Select closest M neighbors
         selected: list[str] = []
-        for dist, cand_id in candidates:
+        for _dist, cand_id in candidates:
             if len(selected) >= M:
                 break
             if cand_id != node_id:
@@ -382,7 +382,7 @@ class HNSWIndex:
         # Pre-compute query norm once for all comparisons
         query_norm = math.sqrt(sum(a * a for a in query))
         similarities = []
-        for dist, node_id in results[:k]:
+        for _dist, node_id in results[:k]:
             if node_id in self.nodes:
                 node = self.nodes[node_id]
                 similarity = self._cosine_similarity(
@@ -503,7 +503,7 @@ class HNSWIndex:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "HNSWIndex":
+    def from_dict(cls, data: dict[str, Any]) -> HNSWIndex:
         """Reconstruct index from serialized dict."""
         idx = cls(
             M=data["M"],
@@ -609,7 +609,7 @@ class VectorIndex:
         return {"hnsw": self.index.to_dict()}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "VectorIndex":
+    def from_dict(cls, data: dict[str, Any]) -> VectorIndex:
         """Reconstruct from serialized dict (handles old and new format)."""
         vi = cls.__new__(cls)
         vi.index = HNSWIndex.from_dict(data["hnsw"])

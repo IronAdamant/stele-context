@@ -63,6 +63,7 @@ class _IndexMixin:
     _do_record_conflict: Any
     _save_index: Any
     _save_bm25: Any
+    _load_gitignore: Any
 
     def index_documents(
         self,
@@ -87,7 +88,11 @@ class _IndexMixin:
                 agent_id,
                 expected_versions,
                 expand_paths=lambda ps: _ix.expand_paths(
-                    ps, self.chunkers, self.skip_dirs, self._normalize_path
+                    ps,
+                    self.chunkers,
+                    self.skip_dirs,
+                    self._normalize_path,
+                    gitignore=self._load_gitignore(),
                 ),
                 normalize_path=self._normalize_path,
                 resolve_path=self._resolve_path,
@@ -114,7 +119,24 @@ class _IndexMixin:
                     self._apply_inline_summaries(summaries, result)
                 else:
                     result["summaries_applied"] = 0
+            self._auto_prune_history()
             return result
+
+    def _auto_prune_history(self) -> None:
+        """Keep history tables bounded after write operations.
+
+        Bounds change_history to `max_history_entries` (config; 0 disables)
+        and operation_log to 10x that. Best-effort — never fails the
+        indexing operation that triggered it. Called inside the write lock.
+        """
+        limit = int(getattr(self, "max_history_entries", 0) or 0)
+        if limit <= 0:
+            return
+        try:
+            self.storage.prune_history(max_entries=limit)
+            self.storage.prune_operation_log(max_entries=limit * 10)
+        except Exception:
+            pass
 
     def _apply_inline_summaries(
         self, summaries: dict[str, str], result: dict[str, Any]
@@ -286,7 +308,11 @@ class _IndexMixin:
         self, max_age_seconds: float | None = None, max_entries: int | None = None
     ) -> dict[str, Any]:
         with self._lock.write_lock():
-            return {"pruned": self.storage.prune_history(max_age_seconds, max_entries)}
+            pruned = self.storage.prune_history(max_age_seconds, max_entries)
+            ops_pruned = 0
+            if max_entries is not None:
+                ops_pruned = self.storage.prune_operation_log(max_entries * 10)
+            return {"pruned": pruned, "operation_log_pruned": ops_pruned}
 
     # -- Tier 2 agent-supplied embeddings -------------------------------------
 
@@ -419,7 +445,7 @@ class _IndexMixin:
         limit: int = 200,
     ) -> dict[str, Any]:
         with self._lock.write_lock():
-            return _cd.detect_changes_unlocked(
+            result = _cd.detect_changes_unlocked(
                 session_id,
                 document_paths,
                 reason,
@@ -446,5 +472,8 @@ class _IndexMixin:
                 scan_new=scan_new,
                 project_root=self._project_root,
                 skip_dirs=self.skip_dirs,
+                gitignore=self._load_gitignore(),
                 limit=limit,
             )
+            self._auto_prune_history()
+            return result

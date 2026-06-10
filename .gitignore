@@ -92,3 +92,18 @@ github_issues/
 plan/
 plans/local/
 
+
+# Stele's own local context cache
+.stele-context/
+
+# Agent-run artifacts (review outputs, work logs, automation state)
+findings/
+journal/
+.wikifier_staging/
+monitored_paths.txt
+pending_updates.md
+file_health.md
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/worktrees/

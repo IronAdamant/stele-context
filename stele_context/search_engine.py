@@ -547,8 +547,15 @@ def get_context_unlocked(
     include_trust: bool = True,
     max_chunk_content_tokens: int | None = None,
     session_id: str | None = None,
+    include_diff: bool = True,
+    max_diff_tokens: int | None = None,
 ) -> dict[str, Any]:
-    """Core get_context logic with optional trust hints for LLM calibration."""
+    """Core get_context logic with optional trust hints for LLM calibration.
+
+    When ``include_diff`` is set, changed files carry a ``diff_since_cache``
+    payload (unified diff vs the cached version) so agents can read only
+    the delta instead of re-reading the whole file.
+    """
     from stele_context.agent_response import (
         parse_agent_notes_field,
         trim_content_to_token_budget,
@@ -581,10 +588,11 @@ def get_context_unlocked(
 
         # Fast-path: skip full read if mtime+size unchanged
         fast_unchanged = file_unchanged(abs_path, stored_doc)
+        disk_content: Any = None
         if not fast_unchanged:
             try:
                 modality = detect_modality(str(abs_path))
-                _, content_hash = read_and_hash(abs_path, modality)
+                disk_content, content_hash = read_and_hash(abs_path, modality)
             except (OSError, UnicodeDecodeError, ValueError):
                 result["changed"].append({"path": doc_path, "reason": "Read error"})
                 continue
@@ -664,6 +672,20 @@ def get_context_unlocked(
                 "old_hash": stored_doc["content_hash"][:16],
                 "new_hash": content_hash[:16],
             }
+            if include_diff:
+                from stele_context.context_diff import (
+                    DEFAULT_MAX_DIFF_TOKENS,
+                    build_change_diff,
+                )
+
+                diff = build_change_diff(
+                    storage.search_chunks(document_path=doc_path),
+                    stored_doc["content_hash"],
+                    disk_content,
+                    max_diff_tokens=max_diff_tokens or DEFAULT_MAX_DIFF_TOKENS,
+                )
+                if diff is not None:
+                    chg["diff_since_cache"] = diff
             if include_trust:
                 try:
                     st = abs_path.stat()

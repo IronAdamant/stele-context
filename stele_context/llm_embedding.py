@@ -442,6 +442,4 @@ IMPORTANT: Output ONLY valid JSON in this exact format:
 
 def llm_embed_prompt(text: str) -> str:
     """Return the prompt that should be given to an LLM to generate an embedding."""
-    return f"{LLM_EMBED_PROMPT}\n\nInput text:\n{{}}\n\nOutput JSON:".format(
-        text[:4000]
-    )
+    return f"{LLM_EMBED_PROMPT}\n\nInput text:\n{text[:4000]}\n\nOutput JSON:"

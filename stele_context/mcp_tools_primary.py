@@ -239,11 +239,15 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
         "name": "get_context",
         "description": "Check cached document state — returns unchanged/changed/new "
         "categorization per file. Unchanged entries may include trust (mtime vs "
-        "index, staleness) and per-chunk agent_notes. When session_id is provided, "
+        "index, staleness) and per-chunk agent_notes. Changed entries include "
+        "diff_since_cache (unified diff vs the cached version, with a "
+        "read_diff/reread_file recommendation) so you can read only the delta "
+        "instead of re-reading the whole file. When session_id is provided, "
         "also includes recently_searched (bool) and search_pattern (str) indicating "
         "if this file was found via agent_grep/search_text in this session. "
         "USE WHEN: checking if files need re-indexing before starting work, "
-        "reading cached chunk content without re-reading disk.",
+        "reading cached chunk content without re-reading disk, seeing what "
+        "changed in a file you already read.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -265,6 +269,17 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                 "max_chunk_content_tokens": {
                     "type": "integer",
                     "description": "Optional per-chunk content trim (estimated tokens).",
+                },
+                "include_diff": {
+                    "type": "boolean",
+                    "description": "Include diff_since_cache on changed entries "
+                    "(default true).",
+                    "default": True,
+                },
+                "max_diff_tokens": {
+                    "type": "integer",
+                    "description": "Token budget for each diff_since_cache "
+                    "(default 2000); larger diffs are truncated.",
                 },
             },
             "required": ["document_paths"],

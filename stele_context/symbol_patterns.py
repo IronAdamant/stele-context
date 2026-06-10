@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(slots=True)
 class Symbol:
     """A symbol extracted from a code chunk."""
 

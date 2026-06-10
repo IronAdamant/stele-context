@@ -5,7 +5,7 @@ Reads `.stele-context.toml` from the project root (if present) and provides
 defaults that can be overridden by constructor parameters.
 
 Uses stdlib tomllib (Python 3.11+) with a minimal fallback parser
-for Python 3.9-3.10.  Zero external dependencies.
+for Python 3.10.  Zero external dependencies.
 """
 
 from __future__ import annotations
@@ -13,14 +13,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-# Prefer stdlib tomllib (3.11+), then tomli, then builtin fallback
+# Prefer stdlib tomllib (3.11+); fall back to the builtin minimal parser on 3.10
 try:
     import tomllib  # type: ignore[import-not-found]
 except ModuleNotFoundError:
-    try:
-        import tomli as tomllib  # type: ignore[import-not-found,no-redef]
-    except ModuleNotFoundError:
-        tomllib = None  # type: ignore[assignment]
+    tomllib = None  # type: ignore[assignment]
 
 
 def _parse_toml_minimal(text: str) -> dict[str, Any]:
@@ -160,6 +157,8 @@ def apply_config(
     change_threshold: float | None = None,
     search_alpha: float | None = None,
     skip_dirs: set | None = None,
+    respect_gitignore: bool | None = None,
+    max_history_entries: int | None = None,
 ) -> dict[str, Any]:
     """Merge config file values with explicit constructor params.
 
@@ -175,6 +174,7 @@ def apply_config(
         "merge_threshold": (merge_threshold, float),
         "change_threshold": (change_threshold, float),
         "search_alpha": (search_alpha, float),
+        "max_history_entries": (max_history_entries, int),
     }
 
     for key, (explicit_val, cast_fn) in _FIELDS.items():
@@ -193,5 +193,11 @@ def apply_config(
         raw = config["skip_dirs"]
         if isinstance(raw, list):
             resolved["skip_dirs"] = set(raw)
+
+    # respect_gitignore: explicit param wins; config value must be a real bool
+    if respect_gitignore is not None:
+        resolved["respect_gitignore"] = respect_gitignore
+    elif isinstance(config.get("respect_gitignore"), bool):
+        resolved["respect_gitignore"] = config["respect_gitignore"]
 
     return resolved

@@ -101,6 +101,7 @@ def detect_changes_unlocked(
     scan_new: bool = False,
     project_root: Any = None,
     skip_dirs: set[str] | None = None,
+    gitignore: Any = None,
     limit: int = 200,
 ) -> dict[str, Any]:
     """Core body of detect_changes_and_update, extracted for engine delegation."""
@@ -131,6 +132,7 @@ def detect_changes_unlocked(
             chunkers,
             dirs,
             normalize_path,
+            gitignore=gitignore,
         )
         indexed_set = {d["document_path"] for d in storage.get_all_documents()}
         for p in expanded:

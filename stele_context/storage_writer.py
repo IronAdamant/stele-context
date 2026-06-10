@@ -14,20 +14,21 @@ import sqlite3
 import threading
 import queue
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 
 class WriterQueue:
     """Serialises SQLite write operations through a single daemon thread."""
 
-    _instances: dict[Path, "WriterQueue"] = {}
+    _instances: dict[Path, WriterQueue] = {}
     _lock = threading.Lock()
 
     _db_path: Path
     _queue: queue.SimpleQueue
     _thread: threading.Thread
 
-    def __new__(cls, db_path: Path) -> "WriterQueue":
+    def __new__(cls, db_path: Path) -> WriterQueue:
         with cls._lock:
             if db_path not in cls._instances:
                 instance = super().__new__(cls)

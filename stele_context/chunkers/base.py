@@ -71,7 +71,7 @@ def estimate_tokens(text: str) -> int:
     return max(1, n - merges)
 
 
-@dataclass
+@dataclass(slots=True)
 class Chunk:
     """
     Represents a chunk of content with metadata.
@@ -274,7 +274,7 @@ class Chunk:
             return max(1, len(self.content) // 4)
         return 1
 
-    def similarity(self, other: "Chunk") -> float:
+    def similarity(self, other: Chunk) -> float:
         """Compute cosine similarity with another chunk."""
         return cosine_similarity(self.semantic_signature, other.semantic_signature)
 

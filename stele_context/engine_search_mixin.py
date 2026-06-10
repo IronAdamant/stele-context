@@ -264,6 +264,8 @@ class _SearchMixin:
         session_id: str | None = None,
         include_trust: bool = True,
         max_chunk_content_tokens: int | None = None,
+        include_diff: bool = True,
+        max_diff_tokens: int | None = None,
     ) -> dict[str, Any]:
         with self._lock.read_lock():
             result = _se.get_context_unlocked(
@@ -276,6 +278,8 @@ class _SearchMixin:
                 include_trust=include_trust,
                 max_chunk_content_tokens=max_chunk_content_tokens,
                 session_id=session_id,
+                include_diff=include_diff,
+                max_diff_tokens=max_diff_tokens,
             )
         # Record file reads in session after releasing lock
         if session_id and result.get("unchanged"):

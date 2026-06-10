@@ -7,17 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.3] - 2026-05-15
+### Added
+- **Diff-since-cache** — `get_context` now returns `diff_since_cache` on changed files: a token-bounded unified diff between the cached version and what's on disk (pure stdlib `difflib`). Includes `diff_exact` (hash-verified reconstruction fidelity), `added_lines`/`removed_lines`, `diff_tokens`, and a `read_diff`/`reread_file` recommendation so agents read only the delta instead of re-reading whole files. New params: `include_diff` (default true), `max_diff_tokens` (default 2000). New module `context_diff.py`.
+- **.gitignore-aware indexing** — directory expansion now skips files matched by the project root's `.gitignore` (supports negation, dir-only, anchored, `**` patterns; pure stdlib). Explicitly listed files always win. Config: `respect_gitignore` (default true) in `.stele-context.toml` or `Stele(respect_gitignore=False)`. New module `gitignore.py`.
+- **Bounded history auto-pruning** — `change_history` is auto-pruned to `max_history_entries` (default 1000, 0 = unlimited) and `operation_log` (telemetry, previously unbounded) to 10x that after index/detect_changes operations. New `StorageBackend.prune_operation_log()`; engine `prune_history` now also compacts telemetry and reports `operation_log_pruned`.
+- **Doctor growth alerts** — `get_db_health_snapshot()` (surfaced via `doctor`) now reports `table_rows` for change_history/chunk_history/operation_log/sessions and `growth_alerts` for oversized databases or unbounded history tables.
 
 ### Changed
-- Formalize Grok Build release automation (scripts/release.py + stele-context release command + improved PyPI workflow). Going forward, all releases will use this tooling to ensure consistent build, testing, tagging, and PyPI updates.
+- **Python 3.10+ required** — Python 3.9 is EOL; `requires-python` bumped, CI matrix now 3.10–3.14.
+- `slots=True` on the hot `Chunk`, `IndexNode`, and `Symbol` dataclasses — meaningful memory reduction for large indexes.
+- Dropped the third-party `tomli` fallback in `config.py` — stdlib `tomllib` on 3.11+, builtin minimal parser on 3.10. Zero-dep posture unchanged.
+- Added explicit `[tool.ruff]` (target py310, pyupgrade + bugbear) and `[tool.mypy]` configs; fixed all resulting findings (deprecated `typing.Callable` imports, duplicate set members, unused loop variables, quoted annotations).
 
-
-## [1.3.3] - 2026-05-15
-
-### Changed
-- Formalize Grok Build release automation (scripts/release.py + stele-context release command + improved PyPI workflow). Going forward, all releases will use this tooling to ensure consistent build, testing, tagging, and PyPI updates.
-
+### Fixed
+- Removed triplicated 1.3.3 entry in this changelog (release-script duplication).
+- `.gitignore` now covers `.stele-context/` (the project's own index) and agent-run artifacts (findings/, journal/, etc.).
 
 ## [1.3.3] - 2026-05-15
 

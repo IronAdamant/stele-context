@@ -28,6 +28,8 @@
 | `stele_context/search_engine.py` | Hybrid search (HNSW+BM25, weak-cosine BM25 fallback, path_prefix), get_context, map/stats, project_brief, search bounds | bm25, index, index_store, agent_response, chunkers | test_engine.py, test_search_engine.py |
 | `stele_context/index_health.py` | `compute_index_health_snapshot()` — alerts, staleness for map/stats | None | test_index_health.py |
 | `stele_context/change_detection.py` | Detect file changes, re-index modified chunks | chunkers.base, chunkers.numpy_compat | test_engine.py |
+| `stele_context/context_diff.py` | Diff-since-cache: token-bounded unified diff between cached chunks and disk for changed files | chunkers.base (estimate_tokens only) | test_context_diff.py |
+| `stele_context/gitignore.py` | Pure-stdlib .gitignore matcher used by expand_paths during indexing | None | test_gitignore.py |
 | `stele_context/config.py` | `.stele-context.toml` loader with minimal TOML parser | None | test_config.py |
 | `stele_context/storage.py` | `StorageBackend` - SQLite + filesystem persistence | storage_schema, storage_delegates, storage_writer, all sub-storages | test_engine.py, test_storage_migration.py |
 | `stele_context/storage_schema.py` | Database init and migration SQL | connection_pool | test_storage_migration.py |

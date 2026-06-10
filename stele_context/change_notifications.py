@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 ConnectFn = Callable[[], sqlite3.Connection]
-GetWorktreeFn = Callable[[sqlite3.Connection, str], Optional[str]]
+GetWorktreeFn = Callable[[sqlite3.Connection, str], str | None]
 
 
 def init_notifications_table(connect: ConnectFn) -> None:

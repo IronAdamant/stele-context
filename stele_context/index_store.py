@@ -135,7 +135,7 @@ def _load_compressed_json(filename: str, index_dir: Path) -> dict[str, Any] | No
     lock_fd = None
     try:
         if _HAS_FCNTL and lock_file.exists():
-            lock_fd = open(lock_file, "r")
+            lock_fd = open(lock_file)
             fcntl.flock(lock_fd, fcntl.LOCK_SH)
 
         compressed = path.read_bytes()

@@ -44,6 +44,8 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
     DEFAULT_MERGE_THRESHOLD = 0.7
     DEFAULT_CHANGE_THRESHOLD = 0.85
     DEFAULT_SEARCH_ALPHA = 0.42
+    # change_history rows kept by auto-prune after index ops (0 = unlimited)
+    DEFAULT_MAX_HISTORY_ENTRIES = 1000
     DEFAULT_SKIP_DIRS = {
         ".git",
         ".hg",
@@ -77,6 +79,8 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
         change_threshold: float | None = None,
         search_alpha: float | None = None,
         skip_dirs: set | None = None,
+        respect_gitignore: bool | None = None,
+        max_history_entries: int | None = None,
     ):
         self._project_root = detect_project_root(project_root)
         file_cfg = load_config(self._project_root)
@@ -89,6 +93,8 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
             change_threshold=change_threshold,
             search_alpha=search_alpha,
             skip_dirs=skip_dirs,
+            respect_gitignore=respect_gitignore,
+            max_history_entries=max_history_entries,
         )
         resolved_storage = cfg.get("storage_dir", storage_dir)
         if resolved_storage is None:
@@ -104,6 +110,10 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
         )
         self.search_alpha = cfg.get("search_alpha", self.DEFAULT_SEARCH_ALPHA)
         self.skip_dirs = self.DEFAULT_SKIP_DIRS | cfg.get("skip_dirs", set())
+        self.respect_gitignore = cfg.get("respect_gitignore", True)
+        self.max_history_entries = cfg.get(
+            "max_history_entries", self.DEFAULT_MAX_HISTORY_ENTRIES
+        )
         self.chunkers = _se.init_chunkers(self.chunk_size, self.max_chunk_size)
         self.vector_index = _se.load_or_rebuild_index(self.storage)
         self.session_manager = SessionManager(self.storage, self.vector_index)
@@ -133,6 +143,14 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
         return do_record_conflict(
             coordination=self._coordination, storage=self.storage, **kw
         )
+
+    def _load_gitignore(self) -> Any:
+        """Build a fresh .gitignore matcher, or None when disabled/absent."""
+        if not self.respect_gitignore:
+            return None
+        from stele_context.gitignore import GitignoreMatcher
+
+        return GitignoreMatcher.load(self._project_root)
 
     def _normalize_path(self, path: str) -> str:
         return _norm(path, self._project_root)

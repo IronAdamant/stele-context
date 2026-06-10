@@ -191,7 +191,7 @@ class SymbolGraphManager:
     ) -> None:
         """Extract symbols from a document's chunks and store them."""
         self.storage.clear_document_symbols(doc_path)
-        ext = Path(doc_path).suffix.lstrip(".").lower()
+        ext = Path(doc_path).suffix.removeprefix(".").lower()
         doc_symbols = []
         for chunk in chunks:
             if isinstance(chunk.content, str):
@@ -412,7 +412,7 @@ class SymbolGraphManager:
             by_doc.setdefault(defn["document_path"], []).append(defn)
 
         results = []
-        for doc_path, doc_defs in by_doc.items():
+        for doc_defs in by_doc.values():
             # Sort by line number for stable ordering
             doc_defs_sorted = sorted(doc_defs, key=lambda d: d.get("line_number") or 0)
             shadowed = len(doc_defs_sorted) > 1
@@ -741,7 +741,7 @@ class SymbolGraphManager:
 
         total_symbols = 0
         for doc_path, chunks in by_doc.items():
-            ext = Path(doc_path).suffix.lstrip(".").lower()
+            ext = Path(doc_path).suffix.removeprefix(".").lower()
             doc_symbols = []
             for chunk in chunks:
                 content = chunk.get("content")

@@ -154,7 +154,6 @@ _NOISE_REFS: frozenset = frozenset(
         "Math",
         # Ambiguous method names (defined on too many types)
         "get",
-        "set",
         "add",
         "remove",
         "pop",
@@ -220,7 +219,6 @@ _NOISE_REFS: frozenset = frozenset(
         # Generic method names that cause false coupling
         "constructor",
         "getStats",
-        "toJSON",
         "toObject",
         "initialize",
         "configure",
@@ -288,7 +286,7 @@ class SymbolExtractor:
             chunk_id: ID of the chunk containing this content
             language: File extension (without dot) or language name
         """
-        ext = language.lstrip(".").lower()
+        ext = language.removeprefix(".").lower()
 
         if ext in ("py", "pyw", "pyx"):
             return self._extract_python(content, document_path, chunk_id)

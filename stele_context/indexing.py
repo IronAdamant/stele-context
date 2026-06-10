@@ -440,8 +440,15 @@ def expand_paths(
     chunkers: dict[str, Any],
     skip_dirs: set[str],
     normalize_path: Any,
+    gitignore: Any = None,
 ) -> list[str]:
-    """Expand directories and globs into individual file paths."""
+    """Expand directories and globs into individual file paths.
+
+    When a ``gitignore`` matcher is provided, files matched by the
+    project's .gitignore are skipped during directory expansion.
+    Explicitly listed files are never filtered — asking for a specific
+    file always wins.
+    """
     supported: set = set()
     for chunker in chunkers.values():
         supported.update(chunker.supported_extensions())
@@ -456,6 +463,8 @@ def expand_paths(
                 if any(part in skip_dirs or part.startswith(".") for part in rel_parts):
                     continue
                 if child.is_file() and child.suffix.lower() in supported:
+                    if gitignore is not None and gitignore.is_ignored_path(child):
+                        continue
                     expanded.append(normalize_path(str(child)))
         else:
             expanded.append(normalize_path(path_str))

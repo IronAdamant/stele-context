@@ -22,7 +22,7 @@ import re
 
 def _contains_vowel(stem: str) -> bool:
     """Return True if *stem* contains at least one vowel."""
-    for i, ch in enumerate(stem):
+    for i in range(len(stem)):
         if _is_vowel(stem, i):
             return True
     return False
@@ -48,7 +48,7 @@ def _measure(stem: str) -> int:
 
     # Build a CV pattern string.
     cv = []
-    for i, ch in enumerate(stem):
+    for i in range(len(stem)):
         cv.append("V" if _is_vowel(stem, i) else "C")
     # Collapse runs.
     pattern = cv[0]

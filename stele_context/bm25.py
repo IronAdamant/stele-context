@@ -153,7 +153,7 @@ class BM25Index:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "BM25Index":
+    def from_dict(cls, data: dict) -> BM25Index:
         """Reconstruct from serialized dict."""
         idx = cls(k1=data["k1"], b=data["b"])
         idx.doc_freqs = Counter(data["doc_freqs"])

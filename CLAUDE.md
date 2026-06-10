@@ -15,6 +15,8 @@ Stele Context (engine.py) -- thin facade orchestrator (inherits engine_*_mixin.p
   |-- agent_response.py -- token-bounded responses for agents (optional helper)
   |-- agent_grep.py -- LLM-optimized search (scope, classify, budget, dedup)
   |-- change_detection.py -- detect file changes, re-index modified
+  |-- context_diff.py -- diff-since-cache for changed files in get_context
+  |-- gitignore.py -- pure-stdlib .gitignore matcher for indexing
   |-- engine_utils.py -- path normalization, lock routing, env checks
   |-- Config (config.py) -- .stele-context.toml loader with minimal TOML parser
   |-- Chunkers (text, code, image, pdf, audio, video)

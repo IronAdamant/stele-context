@@ -7,7 +7,7 @@ name = "stele-context"
 version = "1.3.3"
 description = "Give your AI coding agent persistent memory — stop re-reading files every conversation. MCP server for Claude Code, Claude Desktop, Cursor, and other AI coding tools."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 authors = [
     {name = "Stele Context Contributors"}
@@ -23,7 +23,6 @@ classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -103,6 +102,28 @@ stele-context-mcp = "stele_context.mcp_stdio:main"
 Homepage = "https://github.com/IronAdamant/stele-context"
 Repository = "https://github.com/IronAdamant/stele-context"
 Documentation = "https://github.com/IronAdamant/stele-context#readme"
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9", "F",  # ruff defaults (pycodestyle errors + pyflakes)
+    "UP",                    # pyupgrade — keep idioms current with target-version
+    "B",                     # bugbear — likely bugs and design problems
+]
+ignore = [
+    "B011",  # assert False is intentional in tests
+    "B017",  # pytest.raises(Exception) is intentional in resilience tests
+    "B905",  # zip() without strict= — existing zips rely on shortest-input semantics
+]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = false
 
 [tool.coverage.run]
 omit = [

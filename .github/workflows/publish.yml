@@ -84,3 +84,6 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         print-hash: true
+        # Both triggers (tag push + release published) can fire for the same
+        # version; make the second run a no-op instead of a failure.
+        skip-existing: true

@@ -152,6 +152,20 @@ class StorageBackend(StorageDelegatesMixin):
             )
             recent_total = cursor.fetchone()[0]
 
+            table_rows: dict[str, int] = {}
+            for table in (
+                "change_history",
+                "chunk_history",
+                "operation_log",
+                "sessions",
+            ):
+                try:
+                    table_rows[table] = conn.execute(
+                        f"SELECT COUNT(*) FROM {table}"  # noqa: S608 — fixed names
+                    ).fetchone()[0]
+                except sqlite3.OperationalError:
+                    table_rows[table] = 0
+
         busy_ratio = recent_failures / max(recent_total, 1)
         if busy_ratio < 0.01:
             recommended_action = "idle"
@@ -160,7 +174,27 @@ class StorageBackend(StorageDelegatesMixin):
         else:
             recommended_action = "rebuild_symbols"
 
+        growth_alerts: list[str] = []
+        if db_size > 500 * 1024 * 1024:
+            growth_alerts.append(
+                f"Database is {db_size // (1024 * 1024)} MB; run optimize_storage "
+                "or prune_history/prune_chunks to reclaim space."
+            )
+        if table_rows["change_history"] > 5000:
+            growth_alerts.append(
+                f"change_history has {table_rows['change_history']} rows; "
+                "auto-pruning may be disabled (max_history_entries = 0). "
+                "Run prune_history or set max_history_entries in .stele-context.toml."
+            )
+        if table_rows["operation_log"] > 50000:
+            growth_alerts.append(
+                f"operation_log has {table_rows['operation_log']} rows; "
+                "telemetry is growing unbounded — run prune_history to compact it."
+            )
+
         return {
+            "table_rows": table_rows,
+            "growth_alerts": growth_alerts,
             "journal_mode": journal_mode,
             "synchronous": synchronous,
             "page_count": page_count,
@@ -192,6 +226,22 @@ class StorageBackend(StorageDelegatesMixin):
             )
 
         self._write(_do_write)
+
+    def prune_operation_log(self, max_entries: int) -> int:
+        """Keep only the newest *max_entries* telemetry rows. Returns deleted count."""
+        deleted = 0
+
+        def _do_write(conn: sqlite3.Connection) -> None:
+            nonlocal deleted
+            cursor = conn.execute(
+                "DELETE FROM operation_log WHERE id NOT IN "
+                "(SELECT id FROM operation_log ORDER BY timestamp DESC LIMIT ?)",
+                (max_entries,),
+            )
+            deleted = cursor.rowcount
+
+        self._write(_do_write)
+        return deleted
 
     def get_operation_log(
         self,

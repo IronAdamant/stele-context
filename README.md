@@ -4,7 +4,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/stele-context.svg)](https://pypi.org/project/stele-context/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/stele-context)
 [![Tests](https://github.com/IronAdamant/stele-context/actions/workflows/test.yml/badge.svg)](https://github.com/IronAdamant/stele-context/actions)
 
@@ -101,6 +101,8 @@ If you've ever wished your AI coding assistant had a persistent memory for your 
 | What you want | How Stele helps |
 |---------------|-----------------|
 | "Don't re-read files that haven't changed" | `get_context` returns cached content for unchanged files, only re-reads modified ones |
+| "Show me only what changed in a file I already read" | Changed files come back with `diff_since_cache` — a token-bounded unified diff against the cached version, so you read the delta instead of the whole file |
+| "Don't index my build output and vendored deps" | Indexing respects your project's `.gitignore` by default (`respect_gitignore = false` to opt out) |
 | "Ask a broad question about my code"" | `query` combines semantic search, symbol graph, and text grep into one deduplicated result list |
 | "What files would break if I change this?" | `impact_radius` follows the dependency chain to find affected files; `significance_threshold` filters out noise from common symbols like `push`/`addEdge`. Also works with `symbol=` for dynamic/runtime hooks and `direction=` for outgoing or bidirectional traversal |
 | "Which files are tightly coupled?" | `coupling` shows shared symbols with a `semantic_score` that discounts generic boilerplate. `mode=co_consumers` catches files imported together by the same consumers |
@@ -120,8 +122,8 @@ If you've ever wished your AI coding assistant had a persistent memory for your 
 | What changed | Tokens without Stele | Tokens with Stele | Savings |
 |--------------|---------------------|-------------------|---------|
 | Nothing (same code) | 10,000 | 0 | 100% |
-| A typo fix | 10,000 | ~100 | 99% |
-| Edited a few functions | 10,000 | ~1,000 | 90% |
+| A typo fix | 10,000 | ~100 (via `diff_since_cache`) | 99% |
+| Edited a few functions | 10,000 | ~1,000 (via `diff_since_cache`) | 90% |
 | Rewrote the whole file | 10,000 | 10,000 | 0% |
 
 The less your code changes between conversations, the more tokens you save.
@@ -185,6 +187,8 @@ merge_threshold = 0.7            # When to merge similar adjacent chunks
 change_threshold = 0.85          # When to consider a chunk "unchanged"
 search_alpha = 0.42              # Balance between meaning-based and keyword search
 skip_dirs = [".git", "node_modules", "__pycache__"]
+respect_gitignore = true         # Skip .gitignore'd files when indexing directories
+max_history_entries = 1000       # Auto-prune change history past this bound (0 = unlimited)
 ```
 
 You can also set `STELE_CONTEXT_STORAGE_DIR` as an environment variable, or pass options directly in Python:
