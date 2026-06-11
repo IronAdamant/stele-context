@@ -71,6 +71,7 @@
 | `stele_context/chunkers/video.py` | `VideoChunker` - OpenCV-based (optional) | chunkers.base | (requires opencv) |
 | `stele_context/cli.py` | CLI entry point (`stele-context` command) | engine | (manual testing) |
 | `stele_context/cli_metadata.py` | CLI metadata/annotation subcommands | engine | (manual testing) |
+| `stele_context/cli_release.py` | `stele-context release` command, delegates to scripts/release.py | None (subprocess) | (manual testing) |
 | `stele_context/mcp_server.py` | HTTP REST server (unified tool registry, threaded) + tool dispatch | tool_registry | test_mcp_server.py |
 | `stele_context/mcp_handlers.py` | Backward-compat shim (re-exports from mcp_server) | mcp_server, tool_registry | test_mcp_server.py |
 | `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas, modality flags (40 tools combined) | mcp_tools_primary | (via test_mcp_server.py, test_mcp_stdio.py) |
@@ -118,5 +119,6 @@
 | `tests/test_batch_summaries.py` | Inline summaries during indexing, bulk_store_summaries, has_agent_signatures | ~19 |
 | `tests/test_fastpath.py` | mtime+size fast-path for index/detect/get_context | ~17 |
 | `tests/test_sqlite_resilience.py` | `WriterQueue` single-writer, sqlite_retry decorator | ~2 |
+| `tests/test_auto_prune.py` | Bounded history auto-pruning, prune operation log, doctor growth alerts | ~9 |
 
 **Total: 891 tests pass, 1 skipped without MCP SDK (as of 2026-04-17)**

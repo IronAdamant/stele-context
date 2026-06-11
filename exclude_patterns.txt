@@ -1,0 +1,120 @@
+# Wikifier exclude patterns for stele-context
+# Applied during scans (check-changes, validate, update-maps, etc.)
+# One pattern per line: directory names, file names, or globs.
+
+# ============================================
+# Virtual Environments & Python Environments
+# ============================================
+.venv
+.venv-*
+venv
+venv-*
+.virtualenv
+.conda
+.conda-env
+
+# ============================================
+# Build, Distribution & Compiled Output
+# ============================================
+build
+dist
+out
+target
+*.egg-info
+*.whl
+*.tar.gz
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# ============================================
+# Caches & Temporary Files
+# ============================================
+.cache
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.nox
+.pytype
+.pyre
+dmypy.json
+site-packages
+
+# ============================================
+# Package Managers & Dependencies
+# ============================================
+node_modules
+bower_components
+vendor
+
+# ============================================
+# IDEs & Editor Files
+# ============================================
+.idea
+.vscode
+.vs
+*.swp
+*.swo
+*~
+
+# ============================================
+# Version Control
+# ============================================
+.git
+.gitattributes
+.gitignore
+.hg
+.svn
+
+# ============================================
+# OS Generated
+# ============================================
+.DS_Store
+Thumbs.db
+
+# ============================================
+# Documentation Build Output
+# ============================================
+docs/_build
+site
+_build
+
+# ============================================
+# Stele-context specific: tool state & databases
+# ============================================
+.claude
+.stele
+.stele-context
+.chisel
+.coordinationhub
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ============================================
+# Archived CI / issue logs (records, not living docs)
+# ============================================
+GitHub Logs
+github_issues
+
+# ============================================
+# Wikifier Internal (also hardcoded in the script for safety)
+# ============================================
+.wikifier_staging
+journal
+Logged_issues
+file_health.md
+file_health.json
+pending_updates.md
+library.md
+index.html
+diagnostics.html
+monitored_paths.txt
+exclude_patterns.txt

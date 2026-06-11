@@ -2,7 +2,7 @@
 
 ## Overview
 
-Stele Context is a local context cache for LLM agents. It indexes documents through modality-specific chunkers, stores chunk data in SQLite, and provides O(log n) semantic search via an HNSW vector index. Designed for 100% offline use with zero required dependencies. As of v1.0.5, hybrid search includes weak-vector BM25 fallback; `map`/`search` accept optional `path_prefix`; `impact_radius` supports `summary_mode` for bounded blast-radius output (see CHANGELOG).
+Stele Context is a local context cache for LLM agents. It indexes documents through modality-specific chunkers, stores chunk data in SQLite, and provides O(log n) semantic search via an HNSW vector index. Designed for 100% offline use with zero required dependencies. Hybrid search includes weak-vector BM25 fallback; `map`/`search` accept optional `path_prefix`; `impact_radius` supports `summary_mode` for bounded blast-radius output. As of v1.4.x, `get_context` returns token-bounded `diff_since_cache` for changed files, directory indexing is `.gitignore`-aware, `change_history` is auto-pruned to a configurable bound, and `doctor` flags stale egg-info directories and database growth (see CHANGELOG).
 
 ## Architecture
 
