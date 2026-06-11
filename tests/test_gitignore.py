@@ -133,3 +133,54 @@ class TestIndexingRespectsGitignore:
         result = engine.detect_changes_and_update("scan-session", scan_new=True)
         new_paths = {e["path"] for e in result["new"]}
         assert "ignored.py" not in new_paths
+
+
+class TestGitignoreWithoutProjectRoot:
+    """A plain folder (no .git anywhere above) still gets .gitignore filtering."""
+
+    def _folder(self, tmp_path):
+        d = tmp_path / "plain"
+        d.mkdir()
+        (d / ".gitignore").write_text("ignored.py\n")
+        (d / "kept.py").write_text("def kept():\n    return 1\n")
+        (d / "ignored.py").write_text("def ignored():\n    return 2\n")
+        return d
+
+    def test_expand_paths_falls_back_to_directory_gitignore(self, tmp_path):
+        from stele_context.indexing import expand_paths
+
+        d = self._folder(tmp_path)
+        chunkers = Stele(storage_dir=str(tmp_path / "s1")).chunkers
+        out = expand_paths(
+            [str(d)], chunkers, set(), str, gitignore=None, respect_gitignore=True
+        )
+        assert any("kept.py" in p for p in out)
+        assert not any("ignored.py" in p for p in out)
+
+    def test_expand_paths_fallback_off_without_flag(self, tmp_path):
+        from stele_context.indexing import expand_paths
+
+        d = self._folder(tmp_path)
+        chunkers = Stele(storage_dir=str(tmp_path / "s2")).chunkers
+        out = expand_paths(
+            [str(d)], chunkers, set(), str, gitignore=None, respect_gitignore=False
+        )
+        assert any("ignored.py" in p for p in out)
+
+    def test_engine_filters_in_non_git_folder(self, tmp_path, monkeypatch):
+        d = self._folder(tmp_path)
+        monkeypatch.chdir(d)  # no .git above tmp_path -> project_root is None
+        engine = Stele(storage_dir=str(tmp_path / "storage"))
+        assert engine._project_root is None
+        engine.index_documents([str(d)])
+        indexed = {doc["document_path"] for doc in engine.storage.get_all_documents()}
+        assert any("kept.py" in p for p in indexed)
+        assert not any("ignored.py" in p for p in indexed)
+
+    def test_engine_fallback_disabled_by_param(self, tmp_path, monkeypatch):
+        d = self._folder(tmp_path)
+        monkeypatch.chdir(d)
+        engine = Stele(storage_dir=str(tmp_path / "storage"), respect_gitignore=False)
+        engine.index_documents([str(d)])
+        indexed = {doc["document_path"] for doc in engine.storage.get_all_documents()}
+        assert any("ignored.py" in p for p in indexed)

@@ -446,13 +446,16 @@ def expand_paths(
     skip_dirs: set[str],
     normalize_path: Any,
     gitignore: Any = None,
+    respect_gitignore: bool = False,
 ) -> list[str]:
     """Expand directories and globs into individual file paths.
 
     When a ``gitignore`` matcher is provided, files matched by the
     project's .gitignore are skipped during directory expansion.
-    Explicitly listed files are never filtered — asking for a specific
-    file always wins.
+    Without one (no project root detected — e.g. a plain folder with
+    no .git), ``respect_gitignore`` falls back to a matcher anchored
+    at each indexed directory's own .gitignore. Explicitly listed
+    files are never filtered — asking for a specific file always wins.
     """
     supported: set = set()
     for chunker in chunkers.values():
@@ -463,12 +466,17 @@ def expand_paths(
         if p.is_file():
             expanded.append(normalize_path(str(p)))
         elif p.is_dir():
+            matcher = gitignore
+            if matcher is None and respect_gitignore:
+                from stele_context.gitignore import GitignoreMatcher
+
+                matcher = GitignoreMatcher.load(p.resolve())
             for child in sorted(p.rglob("*")):
                 rel_parts = child.relative_to(p).parts
                 if any(part in skip_dirs or part.startswith(".") for part in rel_parts):
                     continue
                 if child.is_file() and child.suffix.lower() in supported:
-                    if gitignore is not None and gitignore.is_ignored_path(child):
+                    if matcher is not None and matcher.is_ignored_path(child):
                         continue
                     expanded.append(normalize_path(str(child)))
         else:

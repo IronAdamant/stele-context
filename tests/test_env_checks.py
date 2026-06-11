@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from stele_context.env_checks import (
     check_editable_installs,
+    check_stale_egg_info,
     clean_stale_pycache,
     scan_stale_pycache,
 )
@@ -370,3 +371,56 @@ class TestCheckEditableInstalls:
             result = check_editable_installs(project_root=project_root)
         assert result["count"] == 1
         assert result["editable_issues"][0]["package"] == "bad-pkg"
+
+
+class TestCheckStaleEggInfo:
+    def _make_egg_info(self, root: Path, name: str, version: str) -> Path:
+        egg = root / f"{name.replace('-', '_')}.egg-info"
+        egg.mkdir()
+        (egg / "PKG-INFO").write_text(f"Name: {name}\nVersion: {version}\n")
+        return egg
+
+    def test_version_mismatch_is_flagged(self, tmp_path):
+        import importlib.metadata
+
+        installed = importlib.metadata.version("stele-context")
+        self._make_egg_info(tmp_path, "stele-context", "0.0.1")
+        result = check_stale_egg_info(project_root=tmp_path)
+        assert result["count"] == 1
+        issue = result["egg_info_issues"][0]
+        assert issue["egg_info_version"] == "0.0.1"
+        assert issue["installed_version"] == installed
+        assert "stale" in issue["warning"]
+
+    def test_matching_version_is_clean(self, tmp_path):
+        import importlib.metadata
+
+        installed = importlib.metadata.version("stele-context")
+        self._make_egg_info(tmp_path, "stele-context", installed)
+        result = check_stale_egg_info(project_root=tmp_path)
+        assert result["count"] == 0
+
+    def test_uninstalled_package_is_skipped(self, tmp_path):
+        self._make_egg_info(tmp_path, "definitely-not-installed-xyz", "9.9.9")
+        result = check_stale_egg_info(project_root=tmp_path)
+        assert result["count"] == 0
+
+    def test_no_project_root_returns_empty(self):
+        result = check_stale_egg_info(project_root=None)
+        assert result["count"] == 0
+
+    def test_missing_pkg_info_is_skipped(self, tmp_path):
+        (tmp_path / "broken.egg-info").mkdir()
+        result = check_stale_egg_info(project_root=tmp_path)
+        assert result["count"] == 0
+
+    def test_surfaced_via_engine_check_environment(self, tmp_path):
+        from stele_context.engine import Stele
+
+        self._make_egg_info(tmp_path, "stele-context", "0.0.1")
+        engine = Stele(
+            storage_dir=str(tmp_path / "storage"), project_root=str(tmp_path)
+        )
+        env = engine.check_environment()
+        types = {issue["type"] for issue in env["issues"]}
+        assert "stale_egg_info" in types

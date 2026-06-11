@@ -153,3 +153,63 @@ def check_editable_installs(
         pass
 
     return {"editable_issues": issues, "count": len(issues)}
+
+
+def check_stale_egg_info(
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    """Check for stale ``*.egg-info`` directories in the project root.
+
+    A leftover egg-info whose PKG-INFO version differs from the installed
+    distribution shadows ``importlib.metadata`` for any Python process
+    started from the project directory — tools then report the stale
+    version and metadata instead of the installed package's.
+    """
+    issues: list[dict[str, Any]] = []
+    if project_root is None:
+        return {"egg_info_issues": issues, "count": len(issues)}
+
+    try:
+        import importlib.metadata
+
+        for egg_dir in project_root.glob("*.egg-info"):
+            pkg_info = egg_dir / "PKG-INFO"
+            if not pkg_info.is_file():
+                continue
+            name = version = None
+            try:
+                for line in pkg_info.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("Name:"):
+                        name = line.split(":", 1)[1].strip()
+                    elif line.startswith("Version:"):
+                        version = line.split(":", 1)[1].strip()
+                    if name and version:
+                        break
+            except OSError:
+                continue
+            if not name or not version:
+                continue
+
+            try:
+                installed = importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError:
+                continue
+
+            if installed != version:
+                issues.append(
+                    {
+                        "egg_info_dir": str(egg_dir),
+                        "egg_info_version": version,
+                        "installed_version": installed,
+                        "warning": (
+                            f"'{egg_dir.name}' has version {version} but "
+                            f"'{name}' {installed} is installed. Python run "
+                            f"from this directory reads the stale metadata. "
+                            f"Delete the directory or rebuild the package."
+                        ),
+                    }
+                )
+    except Exception:
+        pass
+
+    return {"egg_info_issues": issues, "count": len(issues)}

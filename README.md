@@ -106,7 +106,7 @@ If you've ever wished your AI coding assistant had a memory of your project, tha
 |---------------|-----------------|
 | "Don't re-read files that haven't changed" | `get_context` returns cached content for unchanged files — change detection via mtime+size fast path with SHA-256 verification |
 | "Show me only what changed in a file I already read" | Changed files come back with `diff_since_cache` — a hash-exact, token-bounded unified diff against the cached version, with a `read_diff`/`reread_file` cost recommendation |
-| "Don't index my build output and vendored deps" | Directory indexing respects your project's `.gitignore` by default (`respect_gitignore = false` to opt out) |
+| "Don't index my build output and vendored deps" | Directory indexing respects `.gitignore` by default — anchored at your git project root, or at the indexed folder itself when there's no repo (`respect_gitignore = false` to opt out) |
 | "Ask a broad question about my code" | `query` combines semantic search, the symbol graph, and text grep into one deduplicated result list |
 | "What files would break if I change this?" | `impact_radius` follows the dependency chain to find affected files; `significance_threshold` filters noise from common symbols. Works with `symbol=` for dynamic/runtime hooks and `direction=` for outgoing or bidirectional traversal |
 | "Which files are tightly coupled?" | `coupling` shows shared symbols with a `semantic_score` that discounts generic boilerplate; `mode=co_consumers` catches files imported together |
@@ -260,6 +260,9 @@ Another agent might be holding a lock. Run the `reap_expired_locks` action of th
 
 **`diff_exact: false` on files indexed by an older version**
 Caches built before v1.4.1 reconstruct diffs on a best-effort basis. Re-index the file once (`stele-context index <file>`) and diffs become hash-exact from then on. No migration needed.
+
+**Tools report an old version or stale package metadata**
+A leftover `*.egg-info/` directory in your project root shadows the installed package's metadata for any Python started there. `stele-context doctor` flags this as a `stale_egg_info` environment issue — delete the directory or rebuild the package.
 
 ## FAQ
 

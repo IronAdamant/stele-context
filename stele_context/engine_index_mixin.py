@@ -48,6 +48,7 @@ class _IndexMixin:
     _bm25_ready: Any
     chunkers: Any
     skip_dirs: Any
+    respect_gitignore: Any
     symbol_manager: Any
     merge_threshold: Any
     max_chunk_size: Any
@@ -93,6 +94,7 @@ class _IndexMixin:
                     self.skip_dirs,
                     self._normalize_path,
                     gitignore=self._load_gitignore(),
+                    respect_gitignore=bool(self.respect_gitignore),
                 ),
                 normalize_path=self._normalize_path,
                 resolve_path=self._resolve_path,

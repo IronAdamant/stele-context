@@ -135,8 +135,12 @@ def check_environment_impl(
     project_root: Path | None,
     skip_dirs: set[str],
 ) -> dict[str, Any]:
-    """Run environment checks: stale bytecache + editable installs."""
-    from stele_context.env_checks import scan_stale_pycache, check_editable_installs
+    """Run environment checks: stale bytecache, editable installs, stale egg-info."""
+    from stele_context.env_checks import (
+        check_editable_installs,
+        check_stale_egg_info,
+        scan_stale_pycache,
+    )
 
     result: dict[str, Any] = {"issues": []}
     if project_root:
@@ -147,6 +151,9 @@ def check_environment_impl(
         ei = check_editable_installs(project_root)
         if ei["count"] > 0:
             result["issues"].append({"type": "editable_install_mismatch", **ei})
+        eg = check_stale_egg_info(project_root)
+        if eg["count"] > 0:
+            result["issues"].append({"type": "stale_egg_info", **eg})
     result["total_issues"] = len(result["issues"])
     return result
 

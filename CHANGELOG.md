@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Stale egg-info detection** — `check_environment` (surfaced via `doctor`) now flags `*.egg-info` directories in the project root whose PKG-INFO version differs from the installed distribution. A stale egg-info silently shadows `importlib.metadata` for any Python process started in the project directory, making tools report old versions and metadata.
+
+### Fixed
+- **`.gitignore` filtering now works in plain folders without a git repo.** Previously the matcher only loaded from a detected project root (a `.git` directory), so indexing a non-git folder silently skipped `.gitignore` filtering. `expand_paths` now falls back to a matcher anchored at each indexed directory's own `.gitignore` when no project root exists. `respect_gitignore = false` disables both paths.
+
 ## [1.4.2] - 2026-06-11
 
 ### Changed

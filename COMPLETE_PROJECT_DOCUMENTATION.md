@@ -52,7 +52,7 @@
 | `stele_context/coordination.py` | `CoordinationBackend` - cross-worktree shared DB | agent_registry, change_notifications, lock_ops | test_worktree_safety.py |
 | `stele_context/change_notifications.py` | Change notification storage for coordination DB | None | test_worktree_safety.py |
 | `stele_context/agent_registry.py` | Agent registration, heartbeat, reaping | None | test_worktree_safety.py |
-| `stele_context/env_checks.py` | Stale bytecache + editable install detection | None | test_env_checks.py |
+| `stele_context/env_checks.py` | Stale bytecache, editable install, and stale egg-info detection | None | test_env_checks.py |
 | `stele_context/protocols.py` | Typing protocols for delegation boundaries | None | (static analysis only) |
 | `stele_context/stemmer.py` | Pure-Python Porter stemmer, identifier splitting | None | test_stemmer.py |
 | `stele_context/agent_response.py` | Token-bounded search/map/stats helpers, `project_brief` builder, chunk content trim | chunkers.base | test_agent_response.py |
