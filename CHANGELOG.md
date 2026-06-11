@@ -9,10 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.4] - 2026-06-11
 
-### Changed
-- Pyproject-anchored stale egg-info detection + stale editable-metadata check
-
-
 ### Added
 - **Stale editable-metadata detection** — new `check_stale_editable_metadata` (surfaced via `doctor` as `stale_editable_metadata`) flags an editable install of the project whose recorded dist version differs from `[project] version` in pyproject.toml. Code imports live, but pip and `importlib.metadata` report the install-time version until `pip install -e .` is re-run.
 
