@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-06-11
+
 ### Added
 - **Stale egg-info detection** — `check_environment` (surfaced via `doctor`) now flags `*.egg-info` directories in the project root whose PKG-INFO version differs from the installed distribution. A stale egg-info silently shadows `importlib.metadata` for any Python process started in the project directory, making tools report old versions and metadata.
 
