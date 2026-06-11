@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Stale editable-metadata detection** — new `check_stale_editable_metadata` (surfaced via `doctor` as `stale_editable_metadata`) flags an editable install of the project whose recorded dist version differs from `[project] version` in pyproject.toml. Code imports live, but pip and `importlib.metadata` report the install-time version until `pip install -e .` is re-run.
+
+### Fixed
+- **`check_stale_egg_info` is now anchored on pyproject.toml and catches orphaned egg-infos.** Previously an egg-info whose distribution was not installed was silently skipped, and one matching an equally-stale installed record passed the version comparison — both real-world outcomes of a package rename (a leftover `stele.egg-info` provided a phantom `stele 0.7.0` distribution to every Python process run from the project directory and was never flagged). Egg-infos are now also compared against `[project] name`/`version`: a name mismatch is flagged as `orphaned_name`, and a version that matches the installed record but not pyproject.toml is flagged as `stale_vs_project`. Behavior without a readable pyproject.toml is unchanged. Issues now carry a `reason` field.
+
 ## [1.4.3] - 2026-06-11
 
 ### Added

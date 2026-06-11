@@ -11,8 +11,63 @@ cause subtle bugs in multi-agent/worktree workflows:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
+
+
+def _canonical_name(name: str) -> str:
+    """PEP 503 canonical form so ``stele_context``/``stele-context`` compare equal."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _read_project_name_version(
+    project_root: Path,
+) -> tuple[str | None, str | None]:
+    """Read ``[project] name``/``version`` from pyproject.toml, best-effort.
+
+    Uses stdlib ``tomllib`` when available (3.11+) with a minimal line-scan
+    fallback so the module stays dependency-free on 3.10. Returns
+    ``(None, None)`` when the file is missing or unparseable — callers must
+    treat that as "project identity unknown" and skip name-anchored checks.
+    """
+    pyproject = project_root / "pyproject.toml"
+    if not pyproject.is_file():
+        return (None, None)
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return (None, None)
+
+    try:
+        import tomllib
+
+        proj = tomllib.loads(text).get("project", {})
+        name = proj.get("name")
+        version = proj.get("version")
+        return (
+            name if isinstance(name, str) else None,
+            version if isinstance(version, str) else None,
+        )
+    except Exception:
+        pass
+
+    name = version = None
+    in_project = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_project = stripped == "[project]"
+            continue
+        if not in_project:
+            continue
+        m = re.match(r"(name|version)\s*=\s*[\"']([^\"']+)[\"']", stripped)
+        if m:
+            if m.group(1) == "name" and name is None:
+                name = m.group(2)
+            elif m.group(1) == "version" and version is None:
+                version = m.group(2)
+    return (name, version)
 
 
 def scan_stale_pycache(
@@ -164,10 +219,25 @@ def check_stale_egg_info(
     distribution shadows ``importlib.metadata`` for any Python process
     started from the project directory — tools then report the stale
     version and metadata instead of the installed package's.
+
+    The comparison is anchored on ``pyproject.toml`` when present:
+
+    - An egg-info whose ``Name`` differs from ``[project] name`` cannot be a
+      product of the current project (typically left over from a package
+      rename) and is flagged even when a matching stale distribution record
+      makes the version comparison pass.
+    - An egg-info for the project itself is also compared against the
+      ``[project] version``, catching the case where the installed record
+      and the egg-info are both stale but mutually consistent.
+
+    Without a readable pyproject.toml, behavior is unchanged: only
+    installed-version mismatches are flagged.
     """
     issues: list[dict[str, Any]] = []
     if project_root is None:
         return {"egg_info_issues": issues, "count": len(issues)}
+
+    proj_name, proj_version = _read_project_name_version(project_root)
 
     try:
         import importlib.metadata
@@ -190,9 +260,43 @@ def check_stale_egg_info(
             if not name or not version:
                 continue
 
+            if proj_name and _canonical_name(name) != _canonical_name(proj_name):
+                issues.append(
+                    {
+                        "egg_info_dir": str(egg_dir),
+                        "egg_info_version": version,
+                        "installed_version": None,
+                        "reason": "orphaned_name",
+                        "warning": (
+                            f"'{egg_dir.name}' is for distribution '{name}' "
+                            f"but this project is '{proj_name}' — likely left "
+                            f"over from a package rename. It provides a "
+                            f"phantom distribution to any Python process run "
+                            f"from this directory. Delete the directory."
+                        ),
+                    }
+                )
+                continue
+
             try:
                 installed = importlib.metadata.version(name)
             except importlib.metadata.PackageNotFoundError:
+                if proj_version and version != proj_version:
+                    issues.append(
+                        {
+                            "egg_info_dir": str(egg_dir),
+                            "egg_info_version": version,
+                            "installed_version": None,
+                            "reason": "stale_vs_project",
+                            "warning": (
+                                f"'{egg_dir.name}' has version {version} but "
+                                f"pyproject.toml declares {proj_version}, and "
+                                f"'{name}' is not installed. Python run from "
+                                f"this directory reads the stale metadata. "
+                                f"Delete the directory or rebuild the package."
+                            ),
+                        }
+                    )
                 continue
 
             if installed != version:
@@ -201,6 +305,7 @@ def check_stale_egg_info(
                         "egg_info_dir": str(egg_dir),
                         "egg_info_version": version,
                         "installed_version": installed,
+                        "reason": "version_mismatch",
                         "warning": (
                             f"'{egg_dir.name}' has version {version} but "
                             f"'{name}' {installed} is installed. Python run "
@@ -209,7 +314,90 @@ def check_stale_egg_info(
                         ),
                     }
                 )
+            elif proj_version and version != proj_version:
+                issues.append(
+                    {
+                        "egg_info_dir": str(egg_dir),
+                        "egg_info_version": version,
+                        "installed_version": installed,
+                        "reason": "stale_vs_project",
+                        "warning": (
+                            f"'{egg_dir.name}' and the installed '{name}' "
+                            f"both say {version} but pyproject.toml declares "
+                            f"{proj_version} — install metadata was never "
+                            f"refreshed. Re-run pip install -e . and delete "
+                            f"the directory."
+                        ),
+                    }
+                )
     except Exception:
         pass
 
     return {"egg_info_issues": issues, "count": len(issues)}
+
+
+def check_stale_editable_metadata(
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    """Detect an editable install of this project with a stale recorded version.
+
+    An editable install imports live code, but ``importlib.metadata`` and
+    ``pip show`` report the version recorded at install time. When that
+    record differs from ``[project] version`` in pyproject.toml, every
+    metadata consumer sees an old version until ``pip install -e .`` is
+    re-run. Only editable installs pointing at ``project_root`` are checked.
+    """
+    issues: list[dict[str, Any]] = []
+    if project_root is None:
+        return {"stale_editable_issues": issues, "count": len(issues)}
+
+    proj_name, proj_version = _read_project_name_version(project_root)
+    if not proj_name or not proj_version:
+        return {"stale_editable_issues": issues, "count": len(issues)}
+
+    try:
+        import importlib.metadata
+
+        for dist in importlib.metadata.distributions():
+            dist_name = dist.metadata["Name"] if dist.metadata else None
+            if not dist_name:
+                continue
+            if _canonical_name(dist_name) != _canonical_name(proj_name):
+                continue
+            try:
+                direct_url_text = dist.read_text("direct_url.json")
+            except Exception:
+                continue
+            if direct_url_text is None:
+                continue
+            try:
+                info = json.loads(direct_url_text)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not info.get("dir_info", {}).get("editable"):
+                continue
+            url = info.get("url", "")
+            if not url.startswith("file://"):
+                continue
+            if Path(url[7:]).resolve() != project_root.resolve():
+                continue
+
+            if dist.version != proj_version:
+                issues.append(
+                    {
+                        "package": dist_name,
+                        "installed_version": dist.version,
+                        "project_version": proj_version,
+                        "warning": (
+                            f"Editable install of '{dist_name}' is recorded "
+                            f"as {dist.version} but pyproject.toml declares "
+                            f"{proj_version}. Code imports live, but pip and "
+                            f"importlib.metadata report the stale version. "
+                            f"Re-run pip install -e . to refresh the record."
+                        ),
+                    }
+                )
+    except Exception:
+        pass
+
+    return {"stale_editable_issues": issues, "count": len(issues)}

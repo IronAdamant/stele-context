@@ -6,10 +6,17 @@ from unittest.mock import MagicMock, patch
 
 from stele_context.env_checks import (
     check_editable_installs,
+    check_stale_editable_metadata,
     check_stale_egg_info,
     clean_stale_pycache,
     scan_stale_pycache,
 )
+
+
+def _write_pyproject(root: Path, name: str, version: str) -> None:
+    (root / "pyproject.toml").write_text(
+        f'[project]\nname = "{name}"\nversion = "{version}"\n'
+    )
 
 
 class TestScanStalePycache:
@@ -405,6 +412,55 @@ class TestCheckStaleEggInfo:
         result = check_stale_egg_info(project_root=tmp_path)
         assert result["count"] == 0
 
+    def test_orphaned_name_is_flagged(self, tmp_path):
+        """Egg-info from a pre-rename package name is flagged via pyproject."""
+        _write_pyproject(tmp_path, "my-project", "1.0.0")
+        self._make_egg_info(tmp_path, "definitely-not-installed-xyz", "9.9.9")
+        result = check_stale_egg_info(project_root=tmp_path)
+        assert result["count"] == 1
+        issue = result["egg_info_issues"][0]
+        assert issue["reason"] == "orphaned_name"
+        assert "rename" in issue["warning"]
+
+    def test_name_canonicalization_underscore_vs_dash(self, tmp_path):
+        """stele_context.egg-info matches project name stele-context."""
+        _write_pyproject(tmp_path, "definitely-not-installed-xyz", "9.9.9")
+        self._make_egg_info(tmp_path, "definitely_not_installed.xyz", "9.9.9")
+        result = check_stale_egg_info(project_root=tmp_path)
+        assert result["count"] == 0
+
+    def test_uninstalled_project_egg_info_version_mismatch_flagged(self, tmp_path):
+        """Not-installed project egg-info is compared against pyproject version."""
+        _write_pyproject(tmp_path, "definitely-not-installed-xyz", "2.0.0")
+        self._make_egg_info(tmp_path, "definitely-not-installed-xyz", "1.0.0")
+        result = check_stale_egg_info(project_root=tmp_path)
+        assert result["count"] == 1
+        assert result["egg_info_issues"][0]["reason"] == "stale_vs_project"
+
+    def test_installed_match_but_pyproject_differs_flagged(self, tmp_path):
+        """Egg-info matching a stale installed record is still flagged when
+        pyproject.toml declares a different version."""
+        import importlib.metadata
+
+        installed = importlib.metadata.version("stele-context")
+        _write_pyproject(tmp_path, "stele-context", installed + ".post999")
+        self._make_egg_info(tmp_path, "stele-context", installed)
+        result = check_stale_egg_info(project_root=tmp_path)
+        assert result["count"] == 1
+        issue = result["egg_info_issues"][0]
+        assert issue["reason"] == "stale_vs_project"
+        assert "pip install -e" in issue["warning"]
+
+    def test_fresh_egg_info_with_pyproject_is_clean(self, tmp_path):
+        """No flag when egg-info, installed record, and pyproject all agree."""
+        import importlib.metadata
+
+        installed = importlib.metadata.version("stele-context")
+        _write_pyproject(tmp_path, "stele-context", installed)
+        self._make_egg_info(tmp_path, "stele-context", installed)
+        result = check_stale_egg_info(project_root=tmp_path)
+        assert result["count"] == 0
+
     def test_no_project_root_returns_empty(self):
         result = check_stale_egg_info(project_root=None)
         assert result["count"] == 0
@@ -424,3 +480,91 @@ class TestCheckStaleEggInfo:
         env = engine.check_environment()
         types = {issue["type"] for issue in env["issues"]}
         assert "stale_egg_info" in types
+
+
+class TestCheckStaleEditableMetadata:
+    """Tests for check_stale_editable_metadata()."""
+
+    def _make_editable_dist(self, name: str, version: str, target: Path) -> MagicMock:
+        direct_url = json.dumps(
+            {"url": f"file://{target}", "dir_info": {"editable": True}}
+        )
+        mock_dist = MagicMock()
+        mock_dist.read_text.return_value = direct_url
+        mock_dist.metadata = {"Name": name}
+        mock_dist.version = version
+        return mock_dist
+
+    def test_no_project_root_returns_empty(self):
+        result = check_stale_editable_metadata(project_root=None)
+        assert result == {"stale_editable_issues": [], "count": 0}
+
+    def test_no_pyproject_returns_empty(self, tmp_path):
+        result = check_stale_editable_metadata(project_root=tmp_path)
+        assert result["count"] == 0
+
+    def test_stale_editable_version_flagged(self, tmp_path):
+        _write_pyproject(tmp_path, "mypkg", "2.0.0")
+        dist = self._make_editable_dist("mypkg", "1.0.0", tmp_path)
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            result = check_stale_editable_metadata(project_root=tmp_path)
+        assert result["count"] == 1
+        issue = result["stale_editable_issues"][0]
+        assert issue["installed_version"] == "1.0.0"
+        assert issue["project_version"] == "2.0.0"
+        assert "pip install -e" in issue["warning"]
+
+    def test_fresh_editable_version_is_clean(self, tmp_path):
+        _write_pyproject(tmp_path, "mypkg", "2.0.0")
+        dist = self._make_editable_dist("mypkg", "2.0.0", tmp_path)
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            result = check_stale_editable_metadata(project_root=tmp_path)
+        assert result["count"] == 0
+
+    def test_canonical_name_match_underscore_vs_dash(self, tmp_path):
+        _write_pyproject(tmp_path, "my-pkg", "2.0.0")
+        dist = self._make_editable_dist("my_pkg", "1.0.0", tmp_path)
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            result = check_stale_editable_metadata(project_root=tmp_path)
+        assert result["count"] == 1
+
+    def test_other_package_is_skipped(self, tmp_path):
+        _write_pyproject(tmp_path, "mypkg", "2.0.0")
+        dist = self._make_editable_dist("otherpkg", "1.0.0", tmp_path)
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            result = check_stale_editable_metadata(project_root=tmp_path)
+        assert result["count"] == 0
+
+    def test_editable_pointing_elsewhere_is_skipped(self, tmp_path):
+        """Worktree-style mismatch belongs to check_editable_installs."""
+        _write_pyproject(tmp_path, "mypkg", "2.0.0")
+        other = tmp_path / "other"
+        other.mkdir()
+        dist = self._make_editable_dist("mypkg", "1.0.0", other)
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            result = check_stale_editable_metadata(project_root=tmp_path)
+        assert result["count"] == 0
+
+    def test_non_editable_install_is_skipped(self, tmp_path):
+        """A released install of an older version is normal, not stale."""
+        _write_pyproject(tmp_path, "mypkg", "2.0.0")
+        dist = MagicMock()
+        dist.read_text.return_value = None
+        dist.metadata = {"Name": "mypkg"}
+        dist.version = "1.0.0"
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            result = check_stale_editable_metadata(project_root=tmp_path)
+        assert result["count"] == 0
+
+    def test_surfaced_via_engine_check_environment(self, tmp_path):
+        from stele_context.engine import Stele
+
+        _write_pyproject(tmp_path, "mypkg", "2.0.0")
+        dist = self._make_editable_dist("mypkg", "1.0.0", tmp_path)
+        engine = Stele(
+            storage_dir=str(tmp_path / "storage"), project_root=str(tmp_path)
+        )
+        with patch("importlib.metadata.distributions", return_value=[dist]):
+            env = engine.check_environment()
+        types = {issue["type"] for issue in env["issues"]}
+        assert "stale_editable_metadata" in types

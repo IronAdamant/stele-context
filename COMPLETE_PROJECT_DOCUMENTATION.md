@@ -52,7 +52,7 @@
 | `stele_context/coordination.py` | `CoordinationBackend` - cross-worktree shared DB | agent_registry, change_notifications, lock_ops | test_worktree_safety.py |
 | `stele_context/change_notifications.py` | Change notification storage for coordination DB | None | test_worktree_safety.py |
 | `stele_context/agent_registry.py` | Agent registration, heartbeat, reaping | None | test_worktree_safety.py |
-| `stele_context/env_checks.py` | Stale bytecache, editable install, and stale egg-info detection | None | test_env_checks.py |
+| `stele_context/env_checks.py` | Stale bytecache, editable install, stale egg-info, and stale editable-metadata detection (pyproject-anchored) | None | test_env_checks.py |
 | `stele_context/protocols.py` | Typing protocols for delegation boundaries | None | (static analysis only) |
 | `stele_context/stemmer.py` | Pure-Python Porter stemmer, identifier splitting | None | test_stemmer.py |
 | `stele_context/agent_response.py` | Token-bounded search/map/stats helpers, `project_brief` builder, chunk content trim | chunkers.base | test_agent_response.py |
@@ -106,7 +106,7 @@
 | `tests/test_storage_migration.py` | Schema migrations | ~8 |
 | `tests/test_agent_embeddings.py` | Agent-supplied embeddings | ~15 |
 | `tests/test_chunk_history.py` | Chunk version history | ~10 |
-| `tests/test_env_checks.py` | Pycache scanning, editable installs | ~32 |
+| `tests/test_env_checks.py` | Pycache scanning, editable installs, egg-info/editable-metadata staleness | ~52 |
 
 | `tests/test_stemmer.py` | Porter stemmer: stem(), split_identifier() | ~25 |
 | `tests/test_cli.py` | CLI commands, argument parsing, JSON output | ~30 |

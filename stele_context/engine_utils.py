@@ -138,6 +138,7 @@ def check_environment_impl(
     """Run environment checks: stale bytecache, editable installs, stale egg-info."""
     from stele_context.env_checks import (
         check_editable_installs,
+        check_stale_editable_metadata,
         check_stale_egg_info,
         scan_stale_pycache,
     )
@@ -154,6 +155,9 @@ def check_environment_impl(
         eg = check_stale_egg_info(project_root)
         if eg["count"] > 0:
             result["issues"].append({"type": "stale_egg_info", **eg})
+        em = check_stale_editable_metadata(project_root)
+        if em["count"] > 0:
+            result["issues"].append({"type": "stale_editable_metadata", **em})
     result["total_issues"] = len(result["issues"])
     return result
 
