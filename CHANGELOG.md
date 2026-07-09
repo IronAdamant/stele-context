@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-09
+
+### Changed
+- Next-stage agent path: init, lite default, Tier-2 loop, HNSW invalidation, search eval
+
+
 ### Added
 - **`stele-context init`** — first-run setup: gitignore-aware index, MCP lite config snippet, doctor `next_steps`, and recommended agent ritual.
 - **Doctor guidance** — `doctor_snapshot` now includes `next_steps`, `recommended_mcp_mode` (lite), `recommended_ritual`, `mcp_config`, `token_savings` (avoided re-read estimate), and `enrichment_preview`.
