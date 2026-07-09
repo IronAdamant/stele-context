@@ -95,10 +95,37 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbo
         return ".".join(s[0] for s in scope_stack) if scope_stack else None
 
     # Pre-pass: destructured module.exports = { X, Y, Alias: Original, ...require('./x') }
-    for m_dexp in re.finditer(r"module\.exports\s*=\s*\{([^}]+)\}", content):
-        inner = m_dexp.group(1)
+    # Use a brace-depth scan so multi-line export objects are handled.
+    for m_dexp in re.finditer(r"module\.exports\s*=\s*\{", content):
+        start = m_dexp.end()
+        depth = 1
+        i = start
+        while i < len(content) and depth:
+            ch = content[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            i += 1
+        inner = content[start : i - 1] if depth == 0 else content[start:]
         exp_line = content[: m_dexp.start()].count("\n") + 1
-        for entry_str in inner.split(","):
+        # Split on commas not inside nested braces (shallow entries only).
+        parts: list[str] = []
+        buf = ""
+        nest = 0
+        for ch in inner:
+            if ch == "{":
+                nest += 1
+            elif ch == "}":
+                nest -= 1
+            if ch == "," and nest == 0:
+                parts.append(buf)
+                buf = ""
+            else:
+                buf += ch
+        if buf.strip():
+            parts.append(buf)
+        for entry_str in parts:
             entry_str = entry_str.strip()
             if not entry_str:
                 continue
@@ -115,7 +142,42 @@ def extract_javascript(content: str, doc_path: str, chunk_id: str) -> list[Symbo
                 continue
             m_simple = re.match(r"(\w+)\s*$", entry_str)
             if m_simple:
+                # Shorthand property = re-export of an in-scope definition name
                 _emit(m_simple.group(1), "variable", "reference", exp_line)
+
+    # ES export { name as alias, name2 } and export { name as alias } from 'mod'
+    for m_expb in re.finditer(
+        r"export\s*\{([^}]+)\}(?:\s*from\s*['\"]([^'\"]+)['\"])?", content
+    ):
+        inner = m_expb.group(1)
+        from_mod = m_expb.group(2)
+        exp_line = content[: m_expb.start()].count("\n") + 1
+        if from_mod:
+            _emit(from_mod, "module", "reference", exp_line)
+        for entry_str in inner.split(","):
+            entry_str = entry_str.strip()
+            if not entry_str:
+                continue
+            m_as = re.match(r"(\w+)\s+as\s+(\w+)", entry_str)
+            if m_as:
+                orig, alias = m_as.group(1), m_as.group(2)
+                _emit(alias, "variable", "definition", exp_line)
+                _emit(orig, "variable", "reference", exp_line)
+                continue
+            m_simple = re.match(r"(\w+)\s*$", entry_str)
+            if m_simple:
+                name = m_simple.group(1)
+                if from_mod:
+                    _emit(name, "import", "reference", exp_line)
+                else:
+                    _emit(name, "variable", "reference", exp_line)
+
+    # exports.Name = Original  /  exports.Name = class/function ...
+    for m_ex in re.finditer(r"exports\.(\w+)\s*=\s*(?:new\s+)?(\w+)", content):
+        exp_line = content[: m_ex.start()].count("\n") + 1
+        _emit(m_ex.group(1), "variable", "definition", exp_line)
+        if m_ex.group(2) not in ("function", "class", "async", "require"):
+            _emit(m_ex.group(2), "variable", "reference", exp_line)
 
     # State
     pending_name: str = ""

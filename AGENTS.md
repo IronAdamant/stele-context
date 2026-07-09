@@ -14,9 +14,12 @@ Stele is a **local, persistent index** of your project: chunks, hybrid search (H
 
 ## Orientation (start here)
 
-1. **`doctor`** — one screen: version, storage, `index_health`, `db_health`, `search_quality`, env issues, compact map preview.
+1. **`doctor`** — one screen: version, storage, `index_health`, `db_health`, `search_quality`, `next_steps`, `token_savings`, `enrichment_preview`, env issues, compact map preview.
 2. **`map`** — use `compact=true` for bounded token use.
 3. **`query`** — **universal entry point** for broad questions. It auto-enables `working_tree` when you pass `session_id` on a dirty repo, and auto-restricts `path_prefix` on large projects unless you ask globally.
+
+Cold-start ritual (all on **MCP lite** by default):  
+`doctor` → `query` (`session_id`) → `agent_grep` / `find_*` → `get_context` → `get_search_history` / `get_session_read_files` as needed.
 
 ## Retrieval discipline
 
@@ -52,6 +55,8 @@ The **stdlib-only** engine is in a **reasonable stopping place** for hybrid retr
 
 ## MCP Modes
 
-- **Standard** (default): ~32 tools, simplified surface with unified `document_lock`, `annotations`, `query`, and `batch`.
-- **Lite** (`STELE_MCP_MODE=lite`): ~15 high-leverage tools for simpler agents.
+- **Lite** (**default**, recommended): high-leverage tools (`doctor`, `query`, `agent_grep`, symbols, cache, `enrichment_plan`, `bulk_store_summaries`, …).
+- **Standard** (`STELE_MCP_MODE=standard`): broader surface with history, batch, sessions, embeddings bulk APIs.
 - **Full** (`STELE_MCP_MODE=full`): restores deprecated singleton tools for backward compatibility.
+
+Cold-start ritual: `doctor` → `query` (with `session_id`) → `agent_grep` / `find_*` → `get_context`. First-run CLI: `stele-context init .`.

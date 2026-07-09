@@ -27,6 +27,14 @@ jobs:
     - name: Search regression marker
       run: pytest -m search_regression -q --tb=short
 
+    - name: Search quality eval (keyword gate)
+      run: |
+        python benchmarks/eval_search_quality.py --search-mode keyword --json --min-recall 0.40
+
+    - name: Search quality eval (hybrid + Tier-2 delta)
+      run: |
+        python benchmarks/eval_search_quality.py --tier2-delta --min-recall 0.30
+
   test:
     runs-on: ubuntu-latest
     strategy:

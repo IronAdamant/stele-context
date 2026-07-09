@@ -1248,8 +1248,30 @@ def _write_corpus(tmpdir: str) -> Dict[str, str]:
         filepath = os.path.join(tmpdir, doc_id)
         with open(filepath, "w") as f:
             f.write(content)
-        paths[doc_id] = filepath
+        # Realpath so macOS /var vs /private/var matches Stele path normalization.
+        paths[doc_id] = os.path.realpath(filepath)
     return paths
+
+
+def _doc_id_for_path(doc_path: str, path_to_id: Dict[str, str]) -> str:
+    """Map an engine document_path back to a corpus doc_id.
+
+    Handles realpath aliases and falls back to basename when needed.
+    """
+    if doc_path in path_to_id:
+        return path_to_id[doc_path]
+    try:
+        real = os.path.realpath(doc_path)
+        if real in path_to_id:
+            return path_to_id[real]
+    except OSError:
+        pass
+    base = os.path.basename(doc_path)
+    # Prefer exact corpus id match by basename
+    for p, doc_id in path_to_id.items():
+        if os.path.basename(p) == base or doc_id == base:
+            return doc_id
+    return base or doc_path
 
 
 def _run_eval(engine, path_to_id: Dict[str, str]) -> List[Dict]:
@@ -1262,7 +1284,7 @@ def _run_eval(engine, path_to_id: Dict[str, str]) -> List[Dict]:
         retrieved_ids_10: List[str] = []
         for r in search_results:
             doc_path = r["document_path"]
-            doc_id = path_to_id.get(doc_path, doc_path)
+            doc_id = _doc_id_for_path(doc_path, path_to_id)
             if doc_id not in retrieved_ids_10:
                 retrieved_ids_10.append(doc_id)
 
@@ -1368,30 +1390,230 @@ def _print_results(results: List[Dict]) -> None:
     print()
 
 
-def main() -> None:
+def _summarize(results: List[Dict]) -> Dict[str, float]:
+    """Aggregate recall metrics from per-query results."""
+    if not results:
+        return {"avg_recall_5": 0.0, "avg_recall_10": 0.0, "pass_rate": 0.0}
+    avg_r5 = sum(r["recall_5"] for r in results) / len(results)
+    avg_r10 = sum(r["recall_10"] for r in results) / len(results)
+    pass_count = sum(1 for r in results if r["recall_10"] >= 0.5)
+    return {
+        "avg_recall_5": avg_r5,
+        "avg_recall_10": avg_r10,
+        "pass_rate": pass_count / len(results),
+        "n_queries": float(len(results)),
+    }
+
+
+def _apply_tier2_summaries(engine, path_to_id: Dict[str, str]) -> int:
+    """Populate Tier-2 summaries for all chunks from short doc-id labels.
+
+    Uses document basename as a semantic hint so hybrid ranking can improve
+    on concept queries without an external embedding model.
+    """
+    summaries: Dict[str, str] = {}
+    for chunk in engine.storage.search_chunks():
+        doc = chunk.get("document_path") or ""
+        doc_id = path_to_id.get(doc, os.path.basename(doc))
+        # Short purpose-style summary derived from corpus filename + preview
+        preview = (chunk.get("content") or "")[:200].replace("\n", " ")
+        summaries[chunk["chunk_id"]] = f"{doc_id}: {preview}"
+    if not summaries:
+        return 0
+    result = engine.bulk_store_summaries(summaries)
+    return int(result.get("stored") or 0)
+
+
+def run_eval_suite(
+    *,
+    search_mode: str = "keyword",
+    with_tier2: bool = False,
+    min_avg_recall_10: float = 0.40,
+) -> Dict:
+    """Run the search quality suite and return structured metrics.
+
+    Parameters
+    ----------
+    search_mode:
+        Passed to ``engine.search`` (``keyword`` or ``hybrid``).
+    with_tier2:
+        When True, populate Tier-2 summaries before evaluating.
+    min_avg_recall_10:
+        Gate threshold; result[\"passed_gate\"] is False when overall avg
+        recall@10 falls below this value.
+    """
     from stele_context.engine import Stele
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Write corpus
         id_to_path = _write_corpus(tmpdir)
         path_to_id = {v: k for k, v in id_to_path.items()}
 
-        # Index
         engine = Stele(storage_dir=tmpdir, enable_coordination=False)
-        all_paths = list(id_to_path.values())
-        engine.index_documents(all_paths)
+        engine.index_documents(list(id_to_path.values()))
 
-        # Evaluate
-        results = _run_eval(engine, path_to_id)
+        tier2_stored = 0
+        if with_tier2:
+            tier2_stored = _apply_tier2_summaries(engine, path_to_id)
 
-        # Report
-        _print_results(results)
+        # Local eval that respects search_mode
+        results = []
+        for query, expected, category, description in EVAL_QUERIES:
+            search_results = engine.search(
+                query, top_k=10, search_mode=search_mode
+            )
+            retrieved_ids_10: List[str] = []
+            for r in search_results:
+                doc_path = r["document_path"]
+                doc_id = _doc_id_for_path(doc_path, path_to_id)
+                if doc_id not in retrieved_ids_10:
+                    retrieved_ids_10.append(doc_id)
+            retrieved_5 = set(retrieved_ids_10[:5])
+            retrieved_10 = set(retrieved_ids_10[:10])
+            recall_5 = (
+                len(expected & retrieved_5) / len(expected) if expected else 0
+            )
+            recall_10 = (
+                len(expected & retrieved_10) / len(expected) if expected else 0
+            )
+            results.append(
+                {
+                    "query": query,
+                    "category": category,
+                    "description": description,
+                    "expected": expected,
+                    "retrieved_5": retrieved_5,
+                    "retrieved_10": retrieved_10,
+                    "recall_5": recall_5,
+                    "recall_10": recall_10,
+                }
+            )
 
-        # Exit code: fail if overall recall@10 < 40%
-        avg_r10 = sum(r["recall_10"] for r in results) / len(results)
-        if avg_r10 < 0.40:
-            print("  OVERALL FAIL: avg recall@10 below 40% threshold")
+        summary = _summarize(results)
+        summary["search_mode"] = search_mode
+        summary["with_tier2"] = with_tier2
+        summary["tier2_stored"] = tier2_stored
+        summary["passed_gate"] = summary["avg_recall_10"] >= min_avg_recall_10
+        summary["min_avg_recall_10"] = min_avg_recall_10
+        summary["results"] = results
+        return summary
+
+
+def run_tier2_delta(
+    *,
+    search_mode: str = "hybrid",
+    min_avg_recall_10: float = 0.40,
+) -> Dict:
+    """Compare hybrid recall with Tier-2 off vs on."""
+    baseline = run_eval_suite(
+        search_mode=search_mode, with_tier2=False, min_avg_recall_10=min_avg_recall_10
+    )
+    enriched = run_eval_suite(
+        search_mode=search_mode, with_tier2=True, min_avg_recall_10=min_avg_recall_10
+    )
+    return {
+        "baseline": {
+            k: baseline[k]
+            for k in (
+                "avg_recall_5",
+                "avg_recall_10",
+                "pass_rate",
+                "with_tier2",
+                "search_mode",
+                "passed_gate",
+            )
+        },
+        "tier2": {
+            k: enriched[k]
+            for k in (
+                "avg_recall_5",
+                "avg_recall_10",
+                "pass_rate",
+                "with_tier2",
+                "search_mode",
+                "passed_gate",
+                "tier2_stored",
+            )
+        },
+        "delta_recall_10": enriched["avg_recall_10"] - baseline["avg_recall_10"],
+        "passed_gate": baseline["passed_gate"] and enriched["passed_gate"],
+    }
+
+
+def main(argv: List[str] | None = None) -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Stele search quality evaluation")
+    parser.add_argument(
+        "--search-mode",
+        choices=("keyword", "hybrid"),
+        default="keyword",
+        help="keyword (default BM25) or hybrid HNSW+BM25",
+    )
+    parser.add_argument(
+        "--tier2",
+        action="store_true",
+        help="Populate Tier-2 summaries before evaluating",
+    )
+    parser.add_argument(
+        "--tier2-delta",
+        action="store_true",
+        help="Run hybrid twice (Tier2 off/on) and report delta",
+    )
+    parser.add_argument(
+        "--min-recall",
+        type=float,
+        default=0.40,
+        help="Fail if avg recall@10 below this (default 0.40)",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON summary",
+    )
+    args = parser.parse_args(argv)
+
+    if args.tier2_delta:
+        report = run_tier2_delta(
+            search_mode="hybrid", min_avg_recall_10=args.min_recall
+        )
+        if args.json:
+            import json
+
+            print(json.dumps(report, indent=2, default=str))
+        else:
+            print("\n=== Tier-2 delta (hybrid) ===")
+            print(
+                f"  baseline avg R@10: {report['baseline']['avg_recall_10']:.0%}"
+            )
+            print(f"  tier2    avg R@10: {report['tier2']['avg_recall_10']:.0%}")
+            print(f"  delta R@10:        {report['delta_recall_10']:+.1%}")
+            print(f"  gate: {'PASS' if report['passed_gate'] else 'FAIL'}")
+        if not report["passed_gate"]:
             sys.exit(1)
+        return
+
+    summary = run_eval_suite(
+        search_mode=args.search_mode,
+        with_tier2=args.tier2,
+        min_avg_recall_10=args.min_recall,
+    )
+    if not args.json:
+        _print_results(summary["results"])
+        print(
+            f"  mode={summary['search_mode']} tier2={summary['with_tier2']} "
+            f"avg R@10={summary['avg_recall_10']:.0%}"
+        )
+    else:
+        import json
+
+        payload = {k: v for k, v in summary.items() if k != "results"}
+        print(json.dumps(payload, indent=2, default=str))
+
+    if not summary["passed_gate"]:
+        print(
+            f"  OVERALL FAIL: avg recall@10 below {args.min_recall:.0%} threshold"
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

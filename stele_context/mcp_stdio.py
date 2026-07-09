@@ -100,7 +100,9 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
     server_agent_id = f"stele-context-mcp-{os.getpid()}"
 
     # Build tool dispatch map once (not per request)
-    mode = os.environ.get("STELE_MCP_MODE", "standard")
+    # Lite is the recommended default for cold agents (high-leverage surface).
+    # Set STELE_MCP_MODE=standard or full to expand.
+    mode = os.environ.get("STELE_MCP_MODE", "lite")
     tool_map = build_tool_map(engine, get_modality_flags(), mode=mode)
 
     tool_names = set(tool_map.keys())

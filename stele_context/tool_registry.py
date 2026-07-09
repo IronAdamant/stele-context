@@ -70,7 +70,8 @@ _FULL_MODE_ONLY_TOOLS = frozenset(
     }
 )
 
-# Lite mode: highest-leverage tools only.
+# Lite mode: highest-leverage tools only (recommended default for cold agents).
+# Includes session provenance tools required by the documented agent ritual.
 _LITE_TOOLS = frozenset(
     {
         "index",
@@ -92,6 +93,12 @@ _LITE_TOOLS = frozenset(
         "register_dynamic_symbols",
         "remove_dynamic_symbols",
         "llm_embed",
+        # Tier-2 enrichment loop (paired with doctor enrichment_preview)
+        "bulk_store_summaries",
+        "enrichment_plan",
+        # Session provenance (grep-to-cache / avoid re-read ritual)
+        "get_search_history",
+        "get_session_read_files",
     }
 )
 
@@ -129,7 +136,7 @@ def _wrap_with_telemetry(
 def build_tool_map(
     engine: Any,
     modality_flags: dict[str, bool] | None = None,
-    mode: str = "standard",
+    mode: str = "lite",
 ) -> dict[str, Callable[..., Any]]:
     """Build a {tool_name: callable} dispatch map from a Stele engine.
 
@@ -143,8 +150,8 @@ def build_tool_map(
         ``detect_modality`` and ``get_supported_formats`` utility
         tools are included.
     mode:
-        "standard" (default, simplified surface), "lite" (~15 core tools),
-        or "full" (includes deprecated singleton tools for backward compat).
+        "lite" (recommended default, high-leverage tools), "standard"
+        (broader surface), or "full" (includes deprecated singleton tools).
     """
     _log = getattr(engine, "storage", None) is not None
     tool_map: dict[str, Callable[..., Any]] = {
@@ -160,6 +167,7 @@ def build_tool_map(
         "prune_history": engine.prune_history,
         "map": engine.get_map,
         "doctor": engine.doctor_snapshot,
+        "enrichment_plan": engine.enrichment_plan,
         "history": engine.get_history,
         # Session
         "get_relevant_kv": engine.get_relevant_kv,

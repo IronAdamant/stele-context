@@ -100,6 +100,52 @@ def merge_similar_chunks(
     return merged
 
 
+def _vector_for_stored_chunk(
+    storage: Any,
+    chunk_id: str,
+    fallback_signature: Any,
+    *,
+    tier2_cleared: bool,
+) -> list[float]:
+    """Pick the HNSW vector after a store_chunk call.
+
+    When Tier-2 was cleared (content changed), always use the Tier-1
+    ``fallback_signature``. When content is unchanged and an agent
+    signature remains in storage, keep ranking with that Tier-2 vector.
+    """
+    if not tier2_cleared:
+        try:
+            agent = storage.get_agent_signature(chunk_id)
+        except Exception:
+            agent = None
+        if agent is not None:
+            return sig_to_list(agent)
+    return sig_to_list(fallback_signature)
+
+
+def sync_chunk_vector(
+    storage: Any,
+    vector_index: Any,
+    chunk_id: str,
+    fallback_signature: Any,
+    *,
+    tier2_cleared: bool = False,
+) -> None:
+    """Replace the HNSW node for ``chunk_id`` so it matches storage state.
+
+    Required after ``store_chunk`` when Tier-2 may have been cleared so the
+    old agent embedding cannot keep ranking.
+    """
+    vec = _vector_for_stored_chunk(
+        storage,
+        chunk_id,
+        fallback_signature,
+        tier2_cleared=tier2_cleared,
+    )
+    vector_index.remove_chunk(chunk_id)
+    vector_index.add_chunk(chunk_id, vec)
+
+
 def persist_chunks(
     chunks: list[Chunk],
     doc_path: str,
@@ -111,7 +157,7 @@ def persist_chunks(
     """Store chunks and add them to the vector and keyword indexes."""
     for chunk in chunks:
         chunk_content = chunk.content if isinstance(chunk.content, str) else None
-        storage.store_chunk(
+        store_meta = storage.store_chunk(
             chunk_id=chunk.chunk_id,
             document_path=doc_path,
             content_hash=chunk.content_hash,
@@ -121,9 +167,17 @@ def persist_chunks(
             token_count=chunk.token_count,
             content=chunk_content,
         )
-        vector_index.add_chunk(
+        tier2_cleared = bool(
+            isinstance(store_meta, dict) and store_meta.get("tier2_cleared")
+        )
+        # Always refresh HNSW: content-change clears Tier-2 in DB and must
+        # drop any stale agent vector; unchanged content may still hold Tier-2.
+        sync_chunk_vector(
+            storage,
+            vector_index,
             chunk.chunk_id,
-            sig_to_list(chunk.semantic_signature),
+            chunk.semantic_signature,
+            tier2_cleared=tier2_cleared,
         )
         if bm25_ready and bm25_index is not None and chunk_content:
             bm25_index.add_document(chunk.chunk_id, chunk_content)

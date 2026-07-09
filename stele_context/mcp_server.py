@@ -128,7 +128,9 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
 
     def _build_tool_map(self) -> dict[str, Any]:
         """Build tool name -> callable mapping via tool_registry."""
-        mode = os.environ.get("STELE_MCP_MODE", "standard")
+        # Lite is the recommended default for cold agents (high-leverage surface).
+        # Set STELE_MCP_MODE=standard or full to expand.
+        mode = os.environ.get("STELE_MCP_MODE", "lite")
         return build_tool_map(self.stele, get_modality_flags(), mode=mode)
 
     def _handle_tools_discovery(self) -> None:

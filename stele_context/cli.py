@@ -30,7 +30,10 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Start the stdio MCP server (for Claude Desktop)
+  # First-run: index project + print MCP lite config + doctor guidance
+  stele-context init .
+
+  # Start the stdio MCP server (for Claude Desktop / Code)
   stele-context serve-mcp
 
   # Start the HTTP REST server
@@ -47,6 +50,9 @@ Examples:
 
   # Exact text search
   stele-context search-text "TODO" --regex
+
+  # One-screen health + next steps
+  stele-context doctor
 
   # Show statistics
   stele-context stats
@@ -439,10 +445,68 @@ Examples:
         help="Output as JSON",
     )
 
+    # init command (first-run / project setup)
+    init_parser = subparsers.add_parser(
+        "init",
+        help=(
+            "First-run setup: index paths (gitignore-aware), print MCP lite "
+            "config, doctor next_steps, and the recommended agent ritual"
+        ),
+    )
+    init_parser.add_argument(
+        "paths",
+        nargs="*",
+        default=["."],
+        help="Paths to index (default: current directory)",
+    )
+    init_parser.add_argument(
+        "--no-index",
+        action="store_true",
+        help="Skip indexing; only print MCP config and doctor guidance",
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-index even if files look unchanged",
+    )
+    init_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="output_json",
+        help="Emit machine-readable JSON (index result + doctor snapshot)",
+    )
+
     # doctor command
     subparsers.add_parser(
         "doctor",
-        help="One-screen health: version, storage, index, env issues, map preview",
+        help=(
+            "One-screen health: version, storage, index, env issues, map preview, "
+            "next_steps, token_savings, enrichment_preview"
+        ),
+    )
+
+    # enrichment-plan command
+    enrich_parser = subparsers.add_parser(
+        "enrichment-plan",
+        help="List hot chunks missing Tier-2 summaries (for bulk_store_summaries)",
+    )
+    enrich_parser.add_argument(
+        "--top-n",
+        type=int,
+        default=15,
+        help="Max candidates (default 15)",
+    )
+    enrich_parser.add_argument(
+        "--min-tokens",
+        type=int,
+        default=20,
+        help="Skip chunks smaller than this (default 20)",
+    )
+    enrich_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="output_json",
+        help="Output as JSON (default)",
     )
 
     # project-brief command
@@ -793,6 +857,97 @@ def cmd_doctor(_args: argparse.Namespace, stele: Stele) -> int:
     return 0
 
 
+def cmd_init(args: argparse.Namespace, stele: Stele) -> int:
+    """First-run: optional index + MCP lite guidance + doctor snapshot."""
+    from stele_context.agent_guidance import (
+        DEFAULT_RITUAL,
+        RECOMMENDED_MCP_MODE,
+        mcp_config_snippet,
+    )
+
+    paths = list(args.paths) if args.paths else ["."]
+    index_result: dict | None = None
+    if not getattr(args, "no_index", False):
+        index_result = stele.index_documents(
+            paths=paths,
+            force_reindex=bool(getattr(args, "force", False)),
+        )
+
+    snap = stele.doctor_snapshot()
+    payload = {
+        "ok": True,
+        "indexed": index_result,
+        "doctor": snap,
+        "recommended_mcp_mode": RECOMMENDED_MCP_MODE,
+        "recommended_ritual": DEFAULT_RITUAL,
+        "mcp_config": mcp_config_snippet(),
+    }
+
+    if getattr(args, "output_json", False):
+        print(json.dumps(payload, indent=2, default=str))
+        return 0
+
+    print("Stele Context — init")
+    print("=" * 50)
+    if index_result is not None:
+        n_idx = len(index_result.get("indexed") or [])
+        n_skip = len(index_result.get("skipped") or [])
+        n_err = len(index_result.get("errors") or [])
+        print(
+            f"Index: {n_idx} indexed, {n_skip} skipped, {n_err} errors "
+            f"({index_result.get('total_chunks', 0)} chunks, "
+            f"{index_result.get('total_tokens', 0)} tokens)"
+        )
+        if n_err:
+            for item in index_result.get("errors") or []:
+                print(
+                    f"  error: {item.get('path')}: {item.get('error')}", file=sys.stderr
+                )
+    else:
+        print("Index: skipped (--no-index)")
+
+    print()
+    print(f"Recommended MCP mode: {RECOMMENDED_MCP_MODE}")
+    print(f"Ritual: {DEFAULT_RITUAL}")
+    print()
+    print("MCP client config (Claude Code / Desktop):")
+    print(mcp_config_snippet())
+    print()
+    print("Doctor next_steps:")
+    for step in snap.get("next_steps") or []:
+        print(f"  - [{step.get('action')}] {step.get('detail')}")
+    savings = snap.get("token_savings") or {}
+    if savings:
+        print()
+        print(
+            f"Token savings estimate: up to ~{savings.get('avoided_reread_tokens_if_cache_hit', 0)} "
+            "tokens avoided on full cache-hit re-reads"
+        )
+    enrich = snap.get("enrichment_preview") or {}
+    if enrich.get("candidates_total"):
+        print(
+            f"Tier-2 enrichment: {enrich.get('candidates_total')} candidates "
+            f"({enrich.get('uncovered_tokens', 0)} uncovered tokens). "
+            "Run: stele-context enrichment-plan"
+        )
+    print()
+    print("Full doctor JSON:")
+    print(json.dumps(snap, indent=2, default=str))
+    if index_result and index_result.get("errors"):
+        return 1
+    return 0
+
+
+def cmd_enrichment_plan(args: argparse.Namespace, stele: Stele) -> int:
+    """Print enrichment plan for Tier-2 summaries."""
+    plan = stele.enrichment_plan(
+        top_n=getattr(args, "top_n", 15),
+        min_tokens=getattr(args, "min_tokens", 20),
+    )
+    print(json.dumps(plan, indent=2, default=str))
+    return 0
+
+
 def cmd_project_brief(args: argparse.Namespace, stele: Stele) -> int:
     """Largest files and extension histogram."""
     data = stele.get_project_brief(top_n=getattr(args, "top_n", 40))
@@ -856,12 +1011,14 @@ def main(argv: list[str] | None = None) -> int:
         "serve": cmd_serve,
         "remove": cmd_remove,
         "index": cmd_index,
+        "init": cmd_init,
         "search": cmd_search,
         "search-text": cmd_search_text,
         "agent-grep": cmd_agent_grep,
         "detect": cmd_detect,
         "stats": cmd_stats,
         "doctor": cmd_doctor,
+        "enrichment-plan": cmd_enrichment_plan,
         "project-brief": cmd_project_brief,
         "clear": cmd_clear,
         "annotate": cmd_annotate,

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`stele-context init`** — first-run setup: gitignore-aware index, MCP lite config snippet, doctor `next_steps`, and recommended agent ritual.
+- **Doctor guidance** — `doctor_snapshot` now includes `next_steps`, `recommended_mcp_mode` (lite), `recommended_ritual`, `mcp_config`, `token_savings` (avoided re-read estimate), and `enrichment_preview`.
+- **`enrichment_plan`** — engine + CLI (`enrichment-plan`) + MCP tool listing hot chunks missing Tier-2 summaries by token mass.
+- **`list_chunk_metadata`** — lightweight chunk listing (ids, paths, tokens, tier2 flags, optional short preview) for doctor/enrichment without loading full content.
+- **`query` `suggested_next`** — sparse/empty composite retrieval returns actionable follow-ups (`agent_grep`, `detect_changes`, symbols).
+- **JS/TS symbol golden fixtures** — alias (`const X = Y`), destructured `module.exports`, `export { A as B }`, and `exports.Name =` patterns covered by regression tests.
+- **Search quality eval as product** — `benchmarks/eval_search_quality.py` supports `--search-mode`, `--tier2`, `--tier2-delta`, `--json`, and a recall gate; CI runs keyword + Tier-2 delta; tests in `tests/test_eval_search_quality.py`.
+
+### Changed
+- **MCP default mode is `lite`** (was `standard`). Set `STELE_MCP_MODE=standard` or `full` for broader surfaces. Lite includes `enrichment_plan`, `bulk_store_summaries`, **`get_search_history`**, and **`get_session_read_files`** so the documented agent ritual works on the default surface.
+- **Tier-2 invalidation** — `store_chunk` clears `semantic_summary` / `agent_signature` when `content_hash` changes; **`persist_chunks` / `sync_chunk_vector`** refresh HNSW so stale agent embeddings cannot keep ranking.
+- Doctor and `enrichment_plan` use **metadata-only** chunk queries (not full content for every row).
+
+### Fixed
+- Eval path mapping on macOS (`/var` vs `/private/var`) so corpus recall metrics resolve correctly.
+- HNSW/DB consistency after Tier-2 clear on content change (vector replaced with Tier-1).
+
 ## [1.4.4] - 2026-06-11
 
 ### Added

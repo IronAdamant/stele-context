@@ -34,6 +34,14 @@ Everything runs **100% offline on your machine**. No internet, no API keys, no c
 pip install stele-context
 ```
 
+### First-run setup (recommended)
+
+```bash
+stele-context init .
+```
+
+This indexes the project (respecting `.gitignore`), prints a ready-to-paste **MCP lite** client config, and shows `doctor` next-steps for a cold agent. Prefer this over a bare `index` when wiring Stele for the first time.
+
 ### Index your project
 
 ```bash
@@ -64,7 +72,8 @@ pip install stele-context[mcp]
   "mcpServers": {
     "stele-context": {
       "command": "stele-context",
-      "args": ["serve-mcp"]
+      "args": ["serve-mcp"],
+      "env": { "STELE_MCP_MODE": "lite" }
     }
   }
 }
@@ -76,17 +85,35 @@ pip install stele-context[mcp]
   "mcpServers": {
     "stele-context": {
       "command": "stele-context",
-      "args": ["serve-mcp"]
+      "args": ["serve-mcp"],
+      "env": { "STELE_MCP_MODE": "lite" }
     }
   }
 }
 ```
 
-**Cursor, Windsurf, and other MCP clients** — point them at the same `stele-context serve-mcp` command; the configuration shape is the same.
+**Cursor, Windsurf, and other MCP clients** — point them at the same `stele-context serve-mcp` command; the configuration shape is the same. (`stele-context init` prints a ready-to-paste snippet.)
 
 > **Tip:** If you installed in a virtualenv, use the full path: run `which stele-context` to find it.
 
-Once connected, your agent gets **~32 tools** for caching, searching, and navigating your code — it uses them automatically when they're helpful. (Set `STELE_MCP_MODE=lite` for ~15 essential tools, or `STELE_MCP_MODE=full` for the complete surface.)
+Once connected, your agent gets the **lite** high-leverage tool set by default (~20 tools: `doctor`, `query`, `agent_grep`, symbols, cache, Tier-2 summaries). Set `STELE_MCP_MODE=standard` for the broader surface, or `full` for deprecated singleton tools.
+
+### Recommended agent ritual
+
+```
+doctor → query (session_id) → agent_grep / find_* as needed → get_context (trust/diff)
+```
+
+After edits: `detect_changes`. To improve hybrid search: `enrichment-plan` then `bulk_store_summaries`.
+
+### Search quality eval (CI / release gate)
+
+```bash
+python benchmarks/eval_search_quality.py --search-mode keyword --json --min-recall 0.40
+python benchmarks/eval_search_quality.py --tier2-delta --min-recall 0.30
+```
+
+Keyword recall is gated in CI (`search-regression` job). The Tier-2 delta path reports hybrid recall with summaries off vs on.
 
 ## Who Is This For?
 

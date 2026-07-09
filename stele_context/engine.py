@@ -418,6 +418,33 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
         }
         if errors:
             out["errors"] = errors
+        # Guidance for cold agents when retrieval is thin or empty.
+        if not results:
+            out["suggested_next"] = [
+                {
+                    "action": "agent_grep",
+                    "detail": "No hits — try agent_grep or search_text for exact tokens.",
+                },
+                {
+                    "action": "detect_changes",
+                    "detail": "If files changed recently, run detect_changes / re-index.",
+                },
+                {
+                    "action": "enrich_tier2",
+                    "detail": "For concept queries, check doctor.enrichment_preview and bulk_store_summaries.",
+                },
+            ]
+        elif len(results) < max(3, top_k // 2):
+            out["suggested_next"] = [
+                {
+                    "action": "agent_grep",
+                    "detail": "Sparse results — confirm with agent_grep on key identifiers.",
+                },
+                {
+                    "action": "find_definition",
+                    "detail": "For symbols, use find_definition / find_references.",
+                },
+            ]
         return out
 
     def _chunk_for_line(

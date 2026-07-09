@@ -228,11 +228,34 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
     {
         "name": "doctor",
         "description": "One-screen health snapshot: version, Python, storage paths, "
-        "counts, index_health, environment_check issues, compact map preview. "
+        "counts, index_health, environment_check issues, compact map preview, "
+        "next_steps (actionable), recommended_mcp_mode (lite), token_savings, "
+        "and enrichment_preview for Tier-2 summaries. "
         "USE WHEN: orienting at session start or debugging index/storage.",
         "inputSchema": {
             "type": "object",
             "properties": {},
+        },
+    },
+    {
+        "name": "enrichment_plan",
+        "description": "List hot chunks missing Tier-2 summaries, ranked by token mass. "
+        "Use bulk_store_summaries to fill them. "
+        "USE WHEN: improving hybrid search quality after indexing.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "top_n": {
+                    "type": "integer",
+                    "description": "Max candidates to return (default 15).",
+                    "default": 15,
+                },
+                "min_tokens": {
+                    "type": "integer",
+                    "description": "Skip chunks smaller than this (default 20).",
+                    "default": 20,
+                },
+            },
         },
     },
     {

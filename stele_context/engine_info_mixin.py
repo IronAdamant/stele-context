@@ -23,6 +23,10 @@ import sys
 from typing import Any
 
 from stele_context import search_engine as _se
+from stele_context.agent_guidance import (
+    assemble_doctor_guidance,
+    build_enrichment_plan,
+)
 from stele_context.engine_utils import check_environment_impl
 
 
@@ -103,7 +107,11 @@ class _InfoMixin:
         return data
 
     def doctor_snapshot(self) -> dict[str, Any]:
-        """One-screen orientation: version, storage, health, env issues, map preview."""
+        """One-screen orientation: version, storage, health, env issues, map preview.
+
+        Also includes agent guidance: next_steps, recommended MCP lite mode,
+        token_savings estimate, and enrichment_preview for Tier-2 bootstrap.
+        """
         with self._lock.read_lock():
             stats = _se.get_stats_unlocked(
                 self.storage,
@@ -120,24 +128,60 @@ class _InfoMixin:
             search_quality = _se.get_search_quality_snapshot(
                 self.storage, self.vector_index
             )
+            # Metadata-only path — do not load full content for every chunk.
+            light_chunks = self.storage.list_chunk_metadata(
+                include_preview=True, preview_chars=120
+            )
+            enrich_plan = build_enrichment_plan(light_chunks, top_n=15)
         env = self.check_environment()
         stats["project_root"] = (
             str(self._project_root) if self._project_root is not None else None
         )
         m["project_root"] = stats["project_root"]
+        storage = stats.get("storage") or {}
+        doc_count = storage.get("document_count") or 0
+        chunk_count = storage.get("chunk_count") or 0
+        total_tokens = storage.get("total_tokens") or 0
+        index_health = stats.get("index_health") or {}
+        guidance = assemble_doctor_guidance(
+            document_count=int(doc_count),
+            chunk_count=int(chunk_count),
+            symbol_rows=int(index_health.get("symbol_rows") or 0),
+            total_indexed_tokens=int(total_tokens),
+            tier2_coverage_percent=float(
+                search_quality.get("tier2_coverage_percent") or 0.0
+            ),
+            seconds_since_last_index=index_health.get("seconds_since_last_index"),
+            index_alerts=list(index_health.get("alerts") or []),
+            enrichment_plan=enrich_plan,
+        )
         return {
             "stele_version": stats.get("version"),
             "python": sys.version.split()[0],
             "project_root": stats["project_root"],
-            "storage_dir": (stats.get("storage") or {}).get("storage_dir"),
-            "document_count": (stats.get("storage") or {}).get("document_count"),
-            "chunk_count": (stats.get("storage") or {}).get("chunk_count"),
-            "index_health": stats.get("index_health"),
+            "storage_dir": storage.get("storage_dir"),
+            "document_count": doc_count,
+            "chunk_count": chunk_count,
+            "index_health": index_health,
             "db_health": self.storage.get_db_health_snapshot(),
             "search_quality": search_quality,
             "environment": env,
             "map_preview": m,
+            **guidance,
         }
+
+    def enrichment_plan(self, top_n: int = 15, min_tokens: int = 20) -> dict[str, Any]:
+        """Return hot chunks missing Tier-2 summaries for agent enrichment.
+
+        Candidates are ranked by token mass among chunks without
+        ``agent_signature`` / ``semantic_summary``. Use with
+        ``bulk_store_summaries`` after writing short purpose summaries.
+        """
+        with self._lock.read_lock():
+            chunks = self.storage.list_chunk_metadata(
+                include_preview=True, preview_chars=120
+            )
+            return build_enrichment_plan(chunks, top_n=top_n, min_tokens=min_tokens)
 
     def list_sessions(self, agent_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock.read_lock():

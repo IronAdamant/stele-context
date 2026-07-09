@@ -287,17 +287,36 @@ class StorageBackend(StorageDelegatesMixin):
         end_pos: int,
         token_count: int,
         content: str | None = None,
-    ) -> None:
-        """Store chunk metadata (and optionally content) in database."""
+    ) -> dict[str, Any]:
+        """Store chunk metadata (and optionally content) in database.
+
+        Returns a small status dict:
+          - ``content_changed``: True when an existing row's content_hash differed
+          - ``tier2_cleared``: True when agent Tier-2 fields were nullified
+
+        Callers that maintain an HNSW index (e.g. ``indexing.persist_chunks``)
+        must refresh the vector for this chunk after a store — especially when
+        ``tier2_cleared`` is True so stale agent embeddings cannot rank.
+        """
         now = time.time()
         sig_bytes = sig_to_bytes(semantic_signature)
+        result: dict[str, Any] = {
+            "content_changed": False,
+            "tier2_cleared": False,
+        }
 
         def _write(conn: sqlite3.Connection) -> None:
             cursor = conn.execute(
-                "SELECT version FROM chunks WHERE chunk_id = ?", (chunk_id,)
+                "SELECT version, content_hash FROM chunks WHERE chunk_id = ?",
+                (chunk_id,),
             )
             row = cursor.fetchone()
             version = (row[0] + 1) if row else 1
+            # Content change invalidates agent Tier-2 summary/signature so stale
+            # semantics cannot silently rank after the underlying text changed.
+            content_changed = bool(row) and row[1] != content_hash
+            result["content_changed"] = content_changed
+            result["tier2_cleared"] = content_changed
 
             if row:
                 conn.execute(
@@ -309,27 +328,51 @@ class StorageBackend(StorageDelegatesMixin):
                     """,
                     (chunk_id,),
                 )
-                conn.execute(
-                    """
-                    UPDATE chunks SET
-                        document_path = ?, content_hash = ?, semantic_signature = ?,
-                        start_pos = ?, end_pos = ?, token_count = ?,
-                        last_accessed = ?, version = ?, content = ?
-                    WHERE chunk_id = ?
-                    """,
-                    (
-                        document_path,
-                        content_hash,
-                        sig_bytes,
-                        start_pos,
-                        end_pos,
-                        token_count,
-                        now,
-                        version,
-                        content,
-                        chunk_id,
-                    ),
-                )
+                if content_changed:
+                    conn.execute(
+                        """
+                        UPDATE chunks SET
+                            document_path = ?, content_hash = ?, semantic_signature = ?,
+                            start_pos = ?, end_pos = ?, token_count = ?,
+                            last_accessed = ?, version = ?, content = ?,
+                            semantic_summary = NULL, agent_signature = NULL
+                        WHERE chunk_id = ?
+                        """,
+                        (
+                            document_path,
+                            content_hash,
+                            sig_bytes,
+                            start_pos,
+                            end_pos,
+                            token_count,
+                            now,
+                            version,
+                            content,
+                            chunk_id,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE chunks SET
+                            document_path = ?, content_hash = ?, semantic_signature = ?,
+                            start_pos = ?, end_pos = ?, token_count = ?,
+                            last_accessed = ?, version = ?, content = ?
+                        WHERE chunk_id = ?
+                        """,
+                        (
+                            document_path,
+                            content_hash,
+                            sig_bytes,
+                            start_pos,
+                            end_pos,
+                            token_count,
+                            now,
+                            version,
+                            content,
+                            chunk_id,
+                        ),
+                    )
             else:
                 conn.execute(
                     """
@@ -359,6 +402,7 @@ class StorageBackend(StorageDelegatesMixin):
         else:
             with connect(self.db_path) as conn:
                 _write(conn)
+        return result
 
     def get_chunk(self, chunk_id: str) -> dict[str, Any] | None:
         """Retrieve chunk metadata by ID."""
@@ -407,6 +451,72 @@ class StorageBackend(StorageDelegatesMixin):
                 )
 
             return [dict(row) for row in cursor.fetchall()]
+
+    def list_chunk_metadata(
+        self,
+        *,
+        document_path: str | None = None,
+        include_preview: bool = False,
+        preview_chars: int = 120,
+    ) -> list[dict[str, Any]]:
+        """Lightweight chunk rows for doctor / enrichment (no full content load).
+
+        Returns ``chunk_id``, ``document_path``, ``token_count``, ``content_hash``,
+        ``has_tier2`` (agent_signature present), and optionally a short
+        ``content_preview`` (substr only — never the full body).
+        """
+        prev = max(0, int(preview_chars)) if include_preview else 0
+        with connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if include_preview and prev > 0:
+                base = (
+                    "SELECT chunk_id, document_path, token_count, content_hash, "
+                    "CASE WHEN agent_signature IS NOT NULL THEN 1 ELSE 0 END "
+                    "AS has_tier2, "
+                    "CASE WHEN semantic_summary IS NOT NULL "
+                    "AND semantic_summary != '' THEN 1 ELSE 0 END AS has_summary, "
+                    "substr(content, 1, ?) AS content_preview "
+                    "FROM chunks"
+                )
+            else:
+                base = (
+                    "SELECT chunk_id, document_path, token_count, content_hash, "
+                    "CASE WHEN agent_signature IS NOT NULL THEN 1 ELSE 0 END "
+                    "AS has_tier2, "
+                    "CASE WHEN semantic_summary IS NOT NULL "
+                    "AND semantic_summary != '' THEN 1 ELSE 0 END AS has_summary "
+                    "FROM chunks"
+                )
+            if document_path and include_preview and prev > 0:
+                rows = conn.execute(
+                    base + " WHERE document_path = ? ORDER BY start_pos",
+                    (prev, document_path),
+                ).fetchall()
+            elif document_path:
+                rows = conn.execute(
+                    base + " WHERE document_path = ? ORDER BY start_pos",
+                    (document_path,),
+                ).fetchall()
+            elif include_preview and prev > 0:
+                rows = conn.execute(
+                    base + " ORDER BY document_path, start_pos", (prev,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    base + " ORDER BY document_path, start_pos"
+                ).fetchall()
+            out: list[dict[str, Any]] = []
+            for row in rows:
+                d = dict(row)
+                d["has_tier2"] = bool(d.get("has_tier2") or d.get("has_summary"))
+                # Normalize for build_enrichment_plan (agent_signature truthy)
+                if d["has_tier2"]:
+                    d["agent_signature"] = True
+                else:
+                    d["agent_signature"] = None
+                    d["semantic_summary"] = None
+                out.append(d)
+            return out
 
     def search_text(
         self,

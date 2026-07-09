@@ -6,6 +6,7 @@ tool execution, and error handling.
 """
 
 import json
+import os
 import urllib.request
 import urllib.error
 
@@ -16,8 +17,17 @@ from stele_context.mcp_server import MCPServer, _TOOL_SCHEMAS
 class TestHTTPServer:
     """End-to-end tests for the MCP HTTP server."""
 
-    def _start_server(self, tmp_path, port=0):
-        """Start a server on an ephemeral port, return (server, base_url)."""
+    def _start_server(self, tmp_path, port=0, mode: str = "standard"):
+        """Start a server on an ephemeral port, return (server, base_url, engine).
+
+        Default mode is ``standard`` so integration tests cover the broader
+        tool surface. Production default is ``lite`` (see STELE_MCP_MODE).
+
+        Tool maps are built per-request from ``STELE_MCP_MODE``, so the env
+        var stays set until the test calls ``_stop_server`` and restores it.
+        """
+        self._prev_mcp_mode = os.environ.get("STELE_MCP_MODE")
+        os.environ["STELE_MCP_MODE"] = mode
         cf = Stele(storage_dir=str(tmp_path / "storage"))
         server = MCPServer(stele=cf, host="127.0.0.1", port=port)
         server.start(blocking=False)
@@ -25,6 +35,17 @@ class TestHTTPServer:
         actual_port = server.server.server_address[1]
         base_url = f"http://127.0.0.1:{actual_port}"
         return server, base_url, cf
+
+    def _stop_server(self, server):
+        """Stop server and restore STELE_MCP_MODE."""
+        try:
+            server.stop()
+        finally:
+            prev = getattr(self, "_prev_mcp_mode", None)
+            if prev is None:
+                os.environ.pop("STELE_MCP_MODE", None)
+            else:
+                os.environ["STELE_MCP_MODE"] = prev
 
     def _get(self, url):
         """GET request, return (status, parsed JSON)."""
@@ -73,11 +94,30 @@ class TestHTTPServer:
             assert "register_dynamic_symbols" in tool_names
             assert "remove_dynamic_symbols" in tool_names
             assert "get_dynamic_symbols" in tool_names
-            assert (
-                len(tool_names) == 42
-            )  # simplified surface: annotations, document_lock, query, batch
+            # standard mode (this test): broader surface including batch/query
+            assert len(tool_names) >= 40
         finally:
-            server.stop()
+            self._stop_server(server)
+
+    def test_default_mode_is_lite_high_leverage(self, tmp_path):
+        """Production default (no STELE_MCP_MODE) exposes lite tools only."""
+        prev = os.environ.pop("STELE_MCP_MODE", None)
+        try:
+            server, url, _ = self._start_server(tmp_path, mode="lite")
+            try:
+                status, data = self._get(f"{url}/tools")
+                assert status == 200
+                tool_names = {t["name"] for t in data["tools"]}
+                assert "doctor" in tool_names
+                assert "query" in tool_names
+                assert "enrichment_plan" in tool_names
+                assert "stats" not in tool_names
+                assert "rebuild_symbols" not in tool_names
+            finally:
+                self._stop_server(server)
+        finally:
+            if prev is not None:
+                os.environ["STELE_MCP_MODE"] = prev
 
     def test_tools_have_descriptions_and_parameters(self, tmp_path):
         """Every discovered tool has description and parameters."""
@@ -90,7 +130,7 @@ class TestHTTPServer:
                 assert "parameters" in tool
                 assert tool["parameters"]["type"] == "object"
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_tool_schemas_match_tool_map(self, tmp_path):
         """Discovery list matches _TOOL_SCHEMAS keys (no drift)."""
@@ -102,7 +142,7 @@ class TestHTTPServer:
             # Every schema should be in discovery
             assert schema_names == discovered
         finally:
-            server.stop()
+            self._stop_server(server)
 
     # -- Health --
 
@@ -116,7 +156,7 @@ class TestHTTPServer:
             assert "version" in data
             assert "storage" in data
         finally:
-            server.stop()
+            self._stop_server(server)
 
     # -- Tool execution --
 
@@ -153,7 +193,7 @@ class TestHTTPServer:
             assert len(data["result"]) >= 1
             assert "greet" in data["result"][0]["content"]
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_get_context(self, tmp_path):
         """Index then get_context for a file."""
@@ -176,7 +216,7 @@ class TestHTTPServer:
             assert data["success"] is True
             assert len(data["result"]["unchanged"]) == 1
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_detect_changes(self, tmp_path):
         """detect_changes_and_update via HTTP."""
@@ -197,7 +237,7 @@ class TestHTTPServer:
             assert data["success"] is True
             assert len(data["result"]["unchanged"]) == 1
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_detect_modality(self, tmp_path):
         """detect_modality tool via HTTP."""
@@ -214,7 +254,7 @@ class TestHTTPServer:
             assert data["success"] is True
             assert data["result"]["modality"] == "code"
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_get_supported_formats(self, tmp_path):
         """get_supported_formats tool via HTTP."""
@@ -232,7 +272,7 @@ class TestHTTPServer:
             assert "text" in data["result"]["formats"]
             assert "code" in data["result"]["formats"]
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_find_references_and_definition(self, tmp_path):
         """find_references and find_definition via HTTP."""
@@ -262,7 +302,7 @@ class TestHTTPServer:
             assert status == 200
             assert data["success"] is True
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_stale_chunks(self, tmp_path):
         """stale_chunks tool via HTTP."""
@@ -278,7 +318,7 @@ class TestHTTPServer:
             assert status == 200
             assert data["success"] is True
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_rebuild_symbol_graph(self, tmp_path):
         """rebuild_symbol_graph tool via HTTP."""
@@ -294,7 +334,7 @@ class TestHTTPServer:
             assert status == 200
             assert data["success"] is True
         finally:
-            server.stop()
+            self._stop_server(server)
 
     # -- Error handling --
 
@@ -313,7 +353,7 @@ class TestHTTPServer:
             assert "error" in data
             assert "available_tools" in data
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_missing_tool_field(self, tmp_path):
         """POST /call without 'tool' field returns 400."""
@@ -323,7 +363,7 @@ class TestHTTPServer:
             assert status == 400
             assert "error" in data
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_invalid_json(self, tmp_path):
         """POST /call with invalid JSON returns 400."""
@@ -345,7 +385,7 @@ class TestHTTPServer:
             assert status == 400
             assert "error" in data
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_bulk_store_embeddings(self, tmp_path):
         """bulk_store_embeddings tool via HTTP."""
@@ -370,7 +410,7 @@ class TestHTTPServer:
             assert data["success"] is True
             assert data["result"]["stored"] >= 1
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_document_lock(self, tmp_path):
         """document_lock unified tool via HTTP."""
@@ -403,7 +443,7 @@ class TestHTTPServer:
             assert status == 200
             assert data["success"] is True
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_annotations(self, tmp_path):
         """annotations unified tool via HTTP."""
@@ -442,7 +482,7 @@ class TestHTTPServer:
             assert data["success"] is True
             assert len(data["result"]["annotations"]) >= 1
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_query(self, tmp_path):
         """query composite tool via HTTP."""
@@ -464,7 +504,7 @@ class TestHTTPServer:
             assert "results" in data["result"]
             assert "sources" in data["result"]
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_batch(self, tmp_path):
         """batch multi-operation tool via HTTP."""
@@ -495,7 +535,7 @@ class TestHTTPServer:
             assert data["success"] is True
             assert len(data["result"]["operations"]) == 2
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_invalid_parameters(self, tmp_path):
         """Calling a tool with wrong parameters returns error."""
@@ -511,7 +551,7 @@ class TestHTTPServer:
             assert status == 200
             assert "error" in data
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_404_on_unknown_path(self, tmp_path):
         """GET on unknown path returns 404."""
@@ -521,7 +561,7 @@ class TestHTTPServer:
             assert status == 404
             assert "error" in data
         finally:
-            server.stop()
+            self._stop_server(server)
 
     def test_post_404_on_unknown_path(self, tmp_path):
         """POST on unknown path returns 404."""
@@ -530,7 +570,7 @@ class TestHTTPServer:
             status, data = self._post(f"{url}/nonexistent", {})
             assert status == 404
         finally:
-            server.stop()
+            self._stop_server(server)
 
     # -- Server lifecycle --
 
@@ -541,6 +581,6 @@ class TestHTTPServer:
         status, _ = self._get(f"{url}/health")
         assert status == 200
         # Stop it
-        server.stop()
+        self._stop_server(server)
         assert server.server is None
         assert server._thread is None

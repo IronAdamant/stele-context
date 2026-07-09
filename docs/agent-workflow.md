@@ -13,17 +13,40 @@ Storage is **persistent** (project `.stele-context/` by default), so later sessi
 
 ## Minimal first session
 
-**Goal**: Get the codebase into the index.
+**Goal**: Get the codebase into the index and orient in one step.
+
+### Preferred: CLI init
+
+```bash
+stele-context init .
+```
+
+Indexes the tree (gitignore-aware), prints **MCP lite** config + **recommended ritual**, and a full **`doctor`** snapshot (`next_steps`, `token_savings`, `enrichment_preview`).
+
+### Or step by step
 
 - **MCP / HTTP**: `index` with paths (project root or globs as supported), or CLI: `stele-context index <paths>`.
-- **Orient cheaply** (token-bounded): MCP/CLI **`doctor`** (one-screen health + compact map preview). CLI: `stele-context doctor`.
+- **Orient cheaply** (token-bounded): MCP/CLI **`doctor`** — health, freshness, `next_steps`, Tier-2 coverage, token-savings estimate. CLI: `stele-context doctor`.
 - Optionally run **`map`** (`compact=true` for large repos) or **`stats`** (`compact=true`) to confirm **index_health**.
 
 **Python** (`Stele` engine):
 
 ```python
 engine.index_documents(["src/", "README.md"])
+snap = engine.doctor_snapshot()  # next_steps, enrichment_preview, token_savings
+plan = engine.enrichment_plan(top_n=10)
 ```
+
+### Canonical ritual
+
+```
+doctor → query (session_id) → agent_grep / find_definition|find_references → get_context
+```
+
+After edits: `detect_changes` (or `query` with `session_id` for auto working-tree).  
+For hybrid search quality: `enrichment_plan` → `bulk_store_summaries` on hot chunks.
+
+MCP default mode is **`lite`**. Set `STELE_MCP_MODE=standard` only when you need the broader tool surface.
 
 After this, **`search`**, **`get_context`**, **`find_references`**, etc. have material to work with.
 
@@ -66,8 +89,10 @@ Rough rule: **symbols first** for identifiers; **`search`** for concepts (keywor
 
 ## Tier 2 bootstrap (two passes)
 
-1. **Index** hot paths (or whole repo), then run **`search`** or **`map`** (`compact=true`) to see where tokens live.
-2. **Enrich**: for top chunks you care about, call **`bulk_store_summaries`** with `{chunk_id: summary}` (or **`index_documents(..., summaries=)`** at file level first). Re-run **`search`** — Tier 2 boosts retrieval quality without new dependencies.
+1. **Index** hot paths (or whole repo), then run **`doctor`** / **`enrichment_plan`** (CLI: `stele-context enrichment-plan`) to see uncovered token mass.
+2. **Enrich**: for top candidates, call **`bulk_store_summaries`** with `{chunk_id: summary}` (or **`index_documents(..., summaries=)`** at file level first). Re-run **`search`** with `search_mode=hybrid` — Tier 2 boosts retrieval quality without new dependencies.
+
+When chunk **content_hash** changes on re-index / `store_chunk`, prior `semantic_summary` and `agent_signature` are **cleared** so stale Tier 2 cannot silently rank.
 
 ## Chunk agent notes (non-vector memory)
 
