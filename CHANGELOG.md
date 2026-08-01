@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-08-01
+
+### Changed
+- Audit remediation: MCP schemas, query applied_defaults, CLI composite tools, docs honesty
+
+
 ### Added
 - **Audit remediation (long-term):** `query` returns `applied_defaults`; optional `search_mode` / `compact` / `max_result_tokens` on `query`; full-mode MCP tool schemas for stdio discovery; thin CLI `query` / `find-definition` / `find-references` / `impact-radius` / `coupling`.
 - Design-ceiling stamps in STABILITY + philosophy (dynamic synthetic edges, polymorphic lattice, name-homonym coupling as accepted limits).
