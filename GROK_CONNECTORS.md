@@ -8,11 +8,16 @@ The MCP server provides persistent local context cache and indexing for LLM agen
 
 When Grok supports adding custom MCP servers:
 
-1. Start the server locally (example for this project):
+1. Start the server locally (recommended — matches product ritual / doctor config):
+   ```bash
+   stele-context serve-mcp
+   # optional: STELE_MCP_MODE=lite|standard|full (default: lite)
+   ```
+   HTTP alternative (still supported):
    ```bash
    python -m stele_context.mcp_server --port 9876
+   # or: stele-context serve --port 9876
    ```
-   Or use stdio mode for local agents if available.
 
 2. For remote access from Grok, expose the HTTP endpoint over HTTPS using a secure tunnel.
 

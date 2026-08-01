@@ -38,7 +38,13 @@ WRITE_TOOLS = frozenset(
     }
 )
 
-# Deprecated singleton tools kept in "full" mode for backward compatibility.
+# Mode surface truth (see build_tool_map):
+# - base map = standard non-deprecated tools (includes get_chunk_history,
+#   list_sessions, environment_check, clean_bytecache, prune_history,
+#   get_dynamic_symbols, get_notifications, bulk_store_embeddings, etc.)
+# - lite: keep only _LITE_TOOLS from the base map
+# - full: base map + the deprecated singletons below
+# These names are NOT on the base map; they are added only when mode == "full".
 _FULL_MODE_ONLY_TOOLS = frozenset(
     {
         "stats",
@@ -59,14 +65,6 @@ _FULL_MODE_ONLY_TOOLS = frozenset(
         "store_semantic_summary",
         "store_embedding",
         "store_chunk_agent_notes",
-        # Moved to full mode to reduce standard surface (Phase 4 rationalisation)
-        "get_chunk_history",
-        "list_sessions",
-        "environment_check",
-        "clean_bytecache",
-        "prune_history",
-        "get_dynamic_symbols",
-        "get_notifications",
     }
 )
 
@@ -213,28 +211,34 @@ def build_tool_map(
         "batch": engine.batch,
     }
 
-    # Full mode: restore deprecated singleton tools
+    # Full mode: restore deprecated singleton tools listed in _FULL_MODE_ONLY_TOOLS.
     if mode == "full":
+        full_only_callables = {
+            "stats": engine.get_stats,
+            "project_brief": engine.get_project_brief,
+            "annotate": engine.annotate,
+            "get_annotations": engine.get_annotations,
+            "delete_annotation": engine.delete_annotation,
+            "update_annotation": engine.update_annotation,
+            "search_annotations": engine.search_annotations,
+            "bulk_annotate": engine.bulk_annotate,
+            "acquire_document_lock": engine.acquire_document_lock,
+            "refresh_document_lock": engine.refresh_document_lock,
+            "release_document_lock": engine.release_document_lock,
+            "get_document_lock_status": engine.get_document_lock_status,
+            "release_agent_locks": engine.release_agent_locks,
+            "get_conflicts": engine.get_conflicts,
+            "reap_expired_locks": engine.reap_expired_locks,
+            "store_semantic_summary": engine.store_semantic_summary,
+            "store_embedding": engine.store_embedding,
+            "store_chunk_agent_notes": engine.store_chunk_agent_notes,
+        }
+        # Keep map in sync with the frozenset (fail closed if a name is missing).
         tool_map.update(
             {
-                "stats": engine.get_stats,
-                "project_brief": engine.get_project_brief,
-                "annotate": engine.annotate,
-                "get_annotations": engine.get_annotations,
-                "delete_annotation": engine.delete_annotation,
-                "update_annotation": engine.update_annotation,
-                "search_annotations": engine.search_annotations,
-                "bulk_annotate": engine.bulk_annotate,
-                "acquire_document_lock": engine.acquire_document_lock,
-                "refresh_document_lock": engine.refresh_document_lock,
-                "release_document_lock": engine.release_document_lock,
-                "get_document_lock_status": engine.get_document_lock_status,
-                "release_agent_locks": engine.release_agent_locks,
-                "get_conflicts": engine.get_conflicts,
-                "reap_expired_locks": engine.reap_expired_locks,
-                "store_semantic_summary": engine.store_semantic_summary,
-                "store_embedding": engine.store_embedding,
-                "store_chunk_agent_notes": engine.store_chunk_agent_notes,
+                k: full_only_callables[k]
+                for k in _FULL_MODE_ONLY_TOOLS
+                if k in full_only_callables
             }
         )
 
@@ -284,26 +288,75 @@ def get_modality_flags() -> dict[str, bool]:
     }
 
 
-def self_healing_hint(tool_name: str, error: Exception) -> str | None:
-    """Return an actionable next-step hint for known failure patterns."""
-    err = str(error).lower()
+def self_healing_hint(
+    tool_name: str, error: Exception | BaseException | str | None = None
+) -> str | None:
+    """Return an actionable next-step hint for known failure patterns.
+
+    Accepts an Exception or a string message (structured tool ``error`` fields).
+    For successful dict results that still need guidance, use
+    :func:`hint_for_tool_result` (wired into HTTP/stdio dispatch).
+    """
+    err = str(error).lower() if error is not None else ""
     if (
         "database is locked" in err
         or "busy" in err
         or "unable to open database file" in err
     ):
         return "SQLite is under load. Run detect_changes or wait a moment and retry."
-    if tool_name in ("impact_radius", "coupling") and "0 affected" in err:
-        return (
-            "This file may be a base class with high fan-in. "
-            "Consider also running find_references on its exported symbols."
-        )
-    if tool_name == "search" and "hnsw" not in err and "0" in str(error):
+    if tool_name in ("impact_radius", "coupling"):
+        # impact_radius often returns structured {error} / affected_chunks=0
+        # rather than raising — match both exception text and those messages.
+        if (
+            "0 affected" in err
+            or "no seed" in err
+            or "provide chunk_id" in err
+            or "no definitions" in err
+            or "empty" in err
+        ):
+            return (
+                "Impact/coupling found no useful seeds or edges. "
+                "Pass document_path, chunk_id, or symbol; for base classes with "
+                "high fan-in try find_references on exported symbols and "
+                "impact_radius(direction='dependents', summary_mode=true)."
+            )
+    if (
+        tool_name == "search"
+        and error is not None
+        and "hnsw" not in err
+        and "0" in str(error)
+    ):
         return (
             "Tier-1 semantic search returned no strong matches. "
             "Results may fall back to BM25 keyword ranking. "
             "Consider adding Tier-2 summaries for this topic."
         )
+    return None
+
+
+def hint_for_tool_result(tool_name: str, result: Any) -> str | None:
+    """Hints for structured tool results that succeed but indicate empty/error.
+
+    Callers (HTTP ``execute_tool``, MCP stdio) attach the returned string so
+    agents see guidance without relying on exceptions.
+    """
+    if not isinstance(result, dict):
+        return None
+    if result.get("hint"):
+        return None  # already annotated
+    err = result.get("error")
+    if err:
+        return self_healing_hint(tool_name, err)
+    if tool_name == "impact_radius":
+        # Seeded call that found nothing (or origin with zero dependents)
+        if result.get("affected_chunks") == 0:
+            return self_healing_hint(tool_name, "0 affected")
+    if tool_name == "coupling":
+        coupled = result.get("coupled_files")
+        if isinstance(coupled, list) and len(coupled) == 0:
+            return self_healing_hint(tool_name, "0 affected")
+        if result.get("files") == [] or result.get("count") == 0:
+            return self_healing_hint(tool_name, "0 affected")
     return None
 
 

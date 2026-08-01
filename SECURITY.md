@@ -4,7 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.10.x  | Yes                |
+| 1.x     | Yes                |
+| 0.10.x  | Security fixes only (upgrade to 1.x recommended) |
 | < 0.10  | No                 |
 
 ## Reporting a Vulnerability

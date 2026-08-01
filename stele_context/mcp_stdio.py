@@ -31,6 +31,7 @@ from stele_context.tool_registry import (
     WRITE_TOOLS,
     build_tool_map,
     get_modality_flags,
+    hint_for_tool_result,
     self_healing_hint,
 )
 
@@ -136,6 +137,13 @@ def create_server(storage_dir: str | None = None) -> _ServerBundle:
                 result = {"error": f"Unknown tool: {name}"}
             else:
                 result = tool_map[name](**arguments)
+
+            # Attach self-healing hints for structured empty/error results
+            # (impact_radius returns {error: ...} without raising).
+            if isinstance(result, dict):
+                hint = hint_for_tool_result(name, result)
+                if hint and "hint" not in result:
+                    result = {**result, "hint": hint}
 
             return [
                 TextContent(

@@ -41,7 +41,9 @@ TOOL_DEFINITIONS_SYMBOLS: list[dict[str, Any]] = [
         "name": "find_definition",
         "description": "Jump to where a symbol is defined, with full chunk content. "
         "Includes symbol_index and guidance when count is zero (empty index vs "
-        "symbol not in graph). "
+        "symbol not in graph). When multiple definitions exist in the same document, "
+        "entries may include definition_index, shadowed, and shadow_count "
+        "(same-file multi-def annotation — not full nested block-scope resolution). "
         "USE WHEN: reading implementations, verifying signatures.",
         "inputSchema": {
             "type": "object",
@@ -128,6 +130,9 @@ TOOL_DEFINITIONS_SYMBOLS: list[dict[str, Any]] = [
                     "default": "dependents",
                 },
             },
+            "description": "Provide at least one of chunk_id, document_path, or symbol "
+            "(JSON Schema cannot express oneOf cleanly across all clients; "
+            "engine returns {error: ...} if all omitted).",
         },
     },
     {
@@ -173,6 +178,7 @@ TOOL_DEFINITIONS_SYMBOLS: list[dict[str, Any]] = [
         "rot through the symbol graph. Staleness score: 0.8 = direct "
         "dependency changed, 0.64 = transitive. On active codebases, "
         "consider threshold=0.5 or higher to avoid alert fatigue. "
+        "Not available on default MCP lite mode (use STELE_MCP_MODE=standard|full). "
         "USE WHEN: checking if cached context is still valid after edits, "
         "identifying stale files that need re-review after upstream changes.",
         "inputSchema": {
@@ -182,6 +188,11 @@ TOOL_DEFINITIONS_SYMBOLS: list[dict[str, Any]] = [
                     "type": "number",
                     "description": "Minimum staleness score (0.0-1.0, default 0.3). For active development, use 0.5+ to reduce noise.",
                     "default": 0.3,
+                },
+                "max_age_seconds": {
+                    "type": "number",
+                    "description": "Optional: ignore staleness signals older than this many seconds "
+                    "(e.g. 86400 to drop ancient transitive noise).",
                 },
             },
         },

@@ -57,8 +57,8 @@
 | `stele_context/stemmer.py` | Pure-Python Porter stemmer, identifier splitting | None | test_stemmer.py |
 | `stele_context/agent_response.py` | Token-bounded search/map/stats helpers, `project_brief` builder, chunk content trim | chunkers.base | test_agent_response.py |
 | `stele_context/agent_grep.py` | LLM-optimized search: scope annotation, classification, dedup, token budget | chunkers.base (estimate_tokens only) | test_agent_grep.py |
+| `stele_context/agent_guidance.py` | Agent ritual strings, MCP config snippet, doctor next_steps / enrichment / token-savings helpers (stdlib-only) | None | test_next_stage_guidance.py |
 | `stele_context/llm_embedding.py` | Semantic fingerprint computation + 32-dim to 128-dim vector mapping for Tier 2 embeddings | chunkers.numpy_compat | test_agent_embeddings.py |
-| `stele_context/index_health.py` | `compute_index_health_snapshot()` — documents/chunks/symbol counts, alerts, staleness | None | test_index_health.py |
 | `stele_context/chunkers/__init__.py` | Chunker registry, auto-detection | all chunkers | test_chunkers.py |
 | `stele_context/chunkers/base.py` | `Chunk` dataclass, `BaseChunker` ABC, `estimate_tokens()` | None | test_base_chunker.py |
 | `stele_context/chunkers/numpy_compat.py` | Pure-Python `sig_to_bytes`, `cosine_similarity` | None | test_numpy_compat.py |
@@ -74,7 +74,7 @@
 | `stele_context/cli_release.py` | `stele-context release` command, delegates to scripts/release.py | None (subprocess) | (manual testing) |
 | `stele_context/mcp_server.py` | HTTP REST server (unified tool registry, threaded) + tool dispatch | tool_registry | test_mcp_server.py |
 | `stele_context/mcp_handlers.py` | Backward-compat shim (re-exports from mcp_server) | mcp_server, tool_registry | test_mcp_server.py |
-| `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas, modality flags (40 tools combined) | mcp_tools_primary | (via test_mcp_server.py, test_mcp_stdio.py) |
+| `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas, modality flags; modes **lite** (default high-leverage) / **standard** (broader) / **full** (adds deprecated singleton tool names). Do not hard-code a single “N tools” count — list tools via registry/`doctor` | mcp_tools_primary | (via test_mcp_server.py, test_mcp_stdio.py, test_next_stage_guidance.py) |
 | `stele_context/mcp_stdio.py` | MCP stdio server (JSON-RPC for Claude Desktop) | mcp_tools_primary, tool_registry | test_mcp_stdio.py |
 | `stele_context/mcp_tools_primary.py` | MCP tool schemas — primary tools (search, index, context, sessions, locks, Tier-2, env) | mcp_tools_symbols | (via test_mcp_stdio.py, test_batch_summaries.py) |
 | `stele_context/mcp_tools_symbols.py` | MCP tool schemas — symbol-graph tools (find_references, impact_radius, coupling, dynamic symbols) | None (standalone) | (via test_mcp_stdio.py) |
@@ -120,5 +120,18 @@
 | `tests/test_fastpath.py` | mtime+size fast-path for index/detect/get_context | ~17 |
 | `tests/test_sqlite_resilience.py` | `WriterQueue` single-writer, sqlite_retry decorator | ~2 |
 | `tests/test_auto_prune.py` | Bounded history auto-pruning, prune operation log, doctor growth alerts | ~9 |
+| `tests/test_agent_grep.py` | agent_grep scope/classify/budget/session history | (see file) |
+| `tests/test_context_diff.py` | Diff-since-cache for get_context | (see file) |
+| `tests/test_gitignore.py` | Pure-stdlib gitignore matcher | (see file) |
+| `tests/test_js_ts_symbol_golden.py` | JS/TS alias and export golden fixtures | (see file) |
+| `tests/test_next_stage_guidance.py` | doctor ritual, enrichment_plan, lite MCP tools | (see file) |
+| `tests/test_eval_search_quality.py` | Search quality eval harness wiring | (see file) |
+| `tests/test_p0_audit_fixes.py` | MCP schema/engine alignment (session_id, query history, save_kv_state) | (see file) |
 
-**Total: 891 tests pass, 1 skipped without MCP SDK (as of 2026-04-17)**
+**Total:** run `pytest` for the current count (grows with the suite). Historical snapshot: 891 pass, 1 skipped without MCP SDK (as of 2026-04-17) — do not treat that number as live truth.
+
+## Accepted residual maintainability (D5)
+
+These modules remain large relative to a soft ~500-line guideline and are **accepted residual** after the llm-maintainable mixin split (see `plan/llm-maintainable-refactor-plan_closed.md`). Further splits are optional follow-on work (`plan/large-module-split-follow-on.md`), not open product bugs:
+
+- `stele_context/storage.py`, `symbol_graph.py`, `search_engine.py`, `cli.py`

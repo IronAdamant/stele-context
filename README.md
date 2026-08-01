@@ -96,7 +96,7 @@ pip install stele-context[mcp]
 
 > **Tip:** If you installed in a virtualenv, use the full path: run `which stele-context` to find it.
 
-Once connected, your agent gets the **lite** high-leverage tool set by default (~20 tools: `doctor`, `query`, `agent_grep`, symbols, cache, Tier-2 summaries). Set `STELE_MCP_MODE=standard` for the broader surface, or `full` for deprecated singleton tools.
+Once connected, your agent gets the **lite** high-leverage tool set by default (`doctor`, `query`, `agent_grep`, symbols, cache, Tier-2 summaries, session provenance, plus modality utils when enabled). Set `STELE_MCP_MODE=standard` for the broader surface, or `full` for deprecated singleton tools. Exact counts come from client `list_tools` / `tool_registry` — avoid hard-coding a single integer.
 
 ### Recommended agent ritual
 
@@ -139,7 +139,7 @@ If you've ever wished your AI coding assistant had a memory of your project, tha
 | "Which files are tightly coupled?" | `coupling` shows shared symbols with a `semantic_score` that discounts generic boilerplate; `mode=co_consumers` catches files imported together |
 | "Find where this function is defined and used" | `find_references` / `find_definition` walk the symbol graph with a clear verdict: referenced, unreferenced, external, or not found |
 | "Find every line matching a pattern" | `agent_grep` does text/regex search with scope annotation, classification, and a token budget |
-| "Run several operations in one round-trip" | `batch` executes multiple tool calls under a single write lock |
+| "Run several operations in one round-trip" | `batch` runs sequential engine methods (each manages its own locking; use engine names like `index_documents`) |
 
 ### For power users
 
@@ -332,7 +332,7 @@ CLAUDE.md gives your agent instructions. Stele Context gives it a searchable ind
 
 ```bash
 pip install -e ".[dev]"
-pytest                              # 930+ tests
+pytest                              # full suite (count grows; see CI / pytest collection)
 pytest --cov=stele_context           # With coverage
 mypy stele_context/                 # Type checking
 ruff check stele_context/           # Linting

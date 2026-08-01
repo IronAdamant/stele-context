@@ -438,7 +438,7 @@ class _IndexMixin:
 
     def detect_changes_and_update(
         self,
-        session_id: str,
+        session_id: str = "default",
         document_paths: list[str] | None = None,
         reason: str | None = None,
         agent_id: str | None = None,

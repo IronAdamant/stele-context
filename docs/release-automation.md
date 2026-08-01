@@ -111,16 +111,16 @@ For an agent to push tags and create releases, it needs:
 
 **Recommended:** Create a dedicated GitHub App or Fine-Grained PAT (with minimal scopes) that Grok Build agents can use, rather than using the user's personal token.
 
-### 3. Release Tooling & Changelog Automation (In Progress)
+### 3. Release Tooling & Changelog Automation
 
-**Completed:**
+**Completed (current product):**
 - `scripts/release.py` (core bumping + tagging + gates)
+- **`stele-context release` CLI subcommand** (`cli_release.py`) — this is the standard process documented above, not a future item
 
 **Nice-to-have future enhancements:**
-- Integration as `stele-context release` CLI subcommand
 - Automatic changelog generation from conventional commits (`git-cliff` or similar)
 - Support for release candidates (`1.4.0-rc.1`)
-- Pre-release checklist (update `COMPLETE_PROJECT_DOCUMENTATION.md`, run full benchmark suite, etc.)
+- Pre-release checklist automation (update `COMPLETE_PROJECT_DOCUMENTATION.md`, run full benchmark suite, etc.)
 
 ### 4. Workflow Hardening
 

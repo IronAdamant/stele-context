@@ -30,6 +30,7 @@ from stele_context.tool_registry import (
     build_tool_map,
     get_http_schemas,
     get_modality_flags,
+    hint_for_tool_result,
     self_healing_hint,
 )
 
@@ -71,15 +72,24 @@ def execute_tool(
 
     try:
         result = tool_map[tool_name](**parameters)
-        return {"success": True, "result": result}
+        payload: dict[str, Any] = {"success": True, "result": result}
+        # Structured empty/error results (e.g. impact_radius without seeds)
+        # return success=True — attach self-healing hints so clients see them.
+        hint = hint_for_tool_result(tool_name, result)
+        if hint:
+            payload["hint"] = hint
+            if isinstance(result, dict) and "hint" not in result:
+                annotated = {**result, "hint": hint}
+                payload["result"] = annotated
+        return payload
     except TypeError as e:
         return {"error": f"Invalid parameters for {tool_name}: {e}"}
     except Exception as e:
-        payload: dict[str, Any] = {"error": f"Tool execution failed: {e}"}
+        fail: dict[str, Any] = {"error": f"Tool execution failed: {e}"}
         hint = self_healing_hint(tool_name, e)
         if hint:
-            payload["hint"] = hint
-        return payload
+            fail["hint"] = hint
+        return fail
 
 
 DEFAULT_MCP_PORT = 9876

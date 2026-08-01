@@ -14,3 +14,5 @@
 ## Roadmap complete
 
 All planned features from the v0.2 roadmap have been implemented. The project has evolved well beyond the original scope with multi-modal support, multi-agent coordination, symbol graphs, tree-sitter integration, and agent-supplied embeddings.
+
+**This file is a historical archive (pre-v1.0), not a live backlog.** For current product direction see [CHANGELOG.md](CHANGELOG.md) Unreleased / latest release notes, [STABILITY.md](STABILITY.md), and [AGENTS.md](AGENTS.md).

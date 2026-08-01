@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.5.0] - 2026-07-09
+### Added
+- **Audit remediation (long-term):** `query` returns `applied_defaults`; optional `search_mode` / `compact` / `max_result_tokens` on `query`; full-mode MCP tool schemas for stdio discovery; thin CLI `query` / `find-definition` / `find-references` / `impact-radius` / `coupling`.
+- Design-ceiling stamps in STABILITY + philosophy (dynamic synthetic edges, polymorphic lattice, name-homonym coupling as accepted limits).
 
 ### Changed
-- Next-stage agent path: init, lite default, Tier-2 loop, HNSW invalidation, search eval
+- CLI `detect --scan-new` defaults **true** (BooleanOptionalAction; `--no-scan-new` to disable); `detect_changes` `session_id` defaults to `"default"`.
+- MCP `map` compact default **true**; agent docs document HTTP vs stdio dual envelopes and session_id/auto-index matrices.
 
+## [1.5.0] - 2026-07-09
 
 ### Added
 - **`stele-context init`** — first-run setup: gitignore-aware index, MCP lite config snippet, doctor `next_steps`, and recommended agent ritual.
@@ -23,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Search quality eval as product** — `benchmarks/eval_search_quality.py` supports `--search-mode`, `--tier2`, `--tier2-delta`, `--json`, and a recall gate; CI runs keyword + Tier-2 delta; tests in `tests/test_eval_search_quality.py`.
 
 ### Changed
+- Next-stage agent path: init, lite default, Tier-2 loop, HNSW invalidation, search eval.
 - **MCP default mode is `lite`** (was `standard`). Set `STELE_MCP_MODE=standard` or `full` for broader surfaces. Lite includes `enrichment_plan`, `bulk_store_summaries`, **`get_search_history`**, and **`get_session_read_files`** so the documented agent ritual works on the default surface.
 - **Tier-2 invalidation** — `store_chunk` clears `semantic_summary` / `agent_signature` when `content_hash` changes; **`persist_chunks` / `sync_chunk_vector`** refresh HNSW so stale agent embeddings cannot keep ranking.
 - Doctor and `enrichment_plan` use **metadata-only** chunk queries (not full content for every row).

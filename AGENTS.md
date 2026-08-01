@@ -34,8 +34,9 @@ Cold-start ritual (all on **MCP lite** by default):
 
 ## Tier 2 and chunk notes
 
-- **Tier 2:** `index` with `summaries`, `bulk_store_summaries`, `bulk_store_embeddings`, `llm_embed` — improves hybrid search.
-- **Chunk notes:** `bulk_store_chunk_agent_notes` — JSON or text tied to a `chunk_id` (facts, invariants). Shown in `get_context`; not a substitute for summaries for search vectors.
+- **Tier 2 (lite):** `index` with `summaries`, **`bulk_store_summaries`**, **`llm_embed`**, **`enrichment_plan`** — improves hybrid search.
+- **Tier 2 (standard/full only):** `bulk_store_embeddings` — not on default lite MCP mode; set `STELE_MCP_MODE=standard` (or use CLI/Python API).
+- **Chunk notes (standard/full only):** `bulk_store_chunk_agent_notes` — JSON or text tied to a `chunk_id` (facts, invariants). Shown in `get_context`; not a substitute for summaries for search vectors.
 
 ## Trust
 
@@ -49,14 +50,50 @@ Use **`working_tree=true`** on `agent_grep`, `search_text`, `search`, and `query
 
 `stale_chunks` defaults to `threshold=0.3`. On active codebases this can produce hundreds of warnings. Use **`threshold=0.5`** for direct-dependency changes only, or **`threshold=0.64`** for transitive changes. You can also pass **`max_age_seconds=86400`** to ignore ancient transitive staleness.
 
+**MCP mode note:** `stale_chunks` is **not** on default **lite** mode — use `STELE_MCP_MODE=standard` (or full), or call the Python/CLI path. Lite still covers day-to-day ritual via `doctor` / `detect_changes` / `get_context` trust hints.
+
 ## Scope (zero-dep core)
 
 The **stdlib-only** engine is in a **reasonable stopping place** for hybrid retrieval, symbol tools, and agent-oriented bounds: further gains on "semantic" quality without a bundled model are diminishing; optional **Tier 2** (your summaries/embeddings) remains the supported path for higher intent alignment. **`path_prefix`** on **`map`** / **`search`** reduces cross-tree noise; **`impact_radius(..., summary_mode=true, significance_threshold=0.1)`** keeps blast-radius output small and noise-free. See **STABILITY.md** and [CHANGELOG](CHANGELOG.md) for latest.
 
 ## MCP Modes
 
-- **Lite** (**default**, recommended): high-leverage tools (`doctor`, `query`, `agent_grep`, symbols, cache, `enrichment_plan`, `bulk_store_summaries`, …).
-- **Standard** (`STELE_MCP_MODE=standard`): broader surface with history, batch, sessions, embeddings bulk APIs.
-- **Full** (`STELE_MCP_MODE=full`): restores deprecated singleton tools for backward compatibility.
+- **Lite** (**default**, recommended): high-leverage tools (`doctor`, `query`, `agent_grep`, symbols, cache, `enrichment_plan`, `bulk_store_summaries`, session provenance, …) plus modality utils when enabled. Prefer qualitative “high-leverage subset” over hard-coded tool counts.
+- **Standard** (`STELE_MCP_MODE=standard`): broader surface with history, batch, sessions, `stale_chunks`, `bulk_store_embeddings`, chunk notes, …
+- **Full** (`STELE_MCP_MODE=full`): restores deprecated singleton tool **names** for backward compatibility (prefer unified `annotations` / `document_lock` / bulk Tier-2 tools).
 
 Cold-start ritual: `doctor` → `query` (with `session_id`) → `agent_grep` / `find_*` → `get_context`. First-run CLI: `stele-context init .`.
+
+## CLI ↔ MCP name map
+
+| CLI | MCP / engine |
+|-----|----------------|
+| `detect` (`--scan-new` default **true**) | `detect_changes` (`scan_new` default true; `session_id` default `"default"`) |
+| `search-text` | `search_text` |
+| `agent-grep` | `agent_grep` |
+| `query` | `query` |
+| `find-definition` / `find-references` | `find_definition` / `find_references` |
+| `impact-radius` / `coupling` | `impact_radius` / `coupling` |
+| `enrichment-plan` | `enrichment_plan` |
+| `serve-mcp` | MCP stdio server |
+
+## `session_id` meanings (do not conflate)
+
+| Use | Tools | Effect |
+|-----|-------|--------|
+| Search history + grep auto-index | `agent_grep`, `search_text`, `query` (grep branch) | `record_search`; may index match files |
+| Read tracking | `get_context` | Records fully-read files for `get_session_read_files` |
+| Working-tree / locks agent_id | `working_tree=true`, index writes | Passed as `agent_id` for index/lock attribution |
+
+## Auto-index surfaces
+
+| Trigger | When | What indexes |
+|---------|------|----------------|
+| `session_id` on `agent_grep` / `search_text` | After search | Documents with matches |
+| `working_tree=true` | Before search | Git modified + untracked |
+| `query` + `session_id` + dirty tree | Before search (auto) | Same as working_tree; see `applied_defaults` in response |
+| `detect_changes` / `index` | Explicit | Paths / scan_new new files |
+
+## HTTP vs stdio envelopes
+
+HTTP returns `{"success", "result"}` or `{"error"}`. Stdio MCP returns the **bare** tool result. Both are intentional; do not unify silently.

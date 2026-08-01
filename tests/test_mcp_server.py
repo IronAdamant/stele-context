@@ -133,14 +133,18 @@ class TestHTTPServer:
             self._stop_server(server)
 
     def test_tool_schemas_match_tool_map(self, tmp_path):
-        """Discovery list matches _TOOL_SCHEMAS keys (no drift)."""
+        """Every discovered tool has a schema; definitions may include full-mode extras."""
         server, url, _ = self._start_server(tmp_path)
         try:
             _, data = self._get(f"{url}/tools")
             discovered = {t["name"] for t in data["tools"]}
             schema_names = set(_TOOL_SCHEMAS.keys())
-            # Every schema should be in discovery
-            assert schema_names == discovered
+            # Discovery is mode-filtered; TOOL_DEFINITIONS includes full-mode names too.
+            # Every live tool must have a schema entry (no empty fallback required).
+            assert discovered.issubset(schema_names), (
+                f"tools missing schemas: {discovered - schema_names}"
+            )
+            assert discovered  # lite (or server mode) is non-empty
         finally:
             self._stop_server(server)
 

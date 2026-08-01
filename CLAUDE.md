@@ -110,7 +110,7 @@ For the full module table, see [`COMPLETE_PROJECT_DOCUMENTATION.md`](COMPLETE_PR
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # 891 pass, 1 skipped (mcp SDK optional)
+pytest                    # run suite; count grows over time (mcp SDK optional skip)
 mypy stele_context/
 ruff check stele_context/
 ```
@@ -121,9 +121,23 @@ Entry points: `stele-context` (CLI), `stele-context-mcp` (MCP stdio server)
 
 Stele's MCP tools **complement** native tools (Grep, Glob, Read) — they do not replace them. Pick the right tool for the job.
 
-### Grep-first workflow
+Default MCP mode is **lite** (`STELE_MCP_MODE=lite`): high-leverage tools only. Standard/full restore broader surfaces. See [AGENTS.md](AGENTS.md) and [docs/agent-workflow.md](docs/agent-workflow.md) for full detail.
 
-The core principle: **grep to find, grep to cache**. Every `agent_grep` call automatically indexes the files it searches, so searching and caching happen in one step. `get_search_history` tells you what you already searched this session.
+### Cold-start ritual (start here)
+
+```
+1. doctor                              → health, index age, next_steps, Tier-2 preview
+2. query "…" --session-id S            → universal entry (semantic + symbols + grep)
+3. agent_grep / find_definition|find_references as needed
+4. get_context --session-id S          → cached file text + trust/diff
+5. get_search_history / get_session_read_files  → avoid re-search / re-read
+```
+
+After edits: `detect_changes` (or `query`/`agent_grep` with `working_tree=true`) and re-index changed files.
+
+### Grep-first for exact work
+
+For identifiers, renames, and audit proof: **grep to find, grep to cache**. Every `agent_grep` / `search_text` call with `session_id` records search history and auto-indexes match files. `get_search_history` tells you what you already searched this session. Prefer `query` first for broad natural-language questions; use grep for guaranteed recall.
 
 ```
 1. agent_grep "pattern" --session-id S  → results + files auto-indexed
@@ -138,18 +152,21 @@ The core principle: **grep to find, grep to cache**. Every `agent_grep` call aut
 
 | Tool | Use when |
 |------|----------|
+| `doctor` | Session start / index health / next_steps |
+| `query` | Broad natural-language questions (universal entry; merges search + symbols + grep) |
 | `agent_grep` | Finding usages, auditing code — scope-aware grep with token budget |
 | `find_references` | Looking up a specific symbol's definition and all callers |
 | `find_definition` | Finding where a symbol is defined |
 | `get_context` | Getting full file content from cache (records read in session) |
-| `get_search_history` | Checking what you already grep'd this session |
+| `get_search_history` | Checking what you already grep'd / queried this session |
 | `get_session_read_files` | Checking what you already fully read this session |
-| `search` (semantic) | Open-ended exploration only — only useful with Tier-2 summaries populated |
-| `search_text` | Guaranteed complete substring/regex search |
+| `search` | Open-ended exploration; default is **keyword (BM25)**; use `search_mode=hybrid` when Tier-2 summaries are populated |
+| `search_text` | Guaranteed complete substring/regex search (accepts `session_id` like `agent_grep`) |
 
 ### After edits
 - `stele-context index --force-reindex` the changed files to update the cache
-- `stele-context detect_changes` to verify what changed
+- `stele-context detect_changes` (or MCP `detect_changes`) to verify what changed
+- Or pass `working_tree=true` / `session_id` on `query` / `agent_grep` / `search_text` / `search`
 
 ### Multi-agent coordination rules
 - **Atomic transformations**: Never split "remove X" and "replace X with Y" across parallel agents. Both steps must happen atomically per file.

@@ -47,13 +47,15 @@ graph TB
 
 ## How Search Works
 
-Stele uses two complementary search strategies and blends their results:
+**Default mode is keyword (BM25-only).** Call `search(..., search_mode="keyword")` (the default) for deterministic ranking without vectors. Use `search_mode="hybrid"` when Tier-2 agent-supplied summaries/embeddings are populated — statistical Tier-1 vectors alone often mis-rank domain queries.
 
-**Vector search (HNSW)** — Each chunk gets a 128-dimensional "fingerprint" (signature) based on its content structure: character patterns, word frequency, code structure. These signatures are stored in an HNSW index, a data structure optimized for finding similar vectors quickly — O(log n) instead of comparing every chunk. Good at finding conceptually related code even when exact keywords differ.
+Two complementary strategies are available:
 
-**Keyword search (BM25)** — A standard information retrieval algorithm that scores chunks by how well their words match your query, weighted by rarity. If you search for "authentication," chunks containing that word rank higher, especially if "authentication" is uncommon in the overall index.
+**Keyword search (BM25)** — A standard information retrieval algorithm that scores chunks by how well their words match your query, weighted by rarity. If you search for "authentication," chunks containing that word rank higher, especially if "authentication" is uncommon in the overall index. This is the **default** path.
 
-**Blending** — Results from both methods are combined using a tunable weight (`search_alpha`, default 0.42 — slightly favoring keywords). The system automatically falls back to keyword-only results when the vector scores are weak or the two methods disagree significantly. You can also force keyword-only mode with `search_mode=keyword`.
+**Vector search (HNSW)** — Each chunk gets a 128-dimensional "fingerprint" (signature) based on its content structure: character patterns, word frequency, code structure. These signatures are stored in an HNSW index, a data structure optimized for finding similar vectors quickly — O(log n) instead of comparing every chunk. Used in hybrid mode (and for change detection). Good at finding conceptually related code when Tier-2 semantics are present.
+
+**Hybrid blending** (`search_mode="hybrid"`) — Results from both methods are combined using a tunable weight (`search_alpha`, default 0.42 — slightly favoring keywords). The system automatically falls back to keyword-only results when the vector scores are weak or the two methods disagree significantly.
 
 ## Semantic Signatures
 
@@ -155,21 +157,22 @@ MCP servers auto-register an agent ID and inject it into write operations, so co
 
 ## MCP Tool Reference
 
-The HTTP REST server and MCP stdio server expose the same tools via a unified registry (`tool_registry.py`). **Lite** is the default (~20 high-leverage tools including `doctor`, `query`, `enrichment_plan`); `STELE_MCP_MODE=standard` registers the broader surface; `STELE_MCP_MODE=full` restores deprecated singleton tools.
+The HTTP REST server and MCP stdio server share a unified registry (`tool_registry.py`). **Lite** is the default (high-leverage subset including `doctor`, `query`, `enrichment_plan`, `bulk_store_summaries`, session provenance tools — plus modality utils when enabled). `STELE_MCP_MODE=standard` registers the broader non-deprecated surface; `STELE_MCP_MODE=full` adds deprecated singleton tool names. Exact counts come from `build_tool_map` / client `list_tools`, not a hard-coded integer.
 
-| Category | Tools |
-|----------|-------|
-| **Indexing** | `index`, `remove`, `detect_changes`, `detect_modality`, `get_supported_formats` |
-| **Search** | `query`, `agent_grep`, `search_text`, `search`, `get_context`, `get_relevant_kv`, `get_search_history`, `get_session_read_files` |
-| **Annotations** | `annotations` (create/get/update/delete/search/bulk_create) |
-| **Sessions** | `save_kv_state`, `rollback`, `prune_chunks`, `list_sessions` |
-| **Symbols** | `find_references`, `find_definition`, `impact_radius`, `coupling`, `rebuild_symbols`, `stale_chunks` |
-| **Locking** | `document_lock` (acquire/release/refresh/status/reap/release_agent/conflicts) |
-| **History** | `get_conflicts`, `get_chunk_history`, `get_notifications`, `history`, `prune_history` |
-| **Stats** | `map`, `doctor` |
-| **Embeddings** | `bulk_store_summaries`, `llm_embed`, `bulk_store_embeddings`, `bulk_store_chunk_agent_notes` |
-| **Dynamic symbols** | `register_dynamic_symbols`, `get_dynamic_symbols`, `remove_dynamic_symbols` |
-| **Utilities** | `batch`, `list_agents`, `environment_check`, `clean_bytecache` |
+| Category | Tools | Typical modes |
+|----------|-------|----------------|
+| **Indexing** | `index`, `remove`, `detect_changes`, `detect_modality`, `get_supported_formats` | lite+ |
+| **Search / ritual** | `query`, `agent_grep`, `search_text`, `search`, `get_context`, `get_search_history`, `get_session_read_files` | lite+ |
+| **Orientation** | `doctor`, `map` (default compact), `enrichment_plan` | lite+ |
+| **Annotations** | `annotations` (create/get/update/delete/search/bulk_create) | lite+ |
+| **Sessions / KV** | `get_relevant_kv`, `save_kv_state`, `rollback`, `prune_chunks`, `list_sessions` | standard+ (some) |
+| **Symbols** | `find_references`, `find_definition`, `impact_radius`, `coupling`, `register_dynamic_symbols`, `remove_dynamic_symbols` | lite+ |
+| **Symbols (standard)** | `rebuild_symbols`, `stale_chunks`, `get_dynamic_symbols` | standard+ |
+| **Locking** | `document_lock` | lite+ |
+| **History / ops** | `history`, `get_chunk_history`, `get_notifications`, `prune_history`, `environment_check`, `clean_bytecache` | standard+ |
+| **Tier-2** | `bulk_store_summaries`, `llm_embed` (lite); `bulk_store_embeddings`, `bulk_store_chunk_agent_notes` (standard+) | mixed |
+| **Composite** | `batch` | standard+ |
+| **Full-only legacy** | `stats`, `project_brief`, per-lock singletons, `annotate`/`get_annotations`/…, `store_semantic_summary`, … | full only |
 
 ## Performance Benchmarks
 
@@ -219,7 +222,7 @@ The entries below document *why* particular design choices were made. Consult be
 - **Storage delegates** to 3 specialized classes: `SessionStorage`, `MetadataStorage`, `SymbolStorage`. Each owns its own SQL tables.
 - **JSON only, no pickle**: Session data serialized with JSON+zlib for agent safety.
 - **Zero required deps**: Core uses only stdlib. numpy/msgspec have pure-Python fallbacks in `chunkers/numpy_compat.py`.
-- **`_read_and_hash(path, modality)`**: Module-level helper in `engine.py` for file reading + SHA-256. Used by `index_documents()`, `detect_changes_and_update()`, `get_context()`.
+- **`read_and_hash(path, modality)`**: Module-level helper in **`engine_utils.py`** (not `engine.py`) for file reading + SHA-256. Used by `index_documents()`, `detect_changes_and_update()`, `get_context()`.
 
 ### Search ranking
 
@@ -319,5 +322,6 @@ The entries below document *why* particular design choices were made. Consult be
 
 - **Text pattern search**: `search_text(pattern, regex=, document_path=, limit=)` provides perfect-recall exact/regex search across stored chunk content. Complements semantic (HNSW) and keyword (BM25) search. Uses `str.find()` for substring, stdlib `re` for regex. Zero dependencies. Key use case: verify all usages before renaming/removing symbols.
 - **LLM-optimized search (agent_grep)**: `agent_grep(pattern, regex=, document_path=, classify=, include_scope=, group_by=, max_tokens=, deduplicate=, context_lines=)` wraps `search_text` with five LLM-specific enrichments: (1) **Token budget** — matches added until `max_tokens` reached, preventing context overflow; (2) **Scope annotation** — each match tagged with enclosing function/class from the symbol graph; (3) **Classification** — line-level heuristic tags: comment/import/definition/string/code; (4) **Deduplication** — structurally identical lines collapsed with `also_in` count and `also_in_files` list; (5) **Structured grouping** — results grouped by file, scope, or classification. Base line numbers computed per-chunk by summing newlines across preceding chunks. `agent_grep.py` is standalone (imports only `estimate_tokens`); `SymbolStorage.get_symbols_for_chunks()` provides batch symbol lookup.
-- **Unified tool registry**: `tool_registry.py` is the single source of truth for tool dispatch (`build_tool_map`), write-tool sets (`WRITE_TOOLS`), HTTP schema generation (`get_http_schemas`), and modality flag construction (`get_modality_flags`). Both servers expose identical tool sets (40 tools) with modality_flags for utility tools. Schemas generated from `mcp_tools_primary.py` + `mcp_tools_symbols.py` (split by inclusion criterion: symbol-graph tools vs everything else). `WRITE_TOOLS` includes lock operations (`acquire_document_lock`, `release_document_lock`, `refresh_document_lock`, `release_agent_locks`) for auto agent_id injection.
+- **Unified tool registry**: `tool_registry.py` is the single source of truth for tool dispatch (`build_tool_map`), write-tool sets (`WRITE_TOOLS`), HTTP schema generation (`get_http_schemas`), and modality flag construction (`get_modality_flags`). Tool **count depends on `STELE_MCP_MODE`**: **lite** (default high-leverage subset), **standard** (broader non-deprecated surface), **full** (adds deprecated singleton names). Schemas live in `mcp_tools_primary.py` + `mcp_tools_symbols.py`. Do not hard-code a single flat “N tools” number — discover via `list_tools` / registry. `WRITE_TOOLS` receives auto `agent_id` injection when the callable accepts it.
+- **HTTP vs stdio response envelopes (intentional dual shape)**: HTTP `POST /call` returns `{"success": true, "result": ...}` or `{"error": ...}`. MCP stdio returns the bare tool result JSON (or error object). Clients must not assume one envelope for both transports; this is documented product behavior, not a bug.
 - **LLM intent-routed tool descriptions**: All tool descriptions include `USE WHEN:` guidance mapping agent intent to tool selection. Tool definition order places search tools first in `_TOOL_DEFINITIONS_PRIMARY`: `agent_grep`, `search_text`, then `search`. Search tool trio clearly differentiated: `agent_grep` for structured verification, `search_text` for raw exact matching, `search` for semantic exploration.

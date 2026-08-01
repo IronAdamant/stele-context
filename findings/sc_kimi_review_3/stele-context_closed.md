@@ -310,3 +310,8 @@ Based on the Phase 14 findings, the following fixes and improvements are recomme
 ### Medium Priority
 5. **Expand `coupling` analysis scope** — Currently only tracks shared outgoing imports. Adding a "co-imported by same consumers" mode would detect the tight coupling between files like `Recipe.js` and `Tag.js`, both of which are heavily consumed by `src/api/routes/recipes.js`.
 6. **Improve `stale_chunks` threshold guidance** — On active codebases, the default threshold of 0.3 produces hundreds of stale-file warnings. Consider calibrating the default threshold based on repository activity level, or providing a recommended threshold in the tool response metadata.
+
+---
+## Closure (2026-08-01 audit remediation)
+
+**Status: Closed for product.** WriterQueue/sqlite resilience, impact dependents hybrid + file_deps, co_consumers, working_tree, staleness guidance shipped. Critical/High action lists above are historical narrative.

@@ -46,7 +46,7 @@ class _InfoMixin:
     def get_map(
         self,
         *,
-        compact: bool = False,
+        compact: bool = True,
         max_documents: int | None = None,
         max_annotation_chars: int = 200,
         path_prefix: str | None = None,

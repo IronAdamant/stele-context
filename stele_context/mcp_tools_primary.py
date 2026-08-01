@@ -97,6 +97,8 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
         "name": "search_text",
         "description": "Exact substring or regex search with perfect recall — "
         "guaranteed to find every occurrence across all indexed chunks. "
+        "When session_id is provided, records search history and auto-indexes "
+        "files with matches (same grep-to-cache path as agent_grep). "
         "USE WHEN: need guaranteed completeness for simple patterns without "
         "enrichment. For structured results with scope/classification, "
         "prefer agent_grep.",
@@ -120,6 +122,11 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                     "type": "integer",
                     "description": "Max chunks to return (default: 50)",
                     "default": 50,
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional session ID. When set, records this search "
+                    "in get_search_history and auto-indexes documents with matches.",
                 },
                 "working_tree": {
                     "type": "boolean",
@@ -186,7 +193,9 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                 },
                 "session_id": {
                     "type": "string",
-                    "description": "Optional session ID. Required when working_tree is true for tracking.",
+                    "description": "Optional session ID for provenance. Not required for "
+                    "working_tree (indexes with agent_id=None if omitted); recommended "
+                    "when you want session-linked tracking.",
                 },
             },
             "required": ["query"],
@@ -198,7 +207,8 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
         "token totals, annotations, index_health (documents/chunks/symbol_rows, "
         "storage_dir, latest_indexed_at, seconds_since_last_index, "
         "symbol_graph_status, chunk_store_status, alerts), and project_root. "
-        "Optional path_prefix limits to documents under that path prefix. "
+        "Default compact=true (agent-safe). Optional path_prefix limits to documents "
+        "under that path prefix. "
         "USE WHEN: starting work on a project, understanding what's indexed, "
         "checking project scope and size.",
         "inputSchema": {
@@ -206,8 +216,8 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
             "properties": {
                 "compact": {
                     "type": "boolean",
-                    "description": "Sort by token count, cap document list, shorten annotations.",
-                    "default": False,
+                    "description": "Sort by token count, cap document list, shorten annotations. Default true for agents.",
+                    "default": True,
                 },
                 "max_documents": {
                     "type": "integer",
@@ -371,6 +381,17 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                     "improving search relevance. Example: "
                     '{"src/auth.py": "JWT middleware that validates tokens"}',
                 },
+                "expected_versions": {
+                    "type": "object",
+                    "additionalProperties": {"type": "integer"},
+                    "description": "Optional optimistic concurrency: map of document path → "
+                    "expected doc_version. Mismatches are reported as conflicts.",
+                },
+                "agent_id": {
+                    "type": "string",
+                    "description": "Optional agent id for locks/history. WRITE_TOOLS auto-inject "
+                    "server agent_id when omitted on multi-agent servers.",
+                },
             },
             "required": ["paths"],
         },
@@ -388,7 +409,8 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
             "properties": {
                 "session_id": {
                     "type": "string",
-                    "description": "Session identifier",
+                    "description": 'Session identifier (default: "default", matches CLI)',
+                    "default": "default",
                 },
                 "document_paths": {
                     "type": "array",
@@ -414,7 +436,6 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                     "default": 200,
                 },
             },
-            "required": ["session_id"],
         },
     },
     {
@@ -540,8 +561,16 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
     {
         "name": "query",
         "description": "Composite retrieval that merges semantic search, symbol graph lookups, "
-        "and text grep into one result list. Returns deduplicated chunks with source provenance. "
-        "USE WHEN: you want the broadest possible coverage for a natural-language question.",
+        "and text grep into one result list. Returns deduplicated chunks with source provenance "
+        "and applied_defaults (working_tree/path_prefix smart defaults actually used). "
+        "Smart defaults: when session_id is set and the git tree is dirty, auto-enables working_tree; "
+        "when the index has more than ~500 documents and path_prefix is omitted, may auto-restrict "
+        "to a recent-files path prefix unless the query contains global scope words "
+        "(e.g. 'everywhere', 'all files', 'project-wide'). Pass an explicit path_prefix or those "
+        "keywords to control scope. When session_id is set, the text-grep branch records search "
+        "history (get_search_history). Optional search_mode/compact/max_result_tokens control the "
+        "search branch (same semantics as the search tool). "
+        "USE WHEN: broadest coverage for a natural-language question.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -556,16 +585,36 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                 },
                 "path_prefix": {
                     "type": "string",
-                    "description": "Optional project-relative path prefix filter",
+                    "description": "Optional project-relative path prefix filter. "
+                    "If omitted on large indexes (>500 docs), may be auto-set from recent files "
+                    "unless the query asks for global scope.",
                 },
                 "working_tree": {
                     "type": "boolean",
-                    "description": "When true, auto-index modified and untracked files from the git working tree before searching.",
+                    "description": "When true, auto-index modified and untracked files from the git working tree before searching. "
+                    "Also auto-enabled when session_id is set and the working tree is dirty.",
                     "default": False,
                 },
                 "session_id": {
                     "type": "string",
-                    "description": "Optional session ID. Required when working_tree is true for tracking.",
+                    "description": "Optional session ID for search-history recording on the grep branch, "
+                    "working-tree auto-index agent_id, and dirty-tree auto working_tree. Not strictly "
+                    "required when working_tree is true, but recommended for session provenance.",
+                },
+                "search_mode": {
+                    "type": "string",
+                    "enum": ["hybrid", "keyword"],
+                    "description": "Search branch mode: keyword (default BM25) or hybrid (HNSW+BM25 when Tier-2 useful)",
+                    "default": "keyword",
+                },
+                "compact": {
+                    "type": "boolean",
+                    "description": "If true, search branch returns short previews (default true)",
+                    "default": True,
+                },
+                "max_result_tokens": {
+                    "type": "integer",
+                    "description": "Optional cap on estimated tokens for search branch bodies",
                 },
             },
             "required": ["query"],
@@ -573,9 +622,13 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
     },
     {
         "name": "batch",
-        "description": "Execute multiple engine operations in sequence under a single write lock. "
-        "Each operation is {'method': '...', 'params': {...}}. Unknown methods or errors are captured "
-        "and execution continues. USE WHEN: chaining index + annotate + embed in one round-trip.",
+        "description": "Execute multiple engine operations in sequence (each method manages its own "
+        "locking — not a single global write lock). Each operation is "
+        "{'method': '<Stele engine method name>', 'params': {...}}. "
+        "Use Python engine names, not MCP tool aliases — e.g. index_documents (not index), "
+        "detect_changes_and_update (not detect_changes), search, agent_grep, "
+        "bulk_store_summaries. Unknown methods or errors are captured and execution continues. "
+        "USE WHEN: chaining index + annotate + embed in one round-trip.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -584,12 +637,15 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                     "items": {
                         "type": "object",
                         "properties": {
-                            "method": {"type": "string"},
+                            "method": {
+                                "type": "string",
+                                "description": "Stele engine method name (e.g. index_documents, search)",
+                            },
                             "params": {"type": "object"},
                         },
                         "required": ["method"],
                     },
-                    "description": "List of operations to execute",
+                    "description": "List of operations to execute with engine method names",
                 },
             },
             "required": ["operations"],
@@ -612,8 +668,8 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                 },
                 "top_k": {
                     "type": "integer",
-                    "description": "Number of results to return",
-                    "default": 5,
+                    "description": "Number of results to return (default: 10, matches engine)",
+                    "default": 10,
                 },
             },
             "required": ["session_id", "query"],
@@ -621,7 +677,8 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
     },
     {
         "name": "save_kv_state",
-        "description": "Save KV-cache state for a session chunk",
+        "description": "Save KV-cache state for a session. kv_data is a map of "
+        "chunk_id → payload objects. Optional chunk_ids filters which keys to store.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -629,16 +686,18 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Session ID",
                 },
-                "chunk_id": {
-                    "type": "string",
-                    "description": "Chunk ID",
-                },
                 "kv_data": {
                     "type": "object",
-                    "description": "KV-cache data to save",
+                    "description": "Map of chunk_id → KV payload to save",
+                },
+                "chunk_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of chunk IDs to include from kv_data "
+                    "(when omitted, all keys in kv_data are stored)",
                 },
             },
-            "required": ["session_id", "chunk_id", "kv_data"],
+            "required": ["session_id", "kv_data"],
         },
     },
     {
@@ -698,6 +757,229 @@ _TOOL_DEFINITIONS_PRIMARY: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {},
+        },
+    },
+    # -- Full-mode legacy singletons (stdio discovery when STELE_MCP_MODE=full) --
+    # Prefer unified tools (annotations, document_lock, bulk_store_*, map/doctor)
+    # on lite/standard. These exist for backward compatibility only.
+    {
+        "name": "stats",
+        "description": "Storage statistics (legacy). Prefer doctor or map on lite.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "project_brief",
+        "description": "Largest files / extension counts (legacy). Prefer doctor map_preview.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "top_n": {
+                    "type": "integer",
+                    "description": "Max files in largest_files",
+                    "default": 40,
+                },
+            },
+        },
+    },
+    {
+        "name": "annotate",
+        "description": "Create one annotation (legacy). Prefer annotations action=create.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+                "target_type": {
+                    "type": "string",
+                    "enum": ["document", "chunk"],
+                },
+                "content": {"type": "string"},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["target", "target_type", "content"],
+        },
+    },
+    {
+        "name": "get_annotations",
+        "description": "Get annotations for a target (legacy). Prefer annotations action=get.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+                "target_type": {
+                    "type": "string",
+                    "enum": ["document", "chunk"],
+                },
+            },
+            "required": ["target"],
+        },
+    },
+    {
+        "name": "delete_annotation",
+        "description": "Delete annotation by id (legacy). Prefer annotations action=delete.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "annotation_id": {"type": "integer"},
+            },
+            "required": ["annotation_id"],
+        },
+    },
+    {
+        "name": "update_annotation",
+        "description": "Update annotation (legacy). Prefer annotations action=update.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "annotation_id": {"type": "integer"},
+                "content": {"type": "string"},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["annotation_id"],
+        },
+    },
+    {
+        "name": "search_annotations",
+        "description": "Search annotations (legacy). Prefer annotations action=search.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "bulk_annotate",
+        "description": "Bulk create annotations (legacy). Prefer annotations action=bulk_create.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                },
+            },
+            "required": ["items"],
+        },
+    },
+    {
+        "name": "acquire_document_lock",
+        "description": "Acquire document lock (legacy). Prefer document_lock action=acquire.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "document_path": {"type": "string"},
+                "agent_id": {"type": "string"},
+                "ttl": {"type": "number"},
+            },
+            "required": ["document_path", "agent_id"],
+        },
+    },
+    {
+        "name": "refresh_document_lock",
+        "description": "Refresh document lock (legacy). Prefer document_lock action=refresh.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "document_path": {"type": "string"},
+                "agent_id": {"type": "string"},
+            },
+            "required": ["document_path", "agent_id"],
+        },
+    },
+    {
+        "name": "release_document_lock",
+        "description": "Release document lock (legacy). Prefer document_lock action=release.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "document_path": {"type": "string"},
+                "agent_id": {"type": "string"},
+            },
+            "required": ["document_path", "agent_id"],
+        },
+    },
+    {
+        "name": "get_document_lock_status",
+        "description": "Document lock status (legacy). Prefer document_lock action=status.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "document_path": {"type": "string"},
+            },
+            "required": ["document_path"],
+        },
+    },
+    {
+        "name": "release_agent_locks",
+        "description": "Release all locks for an agent (legacy). Prefer document_lock.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string"},
+            },
+            "required": ["agent_id"],
+        },
+    },
+    {
+        "name": "get_conflicts",
+        "description": "List document conflicts (legacy). Prefer document_lock / history.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "document_path": {"type": "string"},
+                "limit": {"type": "integer", "default": 50},
+            },
+        },
+    },
+    {
+        "name": "reap_expired_locks",
+        "description": "Reap expired document locks (legacy).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "store_semantic_summary",
+        "description": "Store one chunk semantic summary (legacy). Prefer bulk_store_summaries.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "chunk_id": {"type": "string"},
+                "summary": {"type": "string"},
+            },
+            "required": ["chunk_id", "summary"],
+        },
+    },
+    {
+        "name": "store_embedding",
+        "description": "Store one chunk embedding (legacy). Prefer bulk_store_embeddings.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "chunk_id": {"type": "string"},
+                "embedding": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                },
+            },
+            "required": ["chunk_id", "embedding"],
+        },
+    },
+    {
+        "name": "store_chunk_agent_notes",
+        "description": "Store notes for one chunk (legacy). Prefer bulk_store_chunk_agent_notes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "chunk_id": {"type": "string"},
+                "notes": {},
+            },
+            "required": ["chunk_id", "notes"],
         },
     },
 ]

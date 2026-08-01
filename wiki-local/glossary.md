@@ -7,7 +7,13 @@
 | **Agent Signature** | Optional higher-quality embedding supplied by an LLM agent via `store_semantic_summary` or `store_embedding` |
 | **HNSW** | Hierarchical Navigable Small World graph. O(log n) approximate nearest neighbor search |
 | **BM25** | Best Matching 25. Keyword-based relevance scoring algorithm used alongside HNSW |
-| **Hybrid Search** | `alpha * cosine_similarity + (1-alpha) * bm25_score`. Alpha auto-tunes lower for code-like queries |
+| **Hybrid Search** | Opt-in `search_mode=hybrid`: `alpha * cosine + (1-alpha) * bm25`. **Default search is keyword/BM25-only** |
+| **Tier 1 / Tier 2** | Tier 1 = statistical 128-d signatures (always). Tier 2 = agent summaries/vectors for better ranking |
+| **query (tool)** | Composite retrieval: search + symbol graph + agent_grep; returns `applied_defaults` for smart scopes |
+| **working_tree** | Flag to auto-index git modified/untracked files before search |
+| **lite MCP** | Default `STELE_MCP_MODE=lite` high-leverage tool subset |
+| **WriterQueue** | Single-writer daemon serializing SQLite writes for resilience |
+| **file_dependencies** | Path-level dependency fallback used by impact_radius when symbol edges are sparse |
 | **Modality** | Content type: text, code, image, pdf, audio, video. Determines which chunker processes a file |
 | **Chunker** | A class (subclass of `BaseChunker`) that splits content into `Chunk` objects. One per modality |
 | **Tree-sitter** | Optional AST parser for code chunking. Supports 9 languages. Falls back to regex when not installed |

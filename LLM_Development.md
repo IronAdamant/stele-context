@@ -2,6 +2,16 @@
 
 Chronological record of development activity on Stele Context, maintained for LLM agent context.
 
+**Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
+
+## 2026-08-01 - Remaining audit full remediation
+
+- Closed residual audit matrix (docs honesty, full-mode MCP schemas, query `applied_defaults` + search knobs, CLI composite tools, scan_new/detect session defaults, design-ceiling WONTFIX stamps). Plan: `plan/remaining-audit-full-remediation.md`.
+
+## 2026-07-09 - v1.5.0 productization (summary)
+
+- MCP **lite** default; `stele-context init`; doctor `next_steps` / enrichment_preview / token_savings; `enrichment_plan`; query `suggested_next`; Tier-2 invalidation on content_hash; search quality eval as product. See CHANGELOG [1.5.0].
+
 ## 2026-04-29 - RecipeLab review _open findings — 6 fixes
 
 Findings from `RecipeLab_alt/MCP_Findings/stele-context_open.md` (now `_closed`).

@@ -267,21 +267,32 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
         path_prefix: str | None = None,
         working_tree: bool = False,
         session_id: str | None = None,
+        search_mode: str = "keyword",
+        compact: bool = True,
+        max_result_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Composite retrieval that merges symbol, semantic, and text search.
 
         Runs in parallel:
-          1. Semantic search (`search`)
+          1. Semantic search (`search`) — respects search_mode/compact/max_result_tokens
           2. Symbol lookup (`find_references` / `find_definition` for extracted identifiers)
           3. Text grep (`agent_grep`) for high-signal matches
 
-        Returns deduplicated chunks with source provenance.
+        Returns deduplicated chunks with source provenance and ``applied_defaults``
+        describing any smart-default path_prefix / working_tree choices.
         """
         from stele_context.search_engine import extract_query_identifiers
 
+        requested_working_tree = working_tree
+        requested_path_prefix = path_prefix
+        auto_working_tree = False
+        auto_path_prefix = False
+
         # Smart default: auto-enable working_tree when session_id is given and tree is dirty
         if not working_tree and session_id:
-            working_tree = self._git_working_tree_is_dirty()
+            if self._git_working_tree_is_dirty():
+                working_tree = True
+                auto_working_tree = True
 
         # Smart default: restrict large projects unless query asks for global scope
         if path_prefix is None:
@@ -295,6 +306,8 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
                 }
                 if not any(kw in query.lower() for kw in global_keywords):
                     path_prefix = self._recent_files_path_prefix()
+                    if path_prefix is not None:
+                        auto_path_prefix = True
 
         if working_tree:
             self._index_working_tree(agent_id=session_id)
@@ -303,14 +316,19 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
         seen_chunks: set[str] = set()
         errors: list[str] = []
 
-        # 1. Semantic search
+        # 1. Semantic / keyword search branch
         try:
-            semantic = self.search(
-                query,
-                top_k=top_k,
-                path_prefix=path_prefix,
-                compact=True,
-            )
+            search_kwargs: dict[str, Any] = {
+                "query": query,
+                "top_k": top_k,
+                "path_prefix": path_prefix,
+                "compact": compact,
+                "search_mode": search_mode,
+            }
+            if max_result_tokens is not None:
+                search_kwargs["max_result_tokens"] = max_result_tokens
+                search_kwargs["return_response_meta"] = True
+            semantic = self.search(**search_kwargs)
             if isinstance(semantic, dict):
                 semantic = semantic.get("results", [])
             for r in semantic:
@@ -375,7 +393,7 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
             grep_res = self.agent_grep(
                 pattern=query,
                 max_tokens=2000,
-                session_id=None,
+                session_id=session_id,
             )
             # agent_grep returns groups, not results; matches have 'file' not 'chunk_id'
             for group in grep_res.get("groups", []):
@@ -414,6 +432,17 @@ class Stele(_IndexMixin, _InfoMixin, _SearchMixin, _SymbolMixin, _LockMixin):
                 "text_match": sum(
                     1 for r in results if r.get("source") == "text_match"
                 ),
+            },
+            "applied_defaults": {
+                "working_tree": working_tree,
+                "working_tree_auto": auto_working_tree,
+                "working_tree_requested": requested_working_tree,
+                "path_prefix": path_prefix,
+                "path_prefix_auto": auto_path_prefix,
+                "path_prefix_requested": requested_path_prefix,
+                "search_mode": search_mode,
+                "compact": compact,
+                "session_id": session_id,
             },
         }
         if errors:

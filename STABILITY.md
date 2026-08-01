@@ -10,7 +10,7 @@ The public API consists of:
 
 | Class | Module | Stability |
 |-------|--------|-----------|
-| `Stele` | `stele_context.engine` | **Stable** — all 42 public methods |
+| `Stele` | `stele_context.engine` | **Stable** — all public methods on the class (count grows with additive APIs; do not hard-code a fixed number) |
 | `Chunk` | `stele_context.chunkers.base` | **Stable** — dataclass fields + properties |
 | `StorageBackend` | `stele_context.storage` | **Semi-stable** — see below |
 | `SessionManager` | `stele_context.session` | **Stable** |
@@ -72,8 +72,21 @@ Before removing or renaming a public API element:
 
 ## Currently Deprecated
 
-None. All deprecated aliases were removed in 1.0.0.
+**Python public API:** None. All deprecated Python aliases were removed in 1.0.0.
+
+**MCP surface:** Mode **`full`** still exposes **legacy singleton tool names** (`stats`, `annotate`, per-lock tools, `store_semantic_summary`, …) for backward compatibility. Prefer unified tools on **lite/standard** (`doctor`/`map`, `annotations`, `document_lock`, `bulk_store_summaries`, …). Full-mode names are not Python deprecations; they are MCP discovery aliases.
+
+## Design ceilings (static analysis / product WONTFIX)
+
+These are **accepted limits** of the zero-dep static name graph — not open bugs. Agents should not re-open them without a new design epic:
+
+| Ceiling | Guidance |
+|---------|----------|
+| **No synthetic reference edges for dynamic-only symbols** | `register_dynamic_symbols` makes symbols visible; use `impact_radius(symbol=…)` / explicit edges. Follow-on: `plan/large-module-split-follow-on.md` is maintainability only — dynamic edges would be a separate epic if ever revisited. |
+| **No polymorphic / type-context lattice** | Multi-definition disambiguation is name-based (+ same-file `definition_index` / `shadowed` / `shadow_count`). No runtime type resolution. |
+| **Nested block-scope multi-defs** | Shadow fields cover multi-defs in a document; not a full nested scope lattice. |
+| **Name-homonym coupling** | Coupling uses symbol names with noise filters; homonyms can still couple (static analysis limit). |
 
 ## Product scope (zero-dep core)
 
-As of **v1.0.5**, the **core package** (no required third-party runtime dependencies) is in a **reasonable stopping place** for RecipeLab-style validation: hybrid search includes weak-vector and multi-signal BM25 fallbacks; **`map`** / **`search`** support optional **`path_prefix`** scoping; **`impact_radius`** supports **`summary_mode`** for bounded outputs. Further improvements that do not change the “no bundled embedding model” story are expected to be **incremental** (heuristics, UX, docs) unless the project explicitly adopts optional heavy deps or new major features.
+As of **v1.0.5+** (through current 1.x), the **core package** (no required third-party runtime dependencies) is in a **reasonable stopping place** for RecipeLab-style validation: hybrid search includes weak-vector and multi-signal BM25 fallbacks with **keyword (`search_mode="keyword"`) as the default**; **`map`** / **`search`** support optional **`path_prefix`** scoping; **`impact_radius`** supports **`summary_mode`** for bounded outputs; agent ritual tools include **`query`**, **`doctor`**, and session provenance. Further improvements that do not change the “no bundled embedding model” story are expected to be **incremental** (heuristics, UX, docs) unless the project explicitly adopts optional heavy deps or new major features.

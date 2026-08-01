@@ -30,7 +30,7 @@ This project adheres to a Code of Conduct. By participating, you are expected to
 
 ### Prerequisites
 
-- Python 3.9 or higher
+- Python 3.10 or higher (`requires-python = ">=3.10"`)
 - Git
 
 ### Installation
@@ -325,3 +325,7 @@ The key files are:
 - `stele-context release` CLI command (new in 1.3.2+)
 
 We are actively working with the Grok team to enable zero-touch releases via the `grok_com_github` MCP tools.
+
+## Local build artifacts
+
+Do not treat `dist/` wheels as the current package version. `dist/` is gitignored; remove stale local artifacts after version bumps. Publish via the release workflow / `stele-context release`, not by reusing old trees under `dist/`.

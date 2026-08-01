@@ -295,8 +295,12 @@ Examples:
     )
     detect_parser.add_argument(
         "--scan-new",
-        action="store_true",
-        help="When checking all indexed paths, also list new project files not yet indexed",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "When checking all indexed paths, also list new project files not yet "
+            "indexed (default: true, matches MCP/engine). Use --no-scan-new to disable."
+        ),
     )
 
     # stats command
@@ -423,8 +427,9 @@ Examples:
     )
     map_parser.add_argument(
         "--compact",
-        action="store_true",
-        help="Sort by size, limit documents, shorten annotations",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Sort by size, limit documents, shorten annotations (default: true). Use --no-compact for full list.",
     )
     map_parser.add_argument(
         "--max-documents",
@@ -547,6 +552,107 @@ Examples:
         action="store_true",
         dest="output_json",
         help="Output as JSON",
+    )
+
+    # Composite query (thin engine wrapper; same as MCP query)
+    query_parser = subparsers.add_parser(
+        "query",
+        help="Composite retrieval: keyword/hybrid search + symbols + text grep",
+    )
+    query_parser.add_argument("query", help="Natural language or keyword query")
+    query_parser.add_argument("--top-k", type=int, default=10)
+    query_parser.add_argument("--path-prefix", default=None, metavar="PREFIX")
+    query_parser.add_argument(
+        "--session-id",
+        default=None,
+        help="Session ID (enables search history + dirty-tree working_tree)",
+    )
+    query_parser.add_argument(
+        "--working-tree",
+        action="store_true",
+        help="Auto-index git modified/untracked files before search",
+    )
+    query_parser.add_argument(
+        "--search-mode",
+        choices=["keyword", "hybrid"],
+        default="keyword",
+        help="Search mode for the semantic branch (default: keyword)",
+    )
+    query_parser.add_argument(
+        "--compact",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Compact result bodies (default: true)",
+    )
+    query_parser.add_argument(
+        "--max-result-tokens",
+        type=int,
+        default=None,
+        help="Optional token budget for search branch bodies",
+    )
+    query_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="output_json",
+        default=True,
+        help="Output as JSON (default)",
+    )
+
+    # Symbol navigation
+    fdef_parser = subparsers.add_parser(
+        "find-definition",
+        help="Find where a symbol is defined",
+    )
+    fdef_parser.add_argument("symbol", help="Symbol name")
+    fdef_parser.add_argument(
+        "--json", action="store_true", dest="output_json", default=True
+    )
+
+    fref_parser = subparsers.add_parser(
+        "find-references",
+        help="Find definitions and references for a symbol",
+    )
+    fref_parser.add_argument("symbol", help="Symbol name")
+    fref_parser.add_argument(
+        "--json", action="store_true", dest="output_json", default=True
+    )
+
+    impact_parser = subparsers.add_parser(
+        "impact-radius",
+        help="Blast radius for a file, chunk, or symbol",
+    )
+    impact_parser.add_argument("--document-path", default=None, help="File path seed")
+    impact_parser.add_argument("--chunk-id", default=None, help="Chunk ID seed")
+    impact_parser.add_argument("--symbol", default=None, help="Symbol name seed")
+    impact_parser.add_argument("--depth", type=int, default=2)
+    impact_parser.add_argument(
+        "--summary-mode",
+        action="store_true",
+        help="Bounded summary output (recommended)",
+    )
+    impact_parser.add_argument(
+        "--significance-threshold",
+        type=float,
+        default=0.0,
+        help="Filter common-symbol noise (e.g. 0.1)",
+    )
+    impact_parser.add_argument(
+        "--json", action="store_true", dest="output_json", default=True
+    )
+
+    coupling_parser = subparsers.add_parser(
+        "coupling",
+        help="Find files coupled to a document via shared symbols",
+    )
+    coupling_parser.add_argument("document_path", help="File path")
+    coupling_parser.add_argument(
+        "--mode",
+        choices=["edges", "co_consumers"],
+        default="edges",
+    )
+    coupling_parser.add_argument("--significance-threshold", type=float, default=0.0)
+    coupling_parser.add_argument(
+        "--json", action="store_true", dest="output_json", default=True
     )
 
     # Release automation (Grok Build)
@@ -788,6 +894,57 @@ def _print_detect_section(
             print(f"  {item}")
 
 
+def cmd_query(args: argparse.Namespace, stele: Stele) -> int:
+    """Composite query via engine.query."""
+    result = stele.query(
+        query=args.query,
+        top_k=getattr(args, "top_k", 10),
+        path_prefix=getattr(args, "path_prefix", None),
+        working_tree=getattr(args, "working_tree", False),
+        session_id=getattr(args, "session_id", None),
+        search_mode=getattr(args, "search_mode", "keyword"),
+        compact=getattr(args, "compact", True),
+        max_result_tokens=getattr(args, "max_result_tokens", None),
+    )
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def cmd_find_definition(args: argparse.Namespace, stele: Stele) -> int:
+    result = stele.find_definition(args.symbol)
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def cmd_find_references(args: argparse.Namespace, stele: Stele) -> int:
+    result = stele.find_references(args.symbol)
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def cmd_impact_radius(args: argparse.Namespace, stele: Stele) -> int:
+    result = stele.impact_radius(
+        chunk_id=getattr(args, "chunk_id", None),
+        document_path=getattr(args, "document_path", None),
+        symbol=getattr(args, "symbol", None),
+        depth=getattr(args, "depth", 2),
+        summary_mode=getattr(args, "summary_mode", False),
+        significance_threshold=getattr(args, "significance_threshold", 0.0),
+    )
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def cmd_coupling(args: argparse.Namespace, stele: Stele) -> int:
+    result = stele.coupling(
+        document_path=args.document_path,
+        mode=getattr(args, "mode", "edges"),
+        significance_threshold=getattr(args, "significance_threshold", 0.0),
+    )
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
 def cmd_detect(args: argparse.Namespace, stele: Stele) -> int:
     """Detect changes in indexed documents."""
     print(f"Detecting changes for session '{args.session}'...")
@@ -1015,6 +1172,11 @@ def main(argv: list[str] | None = None) -> int:
         "search": cmd_search,
         "search-text": cmd_search_text,
         "agent-grep": cmd_agent_grep,
+        "query": cmd_query,
+        "find-definition": cmd_find_definition,
+        "find-references": cmd_find_references,
+        "impact-radius": cmd_impact_radius,
+        "coupling": cmd_coupling,
         "detect": cmd_detect,
         "stats": cmd_stats,
         "doctor": cmd_doctor,

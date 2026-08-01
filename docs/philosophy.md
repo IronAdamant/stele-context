@@ -14,7 +14,7 @@ Optional extras (`performance`, `tree-sitter`, multimodal chunkers, etc.) stay *
 ## Two tiers of “meaning”
 
 **Tier 1 — always on (statistical signatures)**  
-Every chunk gets a compact **128-dimensional signature** derived from structure and text statistics. It powers change detection and a baseline vector for hybrid search (HNSW + BM25) with **no external model**. The hybrid ranker **falls back to BM25** when vector/keyword signals disagree, scores are flat, or the top raw cosine is weak (v1.0.5+); optional **`path_prefix`** scopes **`map`** / **`search`** when one index covers multiple trees.
+Every chunk gets a compact **128-dimensional signature** derived from structure and text statistics. It powers change detection and a baseline vector for search with **no external model**. **Default `search` is keyword/BM25-only** (`search_mode="keyword"`); opt into **`search_mode="hybrid"`** (HNSW + BM25) when Tier 2 summaries are populated — statistical Tier-1 vectors alone often mis-rank domain queries. Hybrid mode still **falls back to BM25** when vector/keyword signals disagree, scores are flat, or the top raw cosine is weak (v1.0.5+). Optional **`path_prefix`** scopes **`map`** / **`search`** when one index covers multiple trees.
 
 **Tier 2 — agent-supplied (semantic summaries or vectors)**  
 You — or another LLM — act as the **embedding model**:
@@ -37,6 +37,7 @@ Together, this supports: **Session A** indexes and annotates; **Session B** sear
 
 - It is **not** a hosted vector DB or a framework that pulls in half the PyPI ecosystem.
 - **Generic “semantic search” over code** without Tier 2 can miss nuance; **symbol tools** (`find_references`, `find_definition`, `agent_grep`, `search_text`) remain the precision layer for renames and verification.
+- It is **not** a full type-aware or polymorphic call-graph engine. The symbol graph is a **static name graph** (with optional agent-registered dynamic symbols). Synthetic call-site edges for hooks-only registration, type-context lattices, and perfect nested-scope multi-def resolution are **out of scope** unless a future major design revisits them (see [STABILITY.md](../STABILITY.md) design ceilings).
 
 For a **concrete agent workflow** (index → enrich → retrieve), see [Agent workflow](agent-workflow.md).
 

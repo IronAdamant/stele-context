@@ -48,6 +48,10 @@ For hybrid search quality: `enrichment_plan` → `bulk_store_summaries` on hot c
 
 MCP default mode is **`lite`**. Set `STELE_MCP_MODE=standard` only when you need the broader tool surface.
 
+**HTTP vs stdio envelopes:** HTTP wraps `{"success", "result"}`; stdio returns bare tool JSON — intentional dual shape (see architecture design log).
+
+**CLI:** thin subcommands exist for `query`, `find-definition`, `find-references`, `impact-radius`, `coupling` in addition to search/detect/doctor. See AGENTS.md CLI↔MCP map. `detect --scan-new` defaults **true** (use `--no-scan-new` to disable).
+
 After this, **`search`**, **`get_context`**, **`find_references`**, etc. have material to work with.
 
 ## When to use which retrieval tool
@@ -58,6 +62,8 @@ After this, **`search`**, **`get_context`**, **`find_references`**, etc. have ma
 | “Where is X defined / used?” | **`find_definition`**, **`find_references`** (symbol graph) |
 | Exploratory “what talks about Y?” | **`search`** (BM25 keyword by default; pass `search_mode="hybrid"` for HNSW+BM25 — only worthwhile when Tier 2 is populated) |
 | Current chunk text | **`get_context`** (optional **trust** + **agent_notes** per chunk; records reads in session) |
+| Broad NL question (composite) | **`query`** — merges search + symbols + grep; returns **`applied_defaults`** for smart path_prefix/working_tree; optional `search_mode` / `compact` / `max_result_tokens` |
+| Blast radius / coupling | **`impact_radius`** / **`coupling`** (also CLI `impact-radius` / `coupling`) |
 
 ### Grep-first: searching = caching
 
