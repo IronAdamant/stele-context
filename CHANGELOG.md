@@ -1,11 +1,7 @@
-# Changelog
-
-All notable changes to Stele Context will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 ## [Unreleased]
+
+### Fixed
+- **Windows CI**: close SQLite storage before tempdir cleanup in `run_eval_suite` (WinError 32 on `stele_context.db`).
 
 ## [1.5.1] - 2026-08-01
 

@@ -1444,58 +1444,68 @@ def run_eval_suite(
     """
     from stele_context.engine import Stele
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # ignore_cleanup_errors: Windows cannot unlink SQLite files while any handle
+    # remains open; we still close storage explicitly below (primary fix).
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         id_to_path = _write_corpus(tmpdir)
         path_to_id = {v: k for k, v in id_to_path.items()}
 
         engine = Stele(storage_dir=tmpdir, enable_coordination=False)
-        engine.index_documents(list(id_to_path.values()))
+        try:
+            engine.index_documents(list(id_to_path.values()))
 
-        tier2_stored = 0
-        if with_tier2:
-            tier2_stored = _apply_tier2_summaries(engine, path_to_id)
+            tier2_stored = 0
+            if with_tier2:
+                tier2_stored = _apply_tier2_summaries(engine, path_to_id)
 
-        # Local eval that respects search_mode
-        results = []
-        for query, expected, category, description in EVAL_QUERIES:
-            search_results = engine.search(
-                query, top_k=10, search_mode=search_mode
-            )
-            retrieved_ids_10: List[str] = []
-            for r in search_results:
-                doc_path = r["document_path"]
-                doc_id = _doc_id_for_path(doc_path, path_to_id)
-                if doc_id not in retrieved_ids_10:
-                    retrieved_ids_10.append(doc_id)
-            retrieved_5 = set(retrieved_ids_10[:5])
-            retrieved_10 = set(retrieved_ids_10[:10])
-            recall_5 = (
-                len(expected & retrieved_5) / len(expected) if expected else 0
-            )
-            recall_10 = (
-                len(expected & retrieved_10) / len(expected) if expected else 0
-            )
-            results.append(
-                {
-                    "query": query,
-                    "category": category,
-                    "description": description,
-                    "expected": expected,
-                    "retrieved_5": retrieved_5,
-                    "retrieved_10": retrieved_10,
-                    "recall_5": recall_5,
-                    "recall_10": recall_10,
-                }
-            )
+            # Local eval that respects search_mode
+            results = []
+            for query, expected, category, description in EVAL_QUERIES:
+                search_results = engine.search(
+                    query, top_k=10, search_mode=search_mode
+                )
+                retrieved_ids_10: List[str] = []
+                for r in search_results:
+                    doc_path = r["document_path"]
+                    doc_id = _doc_id_for_path(doc_path, path_to_id)
+                    if doc_id not in retrieved_ids_10:
+                        retrieved_ids_10.append(doc_id)
+                retrieved_5 = set(retrieved_ids_10[:5])
+                retrieved_10 = set(retrieved_ids_10[:10])
+                recall_5 = (
+                    len(expected & retrieved_5) / len(expected) if expected else 0
+                )
+                recall_10 = (
+                    len(expected & retrieved_10) / len(expected) if expected else 0
+                )
+                results.append(
+                    {
+                        "query": query,
+                        "category": category,
+                        "description": description,
+                        "expected": expected,
+                        "retrieved_5": retrieved_5,
+                        "retrieved_10": retrieved_10,
+                        "recall_5": recall_5,
+                        "recall_10": recall_10,
+                    }
+                )
 
-        summary = _summarize(results)
-        summary["search_mode"] = search_mode
-        summary["with_tier2"] = with_tier2
-        summary["tier2_stored"] = tier2_stored
-        summary["passed_gate"] = summary["avg_recall_10"] >= min_avg_recall_10
-        summary["min_avg_recall_10"] = min_avg_recall_10
-        summary["results"] = results
-        return summary
+            summary = _summarize(results)
+            summary["search_mode"] = search_mode
+            summary["with_tier2"] = with_tier2
+            summary["tier2_stored"] = tier2_stored
+            summary["passed_gate"] = summary["avg_recall_10"] >= min_avg_recall_10
+            summary["min_avg_recall_10"] = min_avg_recall_10
+            summary["results"] = results
+            return summary
+        finally:
+            # Release SQLite pool / WriterQueue handles before tempdir cleanup.
+            # Required on Windows (WinError 32 if stele_context.db stays locked).
+            try:
+                engine.storage.close()
+            except Exception:
+                pass
 
 
 def run_tier2_delta(
