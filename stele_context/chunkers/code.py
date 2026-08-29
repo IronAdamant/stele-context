@@ -123,6 +123,7 @@ class CodeChunker(BaseChunker):
             ".rb",
             ".php",
             ".swift",
+            ".dart",
             ".sh",
             ".bash",
             ".zsh",

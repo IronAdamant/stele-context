@@ -113,6 +113,40 @@ DEFINITION_TYPES: dict[str, frozenset] = {
             "namespace_definition",
         }
     ),
+    "csharp": frozenset(
+        {
+            "class_declaration",
+            "interface_declaration",
+            "struct_declaration",
+            "enum_declaration",
+            "record_declaration",
+            "namespace_declaration",
+            "method_declaration",
+            "constructor_declaration",
+            "property_declaration",
+        }
+    ),
+    "swift": frozenset(
+        {
+            "class_declaration",
+            "struct_declaration",
+            "protocol_declaration",
+            "enum_declaration",
+            "extension_declaration",
+            "typealias_declaration",
+            "function_declaration",
+        }
+    ),
+    "dart": frozenset(
+        {
+            "class_definition",
+            "mixin_declaration",
+            "extension_declaration",
+            "enum_declaration",
+            "type_alias",
+            "function_signature",
+        }
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -138,6 +172,9 @@ EXT_TO_GRAMMAR: dict[str, tuple[str, str]] = {
     "rs": ("tree_sitter_rust", "rust"),
     "rb": ("tree_sitter_ruby", "ruby"),
     "php": ("tree_sitter_php", "php"),
+    "cs": ("tree_sitter_c_sharp", "csharp"),
+    "swift": ("tree_sitter_swift", "swift"),
+    "dart": ("tree_sitter_dart", "dart"),
 }
 
 # ---------------------------------------------------------------------------
