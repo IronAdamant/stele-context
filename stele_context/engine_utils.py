@@ -14,10 +14,10 @@ from typing import Any
 def read_and_hash(path: Path, modality: str) -> tuple:
     """Read file content and compute SHA-256 hash.
 
-    Binary modalities (image/audio/video) read as bytes; everything else
+    Binary modalities (image/audio/video/pdf) read as bytes; everything else
     reads as UTF-8 text. Returns `(content, sha256_hex)`.
     """
-    if modality in ("image", "audio", "video"):
+    if modality in ("image", "audio", "video", "pdf"):
         raw = path.read_bytes()
         return raw, hashlib.sha256(raw).hexdigest()
     content = path.read_text(encoding="utf-8", errors="replace")
@@ -69,12 +69,15 @@ def resolve_path(normalized: str, project_root: Path | None) -> Path:
 
 
 def detect_project_root(explicit: str | None = None) -> Path | None:
-    """Detect project root by walking up from CWD looking for .git."""
+    """Detect project root by walking up from CWD looking for .git or .stele-context.toml."""
     if explicit is not None:
         return Path(explicit).resolve()
     cwd = Path.cwd().resolve()
     for parent in (cwd, *cwd.parents):
         if (parent / ".git").exists():
+            return parent
+    for parent in (cwd, *cwd.parents):
+        if (parent / ".stele-context.toml").exists():
             return parent
     return None
 

@@ -17,7 +17,10 @@ import ast
 from stele_context.symbol_patterns import (
     Symbol,
     extract_c,
+    extract_csharp,
     extract_css,
+    extract_dart,
+    extract_swift,
     extract_go,
     extract_html,
     extract_java,
@@ -302,8 +305,14 @@ class SymbolExtractor:
             return extract_go(content, document_path, chunk_id)
         if ext == "rs":
             return extract_rust(content, document_path, chunk_id)
-        if ext in ("c", "cpp", "cc", "cxx", "h", "hpp", "hxx", "cs"):
+        if ext in ("c", "cpp", "cc", "cxx", "h", "hpp", "hxx"):
             return extract_c(content, document_path, chunk_id)
+        if ext == "cs":
+            return extract_csharp(content, document_path, chunk_id)
+        if ext == "swift":
+            return extract_swift(content, document_path, chunk_id)
+        if ext == "dart":
+            return extract_dart(content, document_path, chunk_id)
         if ext == "rb":
             return extract_ruby(content, document_path, chunk_id)
         if ext == "php":

@@ -661,3 +661,134 @@ def extract_php(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
             )
 
     return symbols
+
+
+# -- C# ----------------------------------------------------------------------
+
+
+def extract_csharp(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
+    """Extract symbols from C#."""
+    symbols: list[Symbol] = []
+    _skip = {"if", "while", "for", "foreach", "switch", "catch", "return", "new", "throw", "using", "lock"}
+
+    for i, line in enumerate(content.splitlines(), 1):
+        stripped = line.strip()
+
+        m = re.match(
+            r"(?:public\s+|private\s+|protected\s+|internal\s+)?"
+            r"(?:abstract\s+|sealed\s+|static\s+|partial\s+)*"
+            r"(?:class|interface|struct|enum|record)\s+(\w+)",
+            stripped,
+        )
+        if m:
+            symbols.append(
+                Symbol(m.group(1), "class", "definition", chunk_id, doc_path, i)
+            )
+
+        m = re.match(
+            r"(?:public\s+|private\s+|protected\s+|internal\s+)?"
+            r"(?:virtual\s+|override\s+|abstract\s+|sealed\s+|static\s+|async\s+|extern\s+|partial\s+)*"
+            r"[\w<>\[\]?,\s]+?\s+(\w+)\s*\(",
+            stripped,
+        )
+        if m and m.group(1) not in _skip:
+            symbols.append(
+                Symbol(m.group(1), "function", "definition", chunk_id, doc_path, i)
+            )
+
+        m = re.match(r"(?:public\s+|private\s+)?using\s+(?:static\s+)?([\w.]+)(?:\.\*)?;", stripped)
+        if m:
+            symbols.append(
+                Symbol(m.group(1), "module", "reference", chunk_id, doc_path, i)
+            )
+
+    return symbols
+
+
+# -- Swift -------------------------------------------------------------------
+
+
+def extract_swift(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
+    """Extract symbols from Swift."""
+    symbols: list[Symbol] = []
+    _skip = {"if", "while", "for", "switch", "catch", "return", "guard", "defer"}
+
+    for i, line in enumerate(content.splitlines(), 1):
+        stripped = line.strip()
+
+        m = re.match(
+            r"(?:public\s+|private\s+|internal\s+|fileprivate\s+|open\s+)?"
+            r"(?:final\s+|static\s+)?"
+            r"(?:class|struct|enum|protocol|actor|extension)\s+(\w+)",
+            stripped,
+        )
+        if m:
+            symbols.append(
+                Symbol(m.group(1), "class", "definition", chunk_id, doc_path, i)
+            )
+
+        m = re.match(
+            r"(?:public\s+|private\s+|internal\s+|fileprivate\s+|open\s+)?"
+            r"(?:static\s+|class\s+|override\s+|final\s+)?"
+            r"(?:mutating\s+)?func\s+(\w+)",
+            stripped,
+        )
+        if m:
+            symbols.append(
+                Symbol(m.group(1), "function", "definition", chunk_id, doc_path, i)
+            )
+
+        m = re.match(
+            r"(?:public\s+|private\s+|internal\s+)?(?:typealias\s+(\w+))", stripped
+        )
+        if m:
+            symbols.append(
+                Symbol(m.group(1), "class", "definition", chunk_id, doc_path, i)
+            )
+
+        m = re.match(r"(?:import|@import)\s+([\w.]+)", stripped)
+        if m:
+            symbols.append(
+                Symbol(m.group(1), "module", "reference", chunk_id, doc_path, i)
+            )
+
+    return symbols
+
+
+# -- Dart --------------------------------------------------------------------
+
+
+def extract_dart(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
+    """Extract symbols from Dart."""
+    symbols: list[Symbol] = []
+    _skip = {"if", "while", "for", "switch", "catch", "return", "new", "throw"}
+
+    for i, line in enumerate(content.splitlines(), 1):
+        stripped = line.strip()
+
+        m = re.match(
+            r"(?:abstract\s+|sealed\s+|final\s+|base\s+|mixin\s+)*"
+            r"(?:class|mixin|enum|extension)\s+(\w+)",
+            stripped,
+        )
+        if m:
+            symbols.append(
+                Symbol(m.group(1), "class", "definition", chunk_id, doc_path, i)
+            )
+
+        m = re.match(
+            r"(?:\w+(?:<[\w<>\[\], ?]*>)?\s+)?(\w+)\s*\([^;]*\)\s*(?:async\s*)?\{",
+            stripped,
+        )
+        if m and m.group(1) not in _skip:
+            symbols.append(
+                Symbol(m.group(1), "function", "definition", chunk_id, doc_path, i)
+            )
+
+        m = re.match(r"(?:import|export|part)\s+['\"]([^'\"]+)['\"]", stripped)
+        if m:
+            symbols.append(
+                Symbol(m.group(1), "module", "reference", chunk_id, doc_path, i)
+            )
+
+    return symbols
