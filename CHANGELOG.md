@@ -1,16 +1,20 @@
 ## [Unreleased]
 
+## [1.5.2] - 2026-11-03
+
 ### Fixed
+- **MCP 2.x**: a fresh `pip install stele-context[mcp]` of 1.5.1 resolved `mcp` 2.3.0 and the stdio server crashed with `'Server' object has no attribute 'list_tools'`. The server now speaks both the mcp 1.x decorator API and the mcp 2.x `on_*` handler API. Checked on mcp 1.30.0 and mcp 2.3.0 with `initialize`, `tools/list`, and `tools/call`.
 - **Non-git indexes**: folders without `.git` all stored their index in `~/.stele-context/`. A `.stele-context.toml` file, which may be empty, now marks a project root. Walking up from the working directory, the nearest `.git` or marker wins. With neither, the global fallback is unchanged.
 - **PDF indexing**: PDF files are read as raw bytes. Decoding them as text and passing the string to PyMuPDF made `fitz.open` treat that string as a filesystem path and crash. A string is opened as a path only when it is an existing file.
 - **C# symbols**: `.cs` files use a C# extractor. Method declarations are definitions. Calls such as `return Compute(a)`, `await SaveAsync(x)`, and `throw new InvalidOperationException(...)` are references.
-- **MCP 2**: the stdio server speaks both the mcp 1.x decorator API and the mcp 2.x `on_*` handler API, so the `mcp` extra stays `mcp>=1.0.0` and works with current mcp 2.x releases.
 - **Windows CI**: close SQLite storage before tempdir cleanup in `run_eval_suite` (WinError 32 on `stele_context.db`).
 
 ### Added
 - **Swift symbols**: `.swift` files yield definitions for `class`, `struct`, `enum`, `protocol`, `extension`, `func`, and `actor`, so `find_definition` resolves names such as `ViewController`. Optional tree-sitter chunking maps `.swift` through `tree-sitter-swift` (`EXT_TO_GRAMMAR` / `DEFINITION_TYPES`). That package is in the `tree-sitter` and `all` extras.
 
 ### Changed
+- The `mcp` and `all` extras require `mcp>=1.0.0,<3`. mcp 1.x and 2.x are in range. mcp 3 is not.
+- Package author metadata is Aron Amos (aron.amos@ironadamant.com).
 - LICENSE copyright line is `Copyright (c) 2026 Aron Amos`. The license remains MIT.
 
 ## [1.5.1] - 2026-08-01

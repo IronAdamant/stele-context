@@ -109,6 +109,54 @@ jobs:
       run: |
         pytest -q --tb=short
 
+  # Fresh wheel, unpinned [mcp] (current 2.x) and newest mcp 1.x.
+  mcp-stdio-smoke:
+    name: MCP stdio smoke (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: unpinned-mcp-2
+            mcp_major: "2"
+            constraint: ""
+          - label: latest-mcp-1
+            mcp_major: "1"
+            constraint: "mcp>=1.0.0,<2"
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Build the wheel
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install build
+        python -m build --wheel
+
+    - name: Install the wheel into a fresh venv
+      run: |
+        set -euo pipefail
+        python -m venv "$RUNNER_TEMP/stele-mcp"
+        "$RUNNER_TEMP/stele-mcp/bin/python" -m pip install --upgrade pip
+        wheel=(dist/*.whl)
+        constraint="${{ matrix.constraint }}"
+        if [ -z "$constraint" ]; then
+          "$RUNNER_TEMP/stele-mcp/bin/pip" install "${wheel[0]}[mcp]"
+        else
+          "$RUNNER_TEMP/stele-mcp/bin/pip" install "${wheel[0]}[mcp]" "$constraint"
+        fi
+        "$RUNNER_TEMP/stele-mcp/bin/python" -c 'import importlib.metadata as m; print("stele-context", m.version("stele-context")); print("mcp", m.version("mcp"))'
+
+    - name: initialize, tools/list, and tools/call
+      env:
+        STELE_SMOKE_MCP_MAJOR: ${{ matrix.mcp_major }}
+      run: |
+        "$RUNNER_TEMP/stele-mcp/bin/python" scripts/mcp_stdio_smoke.py
+
   type-check:
     runs-on: ubuntu-latest
     steps:
