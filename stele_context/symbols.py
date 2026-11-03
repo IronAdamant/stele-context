@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 
+from stele_context.symbol_csharp import extract_csharp
 from stele_context.symbol_patterns import (
     Symbol,
     extract_c,
@@ -267,7 +268,7 @@ _NOISE_REFS: frozenset = frozenset(
 class SymbolExtractor:
     """Extract symbols from code content by language.
 
-    Supports Python (AST), JS/TS, HTML, CSS, Java, Go, Rust, C/C++.
+    Supports Python (AST), JS/TS, HTML, CSS, Java, Go, Rust, C/C++, and C#.
     All extraction uses stdlib only (ast + re).
     """
 
@@ -302,7 +303,9 @@ class SymbolExtractor:
             return extract_go(content, document_path, chunk_id)
         if ext == "rs":
             return extract_rust(content, document_path, chunk_id)
-        if ext in ("c", "cpp", "cc", "cxx", "h", "hpp", "hxx", "cs"):
+        if ext in ("cs", "csharp"):
+            return extract_csharp(content, document_path, chunk_id)
+        if ext in ("c", "cpp", "cc", "cxx", "h", "hpp", "hxx"):
             return extract_c(content, document_path, chunk_id)
         if ext == "rb":
             return extract_ruby(content, document_path, chunk_id)

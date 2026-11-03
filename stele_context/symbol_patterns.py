@@ -557,11 +557,15 @@ def extract_rust(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
     return symbols
 
 
-# -- C / C++ / C# -----------------------------------------------------------
+# -- C / C++ ----------------------------------------------------------------
 
 
 def extract_c(content: str, doc_path: str, chunk_id: str) -> list[Symbol]:
-    """Extract symbols from C/C++/C#."""
+    """Extract symbols from C/C++.
+
+    C# has its own extractor. This pattern requires a ``{`` on the same
+    line as the declarator, which is the usual C/C++ definition shape.
+    """
     symbols: list[Symbol] = []
     _skip = {"if", "while", "for", "switch", "return", "sizeof", "typeof"}
 

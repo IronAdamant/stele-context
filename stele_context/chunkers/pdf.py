@@ -9,18 +9,41 @@ Install: pip install stele[pdf]
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from stele_context.chunkers.base import BaseChunker, Chunk
 
-# Check for pymupdf
+# Current PyMuPDF installs as ``pymupdf``. Older releases that still
+# satisfy pymupdf>=1.23 only expose the ``fitz`` module name.
 try:
-    import fitz  # pymupdf
+    import pymupdf as fitz
 
     HAS_PYMUPDF = True
 except ImportError:
-    HAS_PYMUPDF = False
-    fitz = None  # type: ignore
+    try:
+        import fitz  # type: ignore[no-redef]
+    except ImportError:
+        HAS_PYMUPDF = False
+        fitz = None  # type: ignore
+    else:
+        HAS_PYMUPDF = True
+
+
+def _is_pdf_filepath(content: str) -> bool:
+    """True when ``content`` is a short single-line path to a real file.
+
+    Decoded PDF text is long and contains newlines. Rejecting those strings
+    here keeps PyMuPDF from trying to open them as filenames.
+    """
+    if not content or "\n" in content or "\r" in content or "\x00" in content:
+        return False
+    if len(content) > 4096:
+        return False
+    try:
+        return Path(content).is_file()
+    except OSError:
+        return False
 
 
 class PDFChunker(BaseChunker):
@@ -80,11 +103,18 @@ class PDFChunker(BaseChunker):
         Returns:
             List of Chunk objects
         """
-        # Open PDF
+        # Bytes are the indexed form. A string is accepted only when it is
+        # an existing file path. Any other string (including a PDF that was
+        # decoded as text) must not be passed to fitz.open: PyMuPDF treats a
+        # bare string as a filesystem path.
         if isinstance(content, bytes):
             doc = fitz.open(stream=content, filetype="pdf")
-        elif isinstance(content, str):
+        elif isinstance(content, str) and _is_pdf_filepath(content):
             doc = fitz.open(content)
+        elif isinstance(content, str):
+            raise ValueError(
+                "PDF content must be raw bytes or a path to an existing file"
+            )
         else:
             raise ValueError(f"Unsupported content type: {type(content)}")
 
