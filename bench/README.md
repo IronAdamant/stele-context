@@ -23,3 +23,14 @@ A confirmed slowdown is a bug. It is not waived.
 
 `STELE_CONTEXT_STORAGE_DIR` is set from `--storage-dir` when that flag is
 passed. Cold index wipes the store before every run.
+
+## First Rust B1 (measured, release build)
+
+Host: Linux 6.12.94+ x86_64, 4 vCPU, rustc 1.99.1, 10 runs of `target/release/stele-context`. The Python floor was measured on an 8 vCPU box; startup is single-threaded, and CI re-checks the floor on each OS.
+
+| Command | Rust median | Rust min–max | Peak RSS | Output | Python 1.5.1 median |
+|---|---:|---:|---:|---:|---:|
+| `--version` | 1.65 ms | 1.51–1.92 | 10.3 MB | 20 B | 79.4 ms |
+| `--help` | 1.69 ms | 1.51–1.83 | 10.3 MB | 327 B | 75.7 ms |
+
+Raw samples are `rust-b1.json`. CI runs the same floor check on Linux, macOS, and Windows.

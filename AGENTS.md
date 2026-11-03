@@ -97,3 +97,17 @@ Cold-start ritual: `doctor` → `query` (with `session_id`) → `agent_grep` / `
 ## HTTP vs stdio envelopes
 
 HTTP returns `{"success", "result"}` or `{"error"}`. Stdio MCP returns the **bare** tool result. Both are intentional; do not unify silently.
+
+## Rust 2.0 (in progress, not released)
+
+The rewrite lives in this repo beside the Python package. `[dependencies]` stays empty.
+
+```bash
+cargo test
+cargo build --release
+python -m parity verify --skip-corpora
+python -m bench --binary target/release/stele-context --group b1 --runs 10 --check-floor
+python scripts/check_zero_deps.py
+```
+
+`stele-context doctor` is JSON by default (`--human` for text). `--version` prints `stele-context 2.0.0`. Commands that are not implemented yet return `ok: false` and a non-zero exit. `stele-context-mcp` does the same until the stdio server lands. Do not tag, merge, or publish from a rewrite branch.

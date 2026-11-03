@@ -4,6 +4,12 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-03 - Rust 2.0.0 phase 1 skeleton
+
+- Std-only crate `stele-context` 2.0.0: JSON, contract envelopes, TOML subset, project root, gitignore walk, SHA-256, MD5, `doctor`, `--version`.
+- `[dependencies]` is empty. `stele-context-mcp` exits with `not_in_this_build` until the stdio server exists.
+- Release B1 on this 4 vCPU Linux host: `--version` median 1.65 ms, `--help` median 1.69 ms, both under the 1.5.1 floor (79.4 ms and 75.7 ms).
+
 ## 2026-11-03 - Rust 2.0.0 phase 0 parity harness
 
 - Added `parity/` (fixture goldens, extension inventory, CLI smoke, rich 13.9.4 and flask 3.1.0 capture hashes) and the recorded Python 1.5.1 floor.

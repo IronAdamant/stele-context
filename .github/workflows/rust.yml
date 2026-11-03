@@ -35,3 +35,72 @@ jobs:
 
       - name: Gate and harness tests
         run: python -m pytest tests/test_bench_gate.py tests/test_parity_harness.py -q --tb=short
+
+  rust:
+    name: rust (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            test: true
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            test: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            test: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            test: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            test: true
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            test: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt
+
+      - name: Set up Python
+        if: matrix.test
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Format
+        if: matrix.test && matrix.os == 'ubuntu-latest'
+        run: cargo fmt --check
+
+      - name: Zero dependencies
+        if: matrix.test && matrix.os == 'ubuntu-latest'
+        run: python scripts/check_zero_deps.py
+
+      - name: Test
+        if: matrix.test
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo test --release --target ${{ matrix.target }}
+
+      - name: Check
+        if: ${{ !matrix.test }}
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo check --release --target ${{ matrix.target }}
+
+      - name: B1 hard floor against the Python 1.5.1 baseline
+        if: matrix.test
+        shell: bash
+        run: |
+          ext=""
+          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
+          python -m bench \
+            --binary "target/${{ matrix.target }}/release/stele-context${ext}" \
+            --group b1 --runs 10 --check-floor
