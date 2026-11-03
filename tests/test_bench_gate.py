@@ -59,8 +59,19 @@ def test_identical_samples_are_not_a_regression() -> None:
 
 def test_large_shift_is_a_regression() -> None:
     verdict = regression([1.0] * MIN_RUNS, [2.0] * MIN_RUNS)
-    assert verdict["reject"] is True
+    assert verdict["ci_slower"] is True
     assert verdict["mw_slower"] is True
+    assert verdict["reject"] is True
+
+
+def test_mannwhitney_inside_overlapping_intervals_is_not_a_regression() -> None:
+    # Shifted by 3, but each 95% median interval still covers the other median.
+    baseline = [float(value) for value in range(MIN_RUNS)]
+    candidate = [float(value) + 3 for value in range(MIN_RUNS)]
+    verdict = regression(baseline, candidate)
+    assert verdict["mw_slower"] is True
+    assert verdict["ci_slower"] is False
+    assert verdict["reject"] is False
 
 
 def test_gate_refuses_short_samples() -> None:

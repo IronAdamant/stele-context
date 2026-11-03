@@ -1,10 +1,10 @@
 """D13 gate: interleaved main-versus-PR timings of the Python implementation.
 
 At least 15 runs of each tracked command are taken on one runner. CI uses
-16 so each side leads exactly half the pairs. The order alternates. A benchmark fails when the pull request
-is slower than the base beyond run-to-run noise: the 95% confidence
-intervals of the two medians do not overlap and the pull request sits
-entirely above the base, or a one-sided Mann-Whitney test gives p < 0.05.
+16 so each side leads exactly half the pairs. The order alternates. A
+benchmark fails only when both are true: the 95% confidence intervals of
+the medians do not overlap and the head sits entirely above the base, and
+a one-sided Mann-Whitney test gives p < 0.05.
 
 ``tools/list`` reply size is recorded and printed. It is not a failure by
 itself. The hard floor against the recorded Python baseline applies when a
@@ -158,8 +158,16 @@ def _isolated_project(checkout: Path, dest: Path) -> Path:
     return dest
 
 
-def _timed(argv: list[str], cwd: Path, env: dict[str, str], timeout: float) -> float:
+def _timed(
+    argv: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    timeout: float,
+    delay_s: float = 0.0,
+) -> float:
     started = time.perf_counter()
+    if delay_s > 0:
+        time.sleep(delay_s)
     proc = subprocess.run(
         argv,
         cwd=cwd,
@@ -289,14 +297,16 @@ def _mcp(command: Path) -> tuple[float, float, int]:
         shutil.rmtree(empty, ignore_errors=True)
 
 
-def _index_suite(binary: Path, project: Path) -> dict[str, float]:
+def _index_suite(
+    binary: Path, project: Path, detect_delay_s: float = 0.0
+) -> dict[str, float]:
     storage = Path(tempfile.mkdtemp(prefix="stele-gate-index-"))
     env = _env()
     base = [str(binary), "--storage-dir", str(storage)]
     try:
         cold = _timed([*base, "index", "stele_context"], project, env, 180.0)
         warm = _timed([*base, "index", "stele_context"], project, env, 180.0)
-        detect = _timed([*base, "detect"], project, env, 180.0)
+        detect = _timed([*base, "detect"], project, env, 180.0, delay_s=detect_delay_s)
         search = _timed(
             [
                 *base,
@@ -321,7 +331,10 @@ def _index_suite(binary: Path, project: Path) -> dict[str, float]:
 
 
 def measure(
-    binary: Path, mcp_binary: Path, project: Path
+    binary: Path,
+    mcp_binary: Path,
+    project: Path,
+    detect_delay_s: float = 0.0,
 ) -> tuple[dict[str, float], int]:
     env = _env()
     empty = _empty_dir()
@@ -335,7 +348,7 @@ def measure(
     initialize_ms, list_ms, list_bytes = _mcp(mcp_binary)
     samples["mcp-initialize"] = initialize_ms
     samples["mcp-tools-list"] = list_ms
-    samples.update(_index_suite(binary, project))
+    samples.update(_index_suite(binary, project, detect_delay_s))
     return samples, list_bytes
 
 
@@ -355,7 +368,13 @@ def _cleanup_worktree(repo: Path, dest: Path) -> None:
     shutil.rmtree(dest, ignore_errors=True)
 
 
-def run_gate(repo: Path, base_sha: str, head_sha: str, runs: int) -> dict:
+def run_gate(
+    repo: Path,
+    base_sha: str,
+    head_sha: str,
+    runs: int,
+    inject_detect_ms: float = 0.0,
+) -> dict:
     base_sha = _resolve(repo, base_sha)
     head_sha = _resolve(repo, head_sha)
     root = Path(tempfile.mkdtemp(prefix="stele-gate-"))
@@ -385,7 +404,10 @@ def run_gate(repo: Path, base_sha: str, head_sha: str, runs: int) -> dict:
             print(f"run {index + 1}/{runs} order {' '.join(order)}", flush=True)
             for side in order:
                 binary, mcp_binary = sides[side]
-                measured, size = measure(binary, mcp_binary, projects[side])
+                delay = inject_detect_ms / 1000.0 if side == "head" else 0.0
+                measured, size = measure(
+                    binary, mcp_binary, projects[side], detect_delay_s=delay
+                )
                 for name in BENCHES:
                     samples[name][side].append(measured[name])
                 list_bytes[side].append(size)
@@ -505,9 +527,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--base", default=os.environ.get("GATE_BASE_SHA", "HEAD"))
     parser.add_argument("--head", default=os.environ.get("GATE_HEAD_SHA", "HEAD"))
+    parser.add_argument(
+        "--inject-detect-ms",
+        type=float,
+        default=0.0,
+        help=(
+            "Add this many milliseconds inside the head detect timing. "
+            "For proving the gate rejects a real slowdown. CI leaves it at 0."
+        ),
+    )
     args = parser.parse_args(argv)
     require_runs(args.runs, args.allow_short)
-    report = run_gate(REPO, args.base, args.head, args.runs)
+    if args.inject_detect_ms < 0:
+        raise SystemExit("--inject-detect-ms must be >= 0")
+    report = run_gate(
+        REPO, args.base, args.head, args.runs, inject_detect_ms=args.inject_detect_ms
+    )
     _print_report(report)
     _write_summary(report)
     return 1 if report["failed"] else 0

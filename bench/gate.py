@@ -1,11 +1,16 @@
 """D13 regression gate.
 
-A candidate is slower than the baseline when either check says so:
+A candidate is slower than the baseline only when both checks say so:
 
 * the 95% confidence intervals of the two medians do not overlap and the
-  candidate interval sits entirely above the baseline interval, or
+  candidate interval sits entirely above the baseline interval, and
 * a one-sided Mann-Whitney test says the candidate sample is stochastically
   larger at p < 0.05.
+
+Either test alone is not a failure. Mann-Whitney by itself flags shifts that
+are still inside the run-to-run noise of the median, which is what happened
+when this gate compared a commit to itself. There is no fixed percentage
+tolerance: a shift that clears both checks fails, however small it looks.
 
 Both need at least 15 runs. A tie at exactly p = 0.05 is not a failure.
 The hard floor is separate: a Rust median must be strictly below the recorded
@@ -156,7 +161,7 @@ def regression(baseline: list[float], candidate: list[float]) -> dict:
         "ci_slower": ci_slower,
         "mannwhitney_p": p_value,
         "mw_slower": mw_slower,
-        "reject": ci_slower or mw_slower,
+        "reject": ci_slower and mw_slower,
     }
 
 
