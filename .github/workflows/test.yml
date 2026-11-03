@@ -194,5 +194,5 @@ jobs:
 
     - name: Run ruff
       run: |
-        ruff check stele_context/ tests/ bench/
-        ruff format --check stele_context/ tests/ bench/
+        ruff check stele_context/ tests/ parity/ bench/
+        ruff format --check stele_context/ tests/ parity/ bench/

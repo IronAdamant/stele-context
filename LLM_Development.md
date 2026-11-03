@@ -4,11 +4,16 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-03 - Rust 2.0.0 phase 0 parity harness
+
+- Added `parity/` (fixture goldens, extension inventory, CLI smoke, rich 13.9.4 and flask 3.1.0 capture hashes) and the recorded Python 1.5.1 floor.
+- Reference capture is stele-context 1.5.2 with tree-sitter off and numpy blocked. rich capture counts match the recorded sample: 475 files, 1097 chunks, 32687 symbols.
+- Python sources are unchanged. No tag, no merge, no publish.
+
 ## 2026-11-03 - D13 benchmark gate
 
-- `.github/workflows/benchmark-gate.yml` job `benchmark-gate` compares a pull request with its base on one runner: 15 interleaved runs of CLI startup, MCP initialize, tools/list, cold and warm index, detect, and keyword search.
-- A benchmark fails when the pull request is slower beyond run-to-run noise (non-overlapping 95% median intervals, or one-sided Mann-Whitney p < 0.05). tools/list size is reported.
-- On a push to main the two sides are the same commit, so the job still runs and stays green.
+- `.github/workflows/benchmark-gate.yml` job `benchmark-gate` compares a pull request with its base on one runner: 16 interleaved runs of CLI startup, MCP initialize, tools/list, cold and warm index, detect, and keyword search.
+- A benchmark fails only when both checks agree: non-overlapping 95% median intervals and one-sided Mann-Whitney p < 0.05. tools/list size is reported. The Python-baseline floor helper stays for Rust measurements.
 
 ## 2026-11-03 - v1.5.2 patch release prep
 

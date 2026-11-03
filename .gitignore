@@ -96,6 +96,10 @@ plans/local/
 # Stele's own local context cache
 .stele-context/
 
+# Parity corpora cache and Rust build output
+parity/.cache/
+target/
+
 # Agent-run artifacts (review outputs, work logs, automation state)
 findings/
 journal/
