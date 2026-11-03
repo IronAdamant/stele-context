@@ -1,5 +1,6 @@
 # D13: every pull request is compared with its base on one runner.
-# The check name is the job name, benchmark-gate, so it can be required.
+# Sixteen interleaved runs (at least fifteen). The check name is the job
+# name, benchmark-gate, so it can be required.
 
 name: Benchmark gate
 
@@ -44,4 +45,4 @@ jobs:
         env:
           GATE_BASE_SHA: ${{ steps.sha.outputs.base }}
           GATE_HEAD_SHA: ${{ steps.sha.outputs.head }}
-        run: python -m bench.ci_gate --runs 15
+        run: python -m bench.ci_gate --runs 16

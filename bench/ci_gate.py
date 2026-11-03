@@ -1,7 +1,7 @@
 """D13 gate: interleaved main-versus-PR timings of the Python implementation.
 
-Fifteen or more runs of each tracked command are taken on one runner,
-alternating which side goes first. A benchmark fails when the pull request
+At least 15 runs of each tracked command are taken on one runner. CI uses
+16 so each side leads exactly half the pairs. The order alternates. A benchmark fails when the pull request
 is slower than the base beyond run-to-run noise: the 95% confidence
 intervals of the two medians do not overlap and the pull request sits
 entirely above the base, or a one-sided Mann-Whitney test gives p < 0.05.
@@ -130,10 +130,32 @@ def _env(storage: Path | None = None) -> dict[str, str]:
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env.pop("STELE_CONTEXT_STORAGE_DIR", None)
+    # Same hash seed on both sides so dict order is not a source of noise.
+    env["PYTHONHASHSEED"] = "0"
     env["STELE_MCP_MODE"] = "lite"
     if storage is not None:
         env["STELE_CONTEXT_STORAGE_DIR"] = str(storage)
     return env
+
+
+def _empty_dir() -> Path:
+    return Path(tempfile.mkdtemp(prefix="stele-gate-empty-"))
+
+
+def _isolated_project(checkout: Path, dest: Path) -> Path:
+    """A project that contains only this checkout's package.
+
+    detect walks the project root. Pointing it at the whole git checkout
+    would time the extra files a pull request added, which is not the
+    implementation under test.
+    """
+    dest.mkdir(parents=True)
+    shutil.copytree(checkout / "stele_context", dest / "stele_context")
+    (dest / ".stele-context.toml").write_text(
+        "[stele-context]\nrespect_gitignore = false\n",
+        encoding="utf-8",
+    )
+    return dest
 
 
 def _timed(argv: list[str], cwd: Path, env: dict[str, str], timeout: float) -> float:
@@ -232,9 +254,10 @@ class _Mcp:
         self._drain.join(timeout=2)
 
 
-def _mcp(command: Path, cwd: Path) -> tuple[float, float, int]:
+def _mcp(command: Path) -> tuple[float, float, int]:
     storage = Path(tempfile.mkdtemp(prefix="stele-gate-mcp-"))
-    session = _Mcp(command, cwd, _env(storage))
+    empty = _empty_dir()
+    session = _Mcp(command, empty, _env(storage))
     try:
         started = time.perf_counter()
         session.send(
@@ -263,16 +286,17 @@ def _mcp(command: Path, cwd: Path) -> tuple[float, float, int]:
     finally:
         session.close()
         shutil.rmtree(storage, ignore_errors=True)
+        shutil.rmtree(empty, ignore_errors=True)
 
 
-def _index_suite(binary: Path, cwd: Path) -> dict[str, float]:
+def _index_suite(binary: Path, project: Path) -> dict[str, float]:
     storage = Path(tempfile.mkdtemp(prefix="stele-gate-index-"))
     env = _env()
     base = [str(binary), "--storage-dir", str(storage)]
     try:
-        cold = _timed([*base, "index", "stele_context"], cwd, env, 180.0)
-        warm = _timed([*base, "index", "stele_context"], cwd, env, 180.0)
-        detect = _timed([*base, "detect"], cwd, env, 180.0)
+        cold = _timed([*base, "index", "stele_context"], project, env, 180.0)
+        warm = _timed([*base, "index", "stele_context"], project, env, 180.0)
+        detect = _timed([*base, "detect"], project, env, 180.0)
         search = _timed(
             [
                 *base,
@@ -282,7 +306,7 @@ def _index_suite(binary: Path, cwd: Path) -> dict[str, float]:
                 "keyword",
                 "--json",
             ],
-            cwd,
+            project,
             env,
             180.0,
         )
@@ -296,16 +320,22 @@ def _index_suite(binary: Path, cwd: Path) -> dict[str, float]:
         shutil.rmtree(storage, ignore_errors=True)
 
 
-def measure(binary: Path, mcp_binary: Path, cwd: Path) -> tuple[dict[str, float], int]:
+def measure(
+    binary: Path, mcp_binary: Path, project: Path
+) -> tuple[dict[str, float], int]:
     env = _env()
-    samples = {
-        "cli-version": _timed([str(binary), "--version"], cwd, env, 60.0),
-        "cli-help": _timed([str(binary), "--help"], cwd, env, 60.0),
-    }
-    initialize_ms, list_ms, list_bytes = _mcp(mcp_binary, cwd)
+    empty = _empty_dir()
+    try:
+        samples = {
+            "cli-version": _timed([str(binary), "--version"], empty, env, 60.0),
+            "cli-help": _timed([str(binary), "--help"], empty, env, 60.0),
+        }
+    finally:
+        shutil.rmtree(empty, ignore_errors=True)
+    initialize_ms, list_ms, list_bytes = _mcp(mcp_binary)
     samples["mcp-initialize"] = initialize_ms
     samples["mcp-tools-list"] = list_ms
-    samples.update(_index_suite(binary, cwd))
+    samples.update(_index_suite(binary, project))
     return samples, list_bytes
 
 
@@ -340,16 +370,22 @@ def run_gate(repo: Path, base_sha: str, head_sha: str, runs: int) -> dict:
         _prepare(repo, head_sha, head_dir)
         base_bin, base_mcp = _install(root / "venv-base", base_dir)
         head_bin, head_mcp = _install(root / "venv-head", head_dir)
+        projects = {
+            "base": _isolated_project(base_dir, root / "proj-base"),
+            "head": _isolated_project(head_dir, root / "proj-head"),
+        }
         sides = {
-            "base": (base_bin, base_mcp, base_dir),
-            "head": (head_bin, head_mcp, head_dir),
+            "base": (base_bin, base_mcp),
+            "head": (head_bin, head_mcp),
         }
         for index in range(runs):
+            # Each side leads half the time when runs is even. 16 keeps the
+            # minimum of 15 and cancels a "whoever goes second is slower" effect.
             order = ("base", "head") if index % 2 == 0 else ("head", "base")
             print(f"run {index + 1}/{runs} order {' '.join(order)}", flush=True)
             for side in order:
-                binary, mcp_binary, cwd = sides[side]
-                measured, size = measure(binary, mcp_binary, cwd)
+                binary, mcp_binary = sides[side]
+                measured, size = measure(binary, mcp_binary, projects[side])
                 for name in BENCHES:
                     samples[name][side].append(measured[name])
                 list_bytes[side].append(size)
