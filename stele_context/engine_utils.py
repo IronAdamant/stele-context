@@ -14,10 +14,14 @@ from typing import Any
 def read_and_hash(path: Path, modality: str) -> tuple:
     """Read file content and compute SHA-256 hash.
 
-    Binary modalities (image/audio/video) read as bytes; everything else
-    reads as UTF-8 text. Returns `(content, sha256_hex)`.
+    Binary modalities (image, audio, video, and PDF) are returned as raw
+    bytes. PDF bytes must stay intact: a text decode replaces bytes that
+    are not valid UTF-8, and the PDF chunker then hands that string to
+    PyMuPDF, which treats a string as a filesystem path and crashes.
+    Every other modality is read as UTF-8 text. Returns
+    ``(content, sha256_hex)``.
     """
-    if modality in ("image", "audio", "video"):
+    if modality in ("image", "audio", "video", "pdf"):
         raw = path.read_bytes()
         return raw, hashlib.sha256(raw).hexdigest()
     content = path.read_text(encoding="utf-8", errors="replace")

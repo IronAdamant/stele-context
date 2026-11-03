@@ -35,7 +35,8 @@ Stele Context (engine.py) -- thin facade orchestrator (inherits engine_*_mixin.p
   |-- SessionManager (session.py)
   |-- SymbolGraphManager (symbol_graph.py) -- extraction, edges, staleness
   |-- SymbolExtractor (symbols.py) -- dispatcher + Python AST
-  \-- symbol_patterns.py -- Symbol dataclass + 10 language regex extractors
+  \-- symbol_patterns.py -- Symbol dataclass + regex extractors
+  \-- symbol_csharp.py -- C# declarations vs call references
 
 APIs:
   |-- CLI (cli.py + cli_metadata.py)

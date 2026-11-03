@@ -1,7 +1,13 @@
 ## [Unreleased]
 
 ### Fixed
+- **PDF indexing**: PDF files are read as raw bytes. Decoding them as text and passing the string to PyMuPDF made `fitz.open` treat that string as a filesystem path and crash. A string is opened as a path only when it is an existing file.
+- **C# symbols**: `.cs` files use a C# extractor. Method declarations are definitions. Calls such as `return Compute(a)`, `await SaveAsync(x)`, and `throw new InvalidOperationException(...)` are references.
+- **MCP 2**: the stdio server speaks both the mcp 1.x decorator API and the mcp 2.x `on_*` handler API, so the `mcp` extra stays `mcp>=1.0.0` and works with current mcp 2.x releases.
 - **Windows CI**: close SQLite storage before tempdir cleanup in `run_eval_suite` (WinError 32 on `stele_context.db`).
+
+### Changed
+- LICENSE copyright line is `Copyright (c) 2026 Aron Amos`. The license remains MIT.
 
 ## [1.5.1] - 2026-08-01
 

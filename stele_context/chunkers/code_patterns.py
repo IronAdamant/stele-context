@@ -192,6 +192,19 @@ REGEX_PATTERNS: dict[str, str] = {
         r"|(?:^|\n)(?:public\s+)?(?:private\s+)?(?:protected\s+)?"
         r"(?:static\s+)?function\s+\w+"
     ),
+    # Declarations only. Statement leads (return/await/throw/new/...) are
+    # excluded so a call such as `return Compute(a)` is not a chunk boundary.
+    "cs": (
+        r"(?:^|\n)[ \t]*(?:(?:public|private|protected|internal|static|abstract|"
+        r"sealed|partial|readonly|ref|file|unsafe|new)[ \t]+)*"
+        r"(?:class|interface|struct|enum|record)[ \t]+(?:class[ \t]+|struct[ \t]+)?"
+        r"[A-Za-z_]\w*"
+        r"|(?:^|\n)[ \t]*(?!(?:return|await|throw|if|else|for|foreach|while|"
+        r"switch|catch|new|var|using|lock)[ \t])"
+        r"(?:(?:public|private|protected|internal|static|abstract|sealed|"
+        r"virtual|override|async|partial|extern|unsafe)[ \t]+)+"
+        r"[\w.<>,\[\]?]+\s+[A-Za-z_]\w*\s*(?:<[^>\n]+>)?\s*\("
+    ),
     "swift": (
         r"(?:^|\n)(?:public\s+)?(?:private\s+)?(?:internal\s+)?"
         r"(?:open\s+)?(?:final\s+)?class\s+\w+"

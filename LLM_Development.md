@@ -4,6 +4,14 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-03 - PDF bytes, C# symbols, MCP 2
+
+- PDF indexing reads bytes so PyMuPDF is not given a decoded string as a path.
+- C# symbol extraction is a dedicated regex extractor. Calls are references.
+- MCP stdio supports mcp 1.x decorators and mcp 2.x `on_*` handlers. No `mcp<2` pin.
+- Dart was not added. PyPI `tree-sitter-dart` 0.1.0 is published by an individual (efrenbl/tree-sitter-dart), not the tree-sitter organization or the Dart project. `tree-sitter-language-pack` is a third-party bundle, not a Dart parser from those publishers.
+- LICENSE copyright line is `Copyright (c) 2026 Aron Amos`. MIT terms are unchanged.
+
 ## 2026-08-01 - Remaining audit full remediation
 
 - Closed residual audit matrix (docs honesty, full-mode MCP schemas, query `applied_defaults` + search knobs, CLI composite tools, scan_new/detect session defaults, design-ceiling WONTFIX stamps). Plan: `plan/remaining-audit-full-remediation.md`.

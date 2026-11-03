@@ -82,7 +82,7 @@ Stele builds a graph of how symbols (functions, classes, variables, imports) con
 - Python: Uses stdlib `ast` for precise extraction (AST walk). Falls back to regex if parsing fails.
 - JavaScript/TypeScript: Regex patterns for functions, classes, const/let/var, imports, requires, module.exports (including destructured exports and spread re-exports), method calls, DOM APIs.
 - HTML/CSS: Cross-language linking — HTML class/id attributes connect to CSS selectors, `<script src>` connects to JS files.
-- Java, Go, Rust, C/C++, Ruby, PHP: Regex patterns for language-specific constructs.
+- Java, Go, Rust, C/C++, C#, Ruby, PHP: Regex patterns for language-specific constructs. C# declarations are definitions; call expressions are references.
 
 **Edge resolution** — After extraction, references are matched to definitions across files. Module path hints (from import statements) disambiguate when multiple files define the same name. A noise filter (`_NOISE_REFS`) suppresses edges through ubiquitous names like `path`, `fs`, `console`, `toString`, `getStats`, etc.
 
@@ -101,7 +101,7 @@ Files are split into meaningful chunks rather than arbitrary fixed-size blocks:
 |----------|---------------|----------|
 | Python | stdlib `ast` (always available) | regex |
 | JS/TS, Java, C/C++, Go, Rust, Ruby, PHP | tree-sitter (optional) | regex patterns |
-| Shell, Swift, SQL, config files | regex patterns | line-based |
+| Shell, Swift, C#, SQL, config files | regex patterns | line-based |
 
 **Merge guard** — Adjacent chunks are merged if their signatures are similar enough (configurable threshold), but code chunks starting with definition boundaries (`def`, `class`, `function`, `const`, `describe(`, `it(`, `test(`) are never merged with the preceding chunk.
 
