@@ -12,6 +12,12 @@ Chronological record of development activity on Stele Context, maintained for LL
 - Dart was not added. PyPI `tree-sitter-dart` 0.1.0 is published by an individual (efrenbl/tree-sitter-dart), not the tree-sitter organization or the Dart project. `tree-sitter-language-pack` is a third-party bundle, not a Dart parser from those publishers.
 - LICENSE copyright line is `Copyright (c) 2026 Aron Amos`. MIT terms are unchanged.
 
+## 2026-11-03 - Non-git project roots and Swift symbols
+
+- `detect_project_root` treats `.stele-context.toml` (including an empty file) as a root marker. Nearest `.git` or marker wins walking up from the working directory. Neither marker still returns None, so storage stays `~/.stele-context/`.
+- Swift regex extractor in `symbol_swift.py` (`class`, `struct`, `enum`, `protocol`, `extension`, `func`, `actor`). `tree-sitter-swift>=0.7.4` is in the `tree-sitter` and `all` extras; `EXT_TO_GRAMMAR` / `DEFINITION_TYPES` use the grammar's real node types (`class_declaration` covers struct, enum, extension, and actor). Dart stays out: only an unofficial grammar exists.
+- Tests: `tests/test_project_root_marker.py`, `tests/test_swift_symbols.py`.
+
 ## 2026-08-01 - Remaining audit full remediation
 
 - Closed residual audit matrix (docs honesty, full-mode MCP schemas, query `applied_defaults` + search knobs, CLI composite tools, scan_new/detect session defaults, design-ceiling WONTFIX stamps). Plan: `plan/remaining-audit-full-remediation.md`.

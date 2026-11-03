@@ -169,7 +169,7 @@ This is a security posture, not a packaging quirk. Every dependency in an AI-age
 Optional extras add capabilities **only if you opt in**:
 
 ```bash
-pip install stele-context[tree-sitter]   # Better parsing for 9 more languages
+pip install stele-context[tree-sitter]   # Better parsing for 10 more languages
 pip install stele-context[image,pdf]     # Image and PDF support
 pip install stele-context[performance]   # Faster math with numpy
 pip install stele-context[all]           # Everything
@@ -181,7 +181,7 @@ pip install stele-context[all]           # Everything
 | Extra | What it adds |
 |-------|-------------|
 | `performance` | Faster math for search (numpy, msgspec) |
-| `tree-sitter` | Better code parsing for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP |
+| `tree-sitter` | Better code parsing for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP, Swift |
 | `image` | Index and search images (Pillow) |
 | `pdf` | Extract text from PDFs (pymupdf) |
 | `audio` | Index audio files (librosa) |
@@ -230,7 +230,7 @@ print(f"{impact['affected_files']} files could be affected")
 
 ## Configuration
 
-Create a `.stele-context.toml` in your project root to customize behavior:
+Create a `.stele-context.toml` in your project root to customize behavior. The same file is the project-root marker: Stele walks upward from the working directory and stops at the nearest `.git` or `.stele-context.toml`. An empty file is enough for a folder that is not a git repository. Without `.git` and without that file, the folder shares the global `~/.stele-context/` index with every other unmarked folder.
 
 ```toml
 [stele-context]
@@ -316,6 +316,8 @@ Yes. Built-in document locking, optimistic version tracking, and a conflict log 
 
 **Where is the data stored?**
 In a `.stele-context/` folder in your project root. It's a SQLite database plus index files. Each git worktree gets its own, and history tables auto-prune so it doesn't grow unbounded.
+
+The root is the nearest directory, walking up from where you launched Stele, that contains `.git` or a `.stele-context.toml` file. A directory with neither does not get its own index: storage falls back to `~/.stele-context/`, and every other unmarked folder shares that one index. Add an empty `.stele-context.toml` at a non-git project's root to give that project its own index. A marker inside a git checkout wins over the higher `.git` when you launch Stele from that subtree, and a nearer `.git` wins over a marker higher up.
 
 **How is this different from CLAUDE.md or project memory files?**
 CLAUDE.md gives your agent instructions. Stele Context gives it a searchable index of your entire codebase — every function, every import, every file relationship — plus change tracking, so it can answer "where is this used?" or "what changed since I last read this?" without re-reading anything.

@@ -23,7 +23,7 @@
 | `stele_context/engine_search_mixin.py` | Mixin: search, agent_grep, search_text, get_context, session history helpers, working-tree indexing | search_engine, agent_grep, engine_utils | (via test_engine.py, test_search_engine.py) |
 | `stele_context/engine_symbol_mixin.py` | Mixin: find_references, find_definition, impact_radius, coupling, dynamic symbols | (self-contained; uses symbol_manager via self) | (via test_symbols.py) |
 | `stele_context/engine_lock_mixin.py` | Mixin: document_lock (unified) + per-op lock methods, agent registry, notifications | (self-contained; uses _coordination/storage via self) | (via test_conflicts.py, test_worktree_safety.py) |
-| `stele_context/engine_utils.py` | Path normalization, lock routing, read_and_hash, env checks | coordination, env_checks | (via test_engine.py, test_worktree_safety.py) |
+| `stele_context/engine_utils.py` | Path normalization, lock routing, read_and_hash, env checks. `detect_project_root` stops at the nearest `.git` or `.stele-context.toml` | coordination, env_checks | (via test_engine.py, test_worktree_safety.py, test_project_root_marker.py) |
 | `stele_context/indexing.py` | Document indexing: chunk, store, merge, expand | chunkers.base, chunkers.numpy_compat | test_engine.py |
 | `stele_context/search_engine.py` | Hybrid search (HNSW+BM25, weak-cosine BM25 fallback, path_prefix), get_context, map/stats, project_brief, search bounds | bm25, index, index_store, agent_response, chunkers | test_engine.py, test_search_engine.py |
 | `stele_context/index_health.py` | `compute_index_health_snapshot()` — alerts, staleness for map/stats | None | test_index_health.py |
@@ -49,6 +49,7 @@
 | `stele_context/symbols.py` | `SymbolExtractor` - dispatcher + Python AST | symbol_patterns | test_symbols.py |
 | `stele_context/symbol_patterns.py` | `Symbol` dataclass + language regex extractors (C/C++ no longer claims C#), const alias tracking, destructured module.exports parsing | None | test_symbols.py |
 | `stele_context/symbol_csharp.py` | C# regex extractor: declarations are definitions, calls such as `return Compute(a)` are references | symbol_patterns | test_csharp_symbols.py |
+| `stele_context/symbol_swift.py` | Swift regex extractor: class/struct/enum/protocol/extension/actor/func declarations are definitions; calls are references | symbol_patterns | test_swift_symbols.py |
 | `stele_context/symbol_graph.py` | `SymbolGraphManager` - edges, staleness, queries, `impact_radius` summary_mode | symbols, storage | test_symbols.py |
 | `stele_context/coordination.py` | `CoordinationBackend` - cross-worktree shared DB | agent_registry, change_notifications, lock_ops | test_worktree_safety.py |
 | `stele_context/change_notifications.py` | Change notification storage for coordination DB | None | test_worktree_safety.py |
