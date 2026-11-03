@@ -1,0 +1,47 @@
+# D13: every pull request is compared with its base on one runner.
+# The check name is the job name, benchmark-gate, so it can be required.
+
+name: Benchmark gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  benchmark-gate:
+    name: benchmark-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve base and head
+        id: sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            git fetch --no-tags origin "${{ github.base_ref }}"
+          else
+            base="${{ github.sha }}"
+            head="${{ github.sha }}"
+          fi
+          git cat-file -e "$base^{commit}"
+          git cat-file -e "$head^{commit}"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
+      - name: Interleaved main versus pull request
+        env:
+          GATE_BASE_SHA: ${{ steps.sha.outputs.base }}
+          GATE_HEAD_SHA: ${{ steps.sha.outputs.head }}
+        run: python -m bench.ci_gate --runs 15

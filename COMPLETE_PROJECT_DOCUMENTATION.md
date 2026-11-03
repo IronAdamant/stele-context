@@ -130,6 +130,10 @@
 | `tests/test_next_stage_guidance.py` | doctor ritual, enrichment_plan, lite MCP tools | (see file) |
 | `tests/test_eval_search_quality.py` | Search quality eval harness wiring | (see file) |
 | `tests/test_p0_audit_fixes.py` | MCP schema/engine alignment (session_id, query history, save_kv_state) | (see file) |
+| `tests/test_bench_gate.py` | D13 median CI and Mann-Whitney gate | (see file) |
+| `bench/gate.py` | D13 statistics: median interval, Mann-Whitney, optional Rust floor | none |
+| `bench/ci_gate.py` | Interleaved main-versus-PR benchmark runner | bench/gate.py |
+| `.github/workflows/benchmark-gate.yml` | Required-style `benchmark-gate` check on every pull request and on main | bench/ci_gate.py |
 
 **Total:** run `pytest` for the current count (grows with the suite). Historical snapshot: 891 pass, 1 skipped without MCP SDK (as of 2026-04-17) — do not treat that number as live truth.
 
