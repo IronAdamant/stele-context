@@ -37,6 +37,7 @@ Stele Context (engine.py) -- thin facade orchestrator (inherits engine_*_mixin.p
   |-- SymbolExtractor (symbols.py) -- dispatcher + Python AST
   \-- symbol_patterns.py -- Symbol dataclass + regex extractors
   \-- symbol_csharp.py -- C# declarations vs call references
+  \-- symbol_swift.py -- Swift declarations vs call references
 
 APIs:
   |-- CLI (cli.py + cli_metadata.py)

@@ -113,6 +113,18 @@ DEFINITION_TYPES: dict[str, frozenset] = {
             "namespace_definition",
         }
     ),
+    # tree-sitter-swift uses class_declaration for class, struct, enum,
+    # extension, and actor. struct_declaration / enum_declaration are not
+    # node types in that grammar.
+    "swift": frozenset(
+        {
+            "class_declaration",
+            "protocol_declaration",
+            "function_declaration",
+            "typealias_declaration",
+            "import_declaration",
+        }
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -138,6 +150,7 @@ EXT_TO_GRAMMAR: dict[str, tuple[str, str]] = {
     "rs": ("tree_sitter_rust", "rust"),
     "rb": ("tree_sitter_ruby", "ruby"),
     "php": ("tree_sitter_php", "php"),
+    "swift": ("tree_sitter_swift", "swift"),
 }
 
 # ---------------------------------------------------------------------------
@@ -206,10 +219,14 @@ REGEX_PATTERNS: dict[str, str] = {
         r"[\w.<>,\[\]?]+\s+[A-Za-z_]\w*\s*(?:<[^>\n]+>)?\s*\("
     ),
     "swift": (
-        r"(?:^|\n)(?:public\s+)?(?:private\s+)?(?:internal\s+)?"
-        r"(?:open\s+)?(?:final\s+)?class\s+\w+"
-        r"|(?:^|\n)(?:public\s+)?(?:private\s+)?(?:internal\s+)?"
-        r"(?:static\s+)?func\s+\w+"
+        r"(?:^|\n)[ \t]*(?:(?:public|private|internal|fileprivate|open|final|"
+        r"indirect|package)(?:\([^)\n]*\))?[ \t]+)*"
+        r"(?:class|struct|enum|protocol|actor|extension)[ \t]+"
+        r"(?!func\b|var\b|let\b|subscript\b)[A-Za-z_]\w*"
+        r"|(?:^|\n)[ \t]*(?:(?:public|private|internal|fileprivate|open|final|"
+        r"static|class|override|mutating|nonmutating|required|convenience|"
+        r"package)(?:\([^)\n]*\))?[ \t]+)*"
+        r"func[ \t]+[A-Za-z_]\w*"
     ),
     "sh": _SHELL_PATTERN,
     "bash": _SHELL_PATTERN,

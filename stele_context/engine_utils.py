@@ -73,12 +73,20 @@ def resolve_path(normalized: str, project_root: Path | None) -> Path:
 
 
 def detect_project_root(explicit: str | None = None) -> Path | None:
-    """Detect project root by walking up from CWD looking for .git."""
+    """Walk upward from the working directory for a project root.
+
+    The nearest directory that contains ``.git`` (a file or a directory,
+    so worktrees count) or a ``.stele-context.toml`` file wins. An empty
+    marker file is enough, which gives a non-git project its own
+    ``<root>/.stele-context/`` index. An explicit root is returned as
+    given. When neither marker exists, returns None and storage falls
+    back to ``~/.stele-context``.
+    """
     if explicit is not None:
         return Path(explicit).resolve()
     cwd = Path.cwd().resolve()
     for parent in (cwd, *cwd.parents):
-        if (parent / ".git").exists():
+        if (parent / ".git").exists() or (parent / ".stele-context.toml").is_file():
             return parent
     return None
 

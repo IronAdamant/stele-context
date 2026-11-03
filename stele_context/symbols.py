@@ -28,6 +28,7 @@ from stele_context.symbol_patterns import (
     extract_ruby,
     extract_rust,
 )
+from stele_context.symbol_swift import extract_swift
 
 # Names too common/ambiguous to create useful cross-file edges.
 # Applied only to references (not definitions) during resolution.
@@ -268,7 +269,7 @@ _NOISE_REFS: frozenset = frozenset(
 class SymbolExtractor:
     """Extract symbols from code content by language.
 
-    Supports Python (AST), JS/TS, HTML, CSS, Java, Go, Rust, C/C++, and C#.
+    Supports Python (AST), JS/TS, HTML, CSS, Java, Go, Rust, C/C++, C#, and Swift.
     All extraction uses stdlib only (ast + re).
     """
 
@@ -305,6 +306,8 @@ class SymbolExtractor:
             return extract_rust(content, document_path, chunk_id)
         if ext in ("cs", "csharp"):
             return extract_csharp(content, document_path, chunk_id)
+        if ext == "swift":
+            return extract_swift(content, document_path, chunk_id)
         if ext in ("c", "cpp", "cc", "cxx", "h", "hpp", "hxx"):
             return extract_c(content, document_path, chunk_id)
         if ext == "rb":

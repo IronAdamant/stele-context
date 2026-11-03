@@ -3,7 +3,7 @@ Code chunker for Stele.
 
 Splits code files into semantically coherent chunks using:
   - Python stdlib ast for Python files
-  - tree-sitter for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP (when installed)
+  - tree-sitter for JS/TS, Java, C/C++, Go, Rust, Ruby, PHP, Swift (when installed)
   - regex patterns as fallback for all languages
 
 Tree-sitter is optional: pip install stele[tree-sitter]
