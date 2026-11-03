@@ -4,6 +4,11 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-03 - v1.5.2 patch release prep
+
+- Version is 1.5.2 in `pyproject.toml`, `stele_context/__init__.py`, and the COMPLETE_PROJECT_DOCUMENTATION header. No tag and no PyPI publish.
+- `mcp` and `all` extras are `mcp>=1.0.0,<3`. Stdio smoke (`scripts/mcp_stdio_smoke.py`) speaks `initialize`, `tools/list`, and `tools/call` to the installed `stele-context-mcp` on mcp 1.30.0 and on unpinned mcp 2.x.
+
 ## 2026-11-03 - PDF bytes, C# symbols, MCP 2
 
 - PDF indexing reads bytes so PyMuPDF is not given a decoded string as a path.

@@ -61,11 +61,13 @@ class _HandlerServer:
 
 
 class TestMcpDependency:
-    def test_extra_allows_mcp_2(self):
+    def test_extra_spans_mcp_1_and_2(self):
         text = Path("pyproject.toml").read_text(encoding="utf-8")
-        compact = text.replace(" ", "")
+        compact = "".join(text.split())
+        # mcp extra and all extra. 1.x decorators and 2.x handlers are tested;
+        # mcp 3 is outside that range. An open lower bound would install it.
+        assert compact.count('"mcp>=1.0.0,<3"') == 2
         assert "mcp<2" not in compact
-        assert compact.count("mcp>=1.0.0") >= 2
 
 
 class TestApiSelection:

@@ -1,6 +1,6 @@
 # Stele Context - Complete Project Documentation
 
-**Last updated:** 2026-11-03 · **Release:** v1.5.1 (Grok Build)
+**Last updated:** 2026-11-03 · **Release:** v1.5.2 (Grok Build)
 
 ## Documentation (root)
 
@@ -74,6 +74,7 @@
 | `stele_context/cli.py` | CLI entry point (`stele-context` command) | engine | (manual testing) |
 | `stele_context/cli_metadata.py` | CLI metadata/annotation subcommands | engine | (manual testing) |
 | `stele_context/cli_release.py` | `stele-context release` command, delegates to scripts/release.py | None (subprocess) | (manual testing) |
+| `scripts/mcp_stdio_smoke.py` | Stdio probe: build/install the wheel, then `initialize`, `tools/list`, and `tools/call` against `stele-context-mcp` | None | CI `mcp-stdio-smoke` |
 | `stele_context/mcp_server.py` | HTTP REST server (unified tool registry, threaded) + tool dispatch | tool_registry | test_mcp_server.py |
 | `stele_context/mcp_handlers.py` | Backward-compat shim (re-exports from mcp_server) | mcp_server, tool_registry | test_mcp_server.py |
 | `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas, modality flags; modes **lite** (default high-leverage) / **standard** (broader) / **full** (adds deprecated singleton tool names). Do not hard-code a single “N tools” count — list tools via registry/`doctor` | mcp_tools_primary | (via test_mcp_server.py, test_mcp_stdio.py, test_next_stage_guidance.py) |
