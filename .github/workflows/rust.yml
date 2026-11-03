@@ -122,6 +122,12 @@ jobs:
           RUSTFLAGS: "-D warnings"
         run: cargo check --release --target ${{ matrix.target }}
 
+      - name: Release binary
+        if: matrix.test
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo build --release --target ${{ matrix.target }}
+
       - name: B1 hard floor against the Python 1.5.1 baseline
         if: matrix.test
         shell: bash
