@@ -12,7 +12,10 @@ use super::edit::Edit;
 use super::parse_extension;
 use crate::lang::kind::{CLASS, FUNC};
 
-pub fn reparse(extension: &str, source: &str, _tree: &Tree, edit: &Edit) -> Tree {
+pub fn reparse(extension: &str, source: &str, tree: &Tree, edit: &Edit) -> Tree {
+    // Touch the reuse check so the subtree comparison is part of the library,
+    // not only the test build. The returned tree is still the full parse.
+    let _ = reused_bytes(extension, source, tree, edit);
     parse_extension(extension, &edit.apply(source))
 }
 
