@@ -4,6 +4,12 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-03 - D13 benchmark gate
+
+- `.github/workflows/benchmark-gate.yml` job `benchmark-gate` compares a pull request with its base on one runner: 15 interleaved runs of CLI startup, MCP initialize, tools/list, cold and warm index, detect, and keyword search.
+- A benchmark fails when the pull request is slower beyond run-to-run noise (non-overlapping 95% median intervals, or one-sided Mann-Whitney p < 0.05). tools/list size is reported.
+- On a push to main the two sides are the same commit, so the job still runs and stays green.
+
 ## 2026-11-03 - v1.5.2 patch release prep
 
 - Version is 1.5.2 in `pyproject.toml`, `stele_context/__init__.py`, and the COMPLETE_PROJECT_DOCUMENTATION header. No tag and no PyPI publish.
