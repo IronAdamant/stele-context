@@ -111,3 +111,5 @@ python scripts/check_zero_deps.py
 ```
 
 `stele-context doctor` is JSON by default (`--human` for text). `--version` prints `stele-context 2.0.0`. Commands that are not implemented yet return `ok: false` and a non-zero exit. `stele-context-mcp` does the same until the stdio server lands. Do not tag, merge, or publish from a rewrite branch.
+
+`cargo test` also checks the parsing core: Python and JSON round-trip, fixture symbol parity, and incremental reparse. A corpus cache from `python -m parity capture` makes the round-trip test cover rich and flask; without the cache that test skips.

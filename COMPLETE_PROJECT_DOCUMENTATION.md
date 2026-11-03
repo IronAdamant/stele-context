@@ -137,7 +137,7 @@
 | `parity/` | Python 1.5.2 parity harness: fixtures, goldens, corpus hashes, CLI smoke | stele_context |
 | `.github/workflows/benchmark-gate.yml` | Required-style `benchmark-gate` check on every pull request and on main | bench/ci_gate.py |
 | `.github/workflows/rust.yml` | Parity harness on 3 OSes; Rust test/check on 6 targets; B1 floor | parity, bench, Cargo.toml |
-| `Cargo.toml`, `src/` | Rust 2.0.0 std-only crate. Phase 1: doctor, JSON, config, root, walk, hashes | none |
+| `Cargo.toml`, `src/` | Rust 2.0.0 std-only crate. Phases 1–2: doctor, JSON, config, root, walk, hashes, parsing core (Python and JSON) | none |
 | `scripts/check_zero_deps.py` | Fails if Cargo.toml or Cargo.lock names any crate but stele-context | none |
 
 **Total:** run `pytest` for the current count (grows with the suite). Historical snapshot: 891 pass, 1 skipped without MCP SDK (as of 2026-04-17) — do not treat that number as live truth.

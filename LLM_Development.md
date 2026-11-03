@@ -4,6 +4,12 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-03 - Rust 2.0.0 phase 2 parsing core
+
+- Shared tree plus Python and JSON grammars. Every cached rich and flask file round-trips. Broken and random bytes do not panic.
+- Python fixture symbols match the 1.5.2 golden (tree-sitter off). 1,000 random edits reparse equal to a full parse, and an interior edit reuses the surrounding functions.
+- Chunk-id and signature bit equality stays in phase 3.
+
 ## 2026-11-03 - Rust 2.0.0 phase 1 skeleton
 
 - Std-only crate `stele-context` 2.0.0: JSON, contract envelopes, TOML subset, project root, gitignore walk, SHA-256, MD5, `doctor`, `--version`.

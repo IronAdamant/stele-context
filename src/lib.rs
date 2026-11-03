@@ -7,7 +7,9 @@ pub mod doctor;
 pub mod gitignore;
 pub mod hash;
 pub mod json;
+pub mod lang;
 pub mod root;
+pub mod syntax;
 pub mod walk;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

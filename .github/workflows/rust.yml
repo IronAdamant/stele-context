@@ -83,6 +83,33 @@ jobs:
         if: matrix.test && matrix.os == 'ubuntu-latest'
         run: python scripts/check_zero_deps.py
 
+      - name: Fetch parity corpora
+        if: matrix.test
+        shell: bash
+        run: |
+          python - << 'PY'
+          import hashlib, json, tarfile, urllib.request
+          from pathlib import Path
+          meta = json.loads(Path("parity/goldens/corpora.json").read_text())
+          cache = Path("parity/.cache")
+          cache.mkdir(parents=True, exist_ok=True)
+          for row in meta["corpora"]:
+              dest = cache / f"{row['id']}.tar.gz"
+              if not dest.is_file():
+                  req = urllib.request.Request(row["url"], headers={"User-Agent": "stele-context-parity/2.0.0"})
+                  dest.write_bytes(urllib.request.urlopen(req, timeout=120).read())
+              blob = dest.read_bytes()
+              digest = hashlib.sha256(blob).hexdigest()
+              if digest != row["tarball_sha256"]:
+                  raise SystemExit(f"{row['id']} sha256 {digest}")
+              root = cache / row["id"]
+              if not root.exists() or not any(root.iterdir()):
+                  root.mkdir(parents=True, exist_ok=True)
+                  with tarfile.open(dest, "r:gz") as archive:
+                      archive.extractall(root, filter="data")
+          print("corpora ready")
+          PY
+
       - name: Test
         if: matrix.test
         env:
