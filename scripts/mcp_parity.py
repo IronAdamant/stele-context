@@ -193,12 +193,10 @@ def blank_graph(value):
         for key in (
             "max_level",
             "avg_connections",
-            "insert_count",
-            "node_count",
+            "hnsw_span",
             "database_size_bytes",
             "page_count",
             "wal_size_bytes",
-            "hnsw_span",
         ):
             if key in value:
                 value[key] = "store"
@@ -221,10 +219,14 @@ def timestamps_ok(left, right, bad):
                 "expires_at", "latest_timestamp", "indexed_at", "at",
                 "last_heartbeat", "file_mtime", "document_indexed_at",
                 "stored_last_modified", "started_at", "indexed_at",
-                "latest_indexed_at", "seconds_since_last_index",
-                "read_at", "timestamp",
+                "latest_indexed_at", "seconds_since_last_index", "read_at", "timestamp",
             } and isinstance(lv, (int, float)) and isinstance(rv, (int, float)):
-                if isinstance(lv, bool) or isinstance(rv, bool):
+                if key == "seconds_since_last_index":
+                    if abs(float(lv) - float(rv)) <= 5:
+                        out_l[key] = out_r[key] = "fresh"
+                    else:
+                        out_l[key], out_r[key] = lv, rv
+                elif isinstance(lv, bool) or isinstance(rv, bool):
                     out_l[key], out_r[key] = lv, rv
                 elif type(lv) is int or type(rv) is int:
                     bad.append(key)
@@ -285,17 +287,6 @@ def documented(name, left, right):
                 for key in SQLITE_FIELDS:
                     health.pop(key, None)
         notes.append("sqlite pragma and database file fields")
-        for side in (left, right):
-            health = side.get("db_health") if isinstance(side, dict) else None
-            if isinstance(health, dict):
-                for key in (
-                    "recent_operations_1h",
-                    "recent_failures_1h",
-                    "busy_ratio",
-                    "recommended_action",
-                ):
-                    health.pop(key, None)
-        notes.append("operation_log is the SQLite telemetry table")
     if name == "stats" and isinstance(left, dict) and isinstance(right, dict):
         storage = left.get("storage") if isinstance(left.get("storage"), dict) else None
         other = right.get("storage") if isinstance(right.get("storage"), dict) else None
@@ -303,6 +294,12 @@ def documented(name, left, right):
             storage.pop("kv_cache_size_bytes", None)
             other.pop("kv_cache_size_bytes", None)
             notes.append("kv_cache_size_bytes is zlib files on 1.5.2")
+        index = left.get("index") if isinstance(left.get("index"), dict) else None
+        other_index = right.get("index") if isinstance(right.get("index"), dict) else None
+        if isinstance(index, dict) and isinstance(other_index, dict):
+            index.pop("insert_count", None)
+            other_index.pop("insert_count", None)
+            notes.append("insert_count counts HNSW reinserts; rust reports the chunk count")
     if name == "get_supported_formats" and isinstance(left, dict) and isinstance(right, dict):
         lf = left.get("formats") if isinstance(left.get("formats"), dict) else {}
         rf = right.get("formats") if isinstance(right.get("formats"), dict) else {}
@@ -398,7 +395,7 @@ def main() -> int:
         ("coupling", {"document_path": "src/main.py", "mode": "edges"}),
         ("get_context", {"document_paths": ["src/calc.py"], "session_id": "s1"}),
         ("doctor", {}),
-        ("map", {"compact": True}),
+        ("map", {"compact": True, "path_prefix": "src"}),
         ("document_lock", {"action": "status", "document_path": "src/calc.py"}),
         ("annotations", {"action": "get", "target": "src/calc.py", "target_type": "document"}),
         ("register_dynamic_symbols", {"symbols": [{"name": "on_hook", "kind": "function", "document_path": "src/calc.py"}], "agent_id": "dyn-agent"}),
@@ -406,7 +403,7 @@ def main() -> int:
         ("remove_dynamic_symbols", {"agent_id": "dyn-agent"}),
         ("detect_modality", {"path": "docs/report.pdf"}),
         ("get_supported_formats", {}),
-        ("enrichment_plan", {"top_n": 15, "min_tokens": 20}),
+        ("enrichment_plan", {"top_n": 5, "min_tokens": 1}),
         ("get_search_history", {"session_id": "s1"}),
         ("get_session_read_files", {"session_id": "s1"}),
         ("detect_changes", {}),

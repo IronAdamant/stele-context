@@ -146,7 +146,7 @@ Exit codes in 2.0: 0 success, 1 operation error, 2 usage. A closed stdout pipe e
 
 | Command | Mark | 2.0 |
 | --- | --- | --- |
-| `doctor`, `index`, `remove`, `detect`, `stats`, `map`, `project-brief`, `search`, `search-text`, `agent-grep`, `query`, `find-definition`, `find-references`, `impact-radius`, `coupling`, `enrichment-plan`, `history`, `init`, `serve`, `serve-mcp`, `clear`, `annotations`, `get-annotations` | same names | Present. `annotations` and `get-annotations` are listed in `--help`. `get-annotations --target PATH` filters. `search-text --path-prefix` is rejected (exit 2), the same as 1.5.2 argparse. |
+| `doctor`, `index`, `remove`, `detect`, `stats`, `map`, `project-brief`, `search`, `search-text`, `agent-grep`, `query`, `find-definition`, `find-references`, `impact-radius`, `coupling`, `enrichment-plan`, `history`, `init`, `serve`, `serve-mcp`, `clear`, `annotations`, `annotate`, `delete-annotation`, `update-annotation`, `get-annotations` | same names | Present and listed in `--help`. `annotate TARGET --type --content` creates a note. `delete-annotation ID` and `update-annotation ID` match 1.5.2. `get-annotations --target PATH` filters. `map --path-prefix` limits documents. `enrichment-plan --top-n` limits candidates. `search-text --path-prefix` is rejected (exit 2). |
 | `index` with no path | intentional change | Indexes `.`. 1.5 requires at least one path. |
 | `index` of a directory | same result keys | Drops stored documents under that directory that the walk no longer sees. `index one-file` does not drop other documents. The result matches 1.5.2: `indexed` (path, chunk_count, total_tokens, modality), `skipped` (path, reason, chunk_count), `errors`, `conflicts`, `total_chunks`, `total_tokens`. |
 | `index --force` and `--force-reindex` | same effect | Both reindex. There is no summaries or `expected_versions` flag. |
@@ -190,7 +190,7 @@ Handshake protocol versions: `2026-07-28`, `2025-11-25`, `2025-06-18`.
 
 | Surface | Mark | What a caller sees |
 | --- | --- | --- |
-| Stdio `tools/list` | intentional change | `inputSchema` is `{"type":"object"}` with no properties. `description` is `stele-context <name>`, except removed names, whose description is `Removed in 2.0. Use <replacement>.` |
+| Stdio `tools/list` | intentional change on lite | Lite `inputSchema` is `{"type":"object"}` with no properties, so the reply stays the 2.0.0 size. Standard and full list the properties. `description` is `stele-context <name>`, except removed names, whose description is `Removed in 2.0. Use <replacement>.` |
 | HTTP `GET /tools` | intentional change | The body is the 1.5 lite schema file (`src/mcp/http_tools.json`): `name`, `description`, and `parameters` with the 1.5 properties. The call path does not read every property. Unknown keys are ignored. |
 | HTTP tool set | intentional change | `POST /call` allows lite names only, even when `STELE_MCP_MODE` is `standard` or `full`. 1.5 HTTP follows that variable. |
 | Argument names the dispatcher reads | intentional change | `path` or `document_path` (string), `query` or `text` or `pattern`, `symbol` or `name`, `session_id`, `search_mode`, `action`, `agent_id`, `force`, `key`, `value`, `chunk_id`, `summary`, `body`. |
@@ -207,7 +207,7 @@ Calls that send only the 1.5 property names therefore miss:
 | `detect_changes` | same | `document_paths`, `limit`, and `scan_new` are read. New files are reported and not indexed. Changed files are reindexed. |
 | `impact_radius` | same on the parity fixture | The symbol call matches unmodified 1.5.2. |
 | `coupling` | same on the parity fixture | The `document_path` call matches unmodified 1.5.2. |
-| `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `get` filters on `target`, `target_type`, and `tags`. A document path is normalized only when the type is `document`, which is when 1.5.2 normalizes it. `delete` matches id. Migrated annotation ids keep the 1.5 values, and `created_at` keeps the fractional seconds. |
+| `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `get` and `search` return newest first and filter on `target_type` when it is set. `create` echoes the stored `target_type`. A document path is normalized only when the type is `document`. `delete` matches id. Migrated annotation ids keep the 1.5 values, and `created_at` keeps the fractional seconds. |
 | `document_lock` | intentional change | Actions `acquire`, `release`, `refresh`, `status`, `release_all`, `reap`, `conflicts`. `ttl` and `limit` are ignored (TTL 300). `force` is read. Storage is the JSON coordination file, not `coordination.db`. |
 | `bulk_store_summaries` | same | `summaries` is a chunk id to text object. One `chunk_id` plus `summary` still works. |
 | `register_dynamic_symbols` | same | `symbols` is a list, stored under `runtime:<agent_id>:<name>`. |
@@ -231,7 +231,10 @@ Full-mode names run in 2.0.1 by calling the tool in the replacement column. Anno
 - `doctor.db_health.recent_operations_1h`, `recent_failures_1h`, `busy_ratio`, and `recommended_action` are counted from MCP tool results in this process (`busy_ratio` under 0.01 is `idle`, under 0.1 is `vacuum`, otherwise `rebuild_symbols`). 1.5.2 counts rows in the SQLite `operation_log`, including internal writes.
 - `get_relevant_kv` `relevance_score` matches 1.5.2 to 5 decimal places. The signature bytes match; the last bits of the cosine move with f32 packing.
 
-Their JSON otherwise matches the 1.5.2 singleton:
+- `llm_embed` without `chunk_id` returns an error. 1.5.2 raises `TypeError: llm_embed() missing 1 required positional argument: 'chunk_id'`. Rust returns that same message as a tool error.
+- Keyword `relevance_score` uses 1.5.2 BM25, the proximity nudge, and the same identifier split (`renderWidget` contributes `render`, `widget`, and `renderwidget`).
+
+Their singleton payloads match 1.5.2 except the alias errors and `kv_cache_size_bytes` above. The names still run; they are not `tool_removed`.
 
 | Removed name | Replacement named in the error |
 | --- | --- |
@@ -251,7 +254,7 @@ Stdio attaches the 1.5.2 hint string when `impact_radius` has `affected_chunks` 
 | Item | Mark | 2.0 |
 | --- | --- | --- |
 | TTL 300, acquire, refresh, release, release_all, status, reap, conflicts | same actions | Refresh by a non-owner returns `refreshed: false` and `reason: not_owner`. Release by a non-owner returns `not_owner`. |
-| Force steal | same outcome | A conflict row is written (`path`, `holder`, `requester`, `at`). The coordination file then shows the new holder. |
+| Force steal | same fields | The conflict row is `id`, `document_path`, `agent_a`, `agent_b`, `conflict_type` `lock_stolen`, `expected_version` null, `actual_version` null, `resolution` `force_overwritten`, `created_at`. It is written to the coordination log and is not counted in `stats.total_conflicts`. |
 | Where it is stored | intentional change | `<git-common-dir>/stele-context/coordination.json` when `.git` resolves. The snapshot also keeps a copy. No git directory: snapshot only. `coordination.db` is not opened. |
 | Optimistic `expected_versions` on index | not supported | Ignored. |
 | Agent registry and notifications | same | `serve-mcp` registers `stele-context-mcp-<pid>` and injects that id into write tools that take `agent_id`. `list_agents` lists that registry. `list_sessions.agent_id` is that id when `detect_changes` or `save_kv_state` created the session. `get_notifications` is newest first. A reindex from `detect_changes` adds a `modified` row. `remove` and a detect removal add a `removed` row with that `agent_id`. Timestamps are fractional seconds. |
@@ -277,7 +280,7 @@ Stdio attaches the 1.5.2 hint string when `impact_radius` has `affected_chunks` 
 | WAV | intentional change | `audio wav <rate>Hz <seconds>s bytes <len>`. Longer than 30 seconds: one chunk per 30s span, `audio wav <rate>Hz <start>-<end>s`. A non-RIFF wav falls back to `audio wav bytes <len>`. |
 | Other audio | intentional change | One line, `audio <ext> bytes <len>`. No MFCC. |
 | Video | intentional change | One line, `video <ext> bytes <len> header <brand>` (`mp4`, `webm`, `avi`, or `unknown`). No frames. |
-| PDF text vs PyMuPDF | same page count | One chunk per page. Content streams that share a page are concatenated. Text is `[Page N]` plus literal and hex strings, with a trailing newline. Layout, fonts, and reading order can still differ from PyMuPDF. |
+| PDF text vs PyMuPDF | same merge rule | One chunk per page, then adjacent pages merge when the signature cosine clears 0.75 and the combined tokens fit in `max_chunk_size`. A long page next to a short page still merges with that neighbour when those two tests pass. Text is `[Page N]` plus literal and hex strings, with a trailing newline. Layout, fonts, and reading order can still differ from PyMuPDF. |
 | PDF that does not start with `%PDF` | intentional change | One chunk, `pdf bytes <len>`. |
 | PDF with no text streams | intentional change | One chunk, `pdf pages 0 bytes <len>`. |
 | Tree-sitter chunking | not supported | Boundaries are the 1.5.2 regex path (tree-sitter absent), and the Python definition spans for `.py`, `.pyw`, and `.pyx`. A 1.5 install that had the `tree-sitter` extra can split JS, TS, Java, C, C++, Go, Rust, Ruby, PHP, and Swift differently. |
@@ -289,7 +292,7 @@ Removed, relative to a 1.5.2 process that had the extras installed:
 
 - PyPI install of 2.0, tree-sitter, numpy, Pillow, PyMuPDF, librosa, OpenCV, msgspec
 - SQLite store, `indices/`, `coordination.db`, bytecache, operation log, chunk history
-- CLI `release` and the singular annotation commands
+- CLI `release`
 - Lookaround and backreference regex
 - Pip egg-info and editable-install checks inside `environment_check`
 - `working_tree` auto-index, `diff_since_cache`, HNSW files, pickle (already gone in 1.5; 2.0 has none)
@@ -299,6 +302,6 @@ Added in 2.0:
 - The JSON snapshot, journal, `signatures.bin`, `bm25.bin`, and `coordination.json`
 - Release binaries for the six targets above
 - Media indexing with no extra package
-- CLI `migrate` (present, and it does not import a 1.5 database; see above)
-- CLI `get-context`, `annotations`, and `document-lock` (not in `--help`)
+- CLI `migrate` copies a 1.5 SQLite database into the native store. The original file is not modified.
+- CLI `get-context`, `annotations`, `annotate`, `delete-annotation`, `update-annotation`, `get-annotations`, and `document-lock` are listed in `--help`
 - JSON envelope on stdout (`ok`, `schema_version`, `command`, `result`)

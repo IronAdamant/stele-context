@@ -824,7 +824,7 @@ impl Dynamic {
     }
 }
 
-fn float_field(value: &Value, key: &str) -> f64 {
+pub(crate) fn float_field(value: &Value, key: &str) -> f64 {
     match field(value, key) {
         Some(Value::Float(number)) => *number,
         Some(Value::Int(number)) => *number as f64,

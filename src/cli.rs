@@ -78,6 +78,7 @@ struct Parsed {
     no_index: bool,
     tags: Vec<String>,
     ann_type: Option<String>,
+    note_body: Option<String>,
     cwd: Option<PathBuf>,
 }
 
@@ -260,9 +261,12 @@ impl Parsed {
                 }
                 Ok(value)
             }
-            "map" => Ok(engine.map()),
+            "map" => Ok(engine.map_with(self.path_prefix.as_deref(), None, None)),
             "project-brief" => Ok(engine.project_brief()),
-            "enrichment-plan" => Ok(engine.enrichment_plan()),
+            "enrichment-plan" => Ok(engine.enrichment_plan_with(
+                self.top_n.unwrap_or(15),
+                self.min_tokens.unwrap_or(20) as i64,
+            )),
             "history" => engine.history(),
             "clear" => {
                 if !self.confirm {
@@ -375,6 +379,23 @@ impl Parsed {
             "coupling" => Ok(engine.coupling(positional)),
             "get-context" => engine.get_context(positional, self.session.as_deref()),
             "init" => init_marker(&engine.cwd),
+            "annotate" => {
+                let target_type = self.ann_type.as_deref().unwrap_or("document");
+                let body = self
+                    .note_body
+                    .clone()
+                    .or_else(|| self.positionals.get(1).cloned())
+                    .unwrap_or_default();
+                engine.annotations_tagged("create", positional, &body, &self.tags, target_type)
+            }
+            "delete-annotation" => engine.annotations("delete", positional, ""),
+            "update-annotation" => engine.annotations_tagged(
+                "update",
+                positional,
+                self.note_body.as_deref().unwrap_or(""),
+                &self.tags,
+                "",
+            ),
             "annotations" | "get-annotations" => {
                 let target = if self.command.as_deref() == Some("get-annotations") {
                     self.document
@@ -453,6 +474,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         no_index: false,
         tags: Vec::new(),
         ann_type: None,
+        note_body: None,
         cwd: None,
     };
     let mut index = 0usize;
@@ -596,6 +618,8 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                         parsed.session = Some(value);
                     } else if arg == "--tags" {
                         parsed.tags.push(value);
+                    } else {
+                        parsed.note_body = Some(value);
                     }
                 }
                 other => return Err(format!("unknown flag '{other}'")),
@@ -658,6 +682,9 @@ Commands:
   find-definition NAME
   find-references NAME
   annotations         create, get, delete, update, search, bulk_create
+  annotate TARGET     --type document|chunk --content TEXT [--tags TAG]
+  delete-annotation ID
+  update-annotation ID [--content TEXT] [--tags TAG]
   get-annotations     --target PATH [--type document|chunk] [--tags TAG]
   impact-radius       --symbol NAME
   coupling PATH

@@ -206,15 +206,16 @@ impl Engine {
             };
             for hit in hit_list {
                 let start = crate::store::int_field(&hit, "start") as usize;
-                let line = content.chars().take(start).filter(|ch| *ch == '\n').count() + 1;
-                let excerpt = line_at(&content, line.saturating_sub(1));
+                let chunk_line = content.chars().take(start).filter(|ch| *ch == '\n').count() + 1;
+                let line = document_base_line(self, &chunk_id) + chunk_line - 1;
+                let excerpt = line_at(&content, chunk_line.saturating_sub(1));
                 let class = if classify {
                     classify_line(&excerpt)
                 } else {
                     String::new()
                 };
                 let scope = if include_scope {
-                    scope_for(self, &chunk_id, line as u32)
+                    scope_for(self, &chunk_id, chunk_line as u32)
                 } else {
                     String::new()
                 };
@@ -1009,7 +1010,14 @@ impl Engine {
                 Ok(Value::object(vec![
                     ("id", Value::Int(id_num)),
                     ("target", Value::string(path)),
-                    ("target_type", Value::string("document")),
+                    (
+                        "target_type",
+                        Value::string(if target_type.is_empty() {
+                            "document"
+                        } else {
+                            target_type
+                        }),
+                    ),
                 ]))
             }
             "get" | "search" => {
@@ -1020,7 +1028,10 @@ impl Engine {
                     .iter()
                     .filter(|note| {
                         if action == "search" {
-                            return path.is_empty() || note.body.contains(path);
+                            let body_hit = path.is_empty() || note.body.contains(path);
+                            let type_hit =
+                                target_type.is_empty() || note.target_type == target_type;
+                            return body_hit && type_hit;
                         }
                         (path.is_empty() || note.path == path)
                             && (target_type.is_empty() || note.target_type == target_type)
@@ -1051,7 +1062,16 @@ impl Engine {
                             ),
                         ])
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
+                let mut rows = rows;
+                rows.sort_by(|left, right| {
+                    crate::store::float_field(right, "created_at")
+                        .total_cmp(&crate::store::float_field(left, "created_at"))
+                        .then(
+                            crate::store::int_field(right, "id")
+                                .cmp(&crate::store::int_field(left, "id")),
+                        )
+                });
                 Ok(Value::object(vec![("annotations", Value::Array(rows))]))
             }
             "delete" => {
@@ -1238,36 +1258,6 @@ impl Engine {
             ("chunks", Value::Array(chunks)),
             ("total_tokens", Value::Int(total)),
         ])
-    }
-
-    pub fn save_kv(&mut self, session: &str, key: &str, value: &str) -> Result<Value, String> {
-        let slot = self.session_mut(session);
-        if let Some(pair) = slot.kv.iter_mut().find(|(name, _)| name == key) {
-            pair.1 = value.to_string();
-        } else {
-            slot.kv.push((key.to_string(), value.to_string()));
-        }
-        self.store.save("kv", &Value::string(key))?;
-        Ok(Value::object(vec![("saved", Value::Bool(true))]))
-    }
-
-    pub fn get_kv(&self, session: &str) -> Value {
-        let kv = self
-            .store
-            .state
-            .sessions
-            .iter()
-            .find(|item| item.id == session)
-            .map(|item| {
-                item.kv
-                    .iter()
-                    .map(|(key, value)| {
-                        Value::object(vec![("k", Value::string(key)), ("v", Value::string(value))])
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        Value::object(vec![("kv", Value::Array(kv))])
     }
 
     pub fn search_history(&self, session: &str) -> Value {
@@ -1777,22 +1767,138 @@ fn round6(number: f64) -> f64 {
 }
 
 fn proximity_terms(query: &str) -> Vec<String> {
+    // 1.5.2 `extract_proximity_terms`: identifier pieces, the whole
+    // identifier, and letter-words of length 4 or more. Order does not
+    // change the score.
+    let chars: Vec<char> = query.chars().collect();
     let mut terms = Vec::new();
-    let mut push = |word: &str| {
+    let mut add = |word: &str| {
         let lower = word.to_ascii_lowercase();
-        if lower.len() < 3 || STOP_WORDS.contains(&lower.as_str()) {
+        if lower.chars().count() < 3 || STOP_WORDS.contains(&lower.as_str()) {
             return;
         }
         if !terms.iter().any(|have: &String| have == &lower) {
             terms.push(lower);
         }
     };
-    for word in query.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_') {
-        if word.len() >= 4 || word.len() >= 3 {
-            push(word);
+    let mut index = 0usize;
+    while index < chars.len() {
+        if let Some(end) = ident_piece(&chars, index) {
+            let word: String = chars[index..end].iter().collect();
+            add(&word);
+            index = end;
+        } else {
+            index += 1;
+        }
+    }
+    index = 0;
+    while index < chars.len() {
+        if is_ident_start(chars[index]) {
+            let start = index;
+            index += 1;
+            while index < chars.len() && is_ident_cont(chars[index]) {
+                index += 1;
+            }
+            if index - start >= 3 {
+                let word: String = chars[start..index].iter().collect();
+                add(&word);
+            }
+        } else {
+            index += 1;
+        }
+    }
+    index = 0;
+    while index < chars.len() {
+        let bound = index == 0 || !chars[index - 1].is_ascii_alphabetic();
+        if bound && chars[index].is_ascii_alphabetic() {
+            let start = index;
+            index += 1;
+            while index < chars.len() && chars[index].is_ascii_alphabetic() {
+                index += 1;
+            }
+            if index - start >= 4 {
+                let word: String = chars[start..index].iter().collect();
+                add(&word);
+            }
+        } else {
+            index += 1;
         }
     }
     terms
+}
+
+fn ident_piece(chars: &[char], start: usize) -> Option<usize> {
+    if let Some(end) = camel_word(chars, start) {
+        return Some(end);
+    }
+    if let Some(end) = acronym(chars, start) {
+        return Some(end);
+    }
+    snake_word(chars, start)
+}
+
+fn camel_word(chars: &[char], start: usize) -> Option<usize> {
+    let mut index = start;
+    if chars.get(index).is_some_and(|ch| ch.is_ascii_uppercase()) {
+        index += 1;
+    }
+    let lower_from = index;
+    while index < chars.len() && chars[index].is_ascii_lowercase() {
+        index += 1;
+    }
+    if index - lower_from >= 2 {
+        Some(index)
+    } else {
+        None
+    }
+}
+
+fn acronym(chars: &[char], start: usize) -> Option<usize> {
+    if !chars.get(start).is_some_and(|ch| ch.is_ascii_uppercase()) {
+        return None;
+    }
+    let mut index = start;
+    while index < chars.len() && chars[index].is_ascii_uppercase() {
+        index += 1;
+    }
+    if index - start < 2 {
+        return None;
+    }
+    let next = chars.get(index);
+    let boundary = next.is_none_or(|ch| !is_ident_cont(*ch));
+    let capital_word = next.is_some_and(|ch| ch.is_ascii_uppercase())
+        && chars
+            .get(index + 1)
+            .is_some_and(|ch| ch.is_ascii_lowercase());
+    if boundary || capital_word {
+        Some(index)
+    } else {
+        None
+    }
+}
+
+fn snake_word(chars: &[char], start: usize) -> Option<usize> {
+    let first = *chars.get(start)?;
+    if !(first.is_ascii_lowercase() || first == '_') {
+        return None;
+    }
+    let mut index = start + 1;
+    while index < chars.len() && is_ident_cont(chars[index]) {
+        index += 1;
+    }
+    if index - start >= 3 {
+        Some(index)
+    } else {
+        None
+    }
+}
+
+fn is_ident_start(ch: char) -> bool {
+    ch.is_ascii_alphabetic() || ch == '_'
+}
+
+fn is_ident_cont(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
 }
 
 fn proximity_score(content: &str, terms: &[String]) -> f64 {
@@ -1897,13 +2003,47 @@ fn classify_line(line: &str) -> String {
     "code".to_string()
 }
 
+fn document_base_line(engine: &Engine, chunk_id: &str) -> usize {
+    let Some(chunk) = engine
+        .store
+        .state
+        .chunks
+        .iter()
+        .find(|chunk| chunk.id == chunk_id)
+    else {
+        return 1;
+    };
+    let mut siblings: Vec<_> = engine
+        .store
+        .state
+        .chunks
+        .iter()
+        .filter(|other| other.path == chunk.path)
+        .collect();
+    siblings.sort_by_key(|other| other.start);
+    let mut cumulative = 1usize;
+    for other in siblings {
+        if other.id == chunk_id {
+            return cumulative;
+        }
+        let newlines = other.content.matches('\n').count();
+        cumulative += newlines + usize::from(!other.content.ends_with('\n'));
+    }
+    1
+}
+
 fn scope_for(engine: &Engine, chunk_id: &str, line: u32) -> String {
     engine
         .store
         .state
         .symbols
         .iter()
-        .filter(|sym| sym.chunk_id == chunk_id && sym.role == "definition" && sym.line <= line)
+        .filter(|sym| {
+            sym.chunk_id == chunk_id
+                && sym.role == "definition"
+                && matches!(sym.kind.as_str(), "function" | "class" | "method")
+                && sym.line <= line
+        })
         .max_by_key(|sym| sym.line)
         .map(|sym| sym.name.clone())
         .unwrap_or_default()

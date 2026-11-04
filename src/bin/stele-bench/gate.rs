@@ -91,13 +91,14 @@ pub(crate) fn run(
         cargo_build(&head_dir)?
     };
     let head_src = if same { &base_dir } else { &head_dir };
+    let shared = head_src.join("parity").join("fixtures");
     let sides = [
         (
             "base",
             Side {
                 binary: base_bin,
                 mcp: base_mcp,
-                project: isolate(&base_dir, &root.join("proj-base"))?,
+                project: isolate_from(&shared, &root.join("proj-base"))?,
             },
         ),
         (
@@ -105,7 +106,7 @@ pub(crate) fn run(
             Side {
                 binary: head_bin,
                 mcp: head_mcp,
-                project: isolate(head_src, &root.join("proj-head"))?,
+                project: isolate_from(&shared, &root.join("proj-head"))?,
             },
         ),
     ];
@@ -255,12 +256,11 @@ fn index_suite(binary: &Path, project: &Path, detect_delay: Duration) -> Result<
     Ok([cold?, warm?, detect?, search?])
 }
 
-fn isolate(checkout: &Path, dest: &Path) -> Result<PathBuf, String> {
-    let src = checkout.join("parity").join("fixtures");
+fn isolate_from(src: &Path, dest: &Path) -> Result<PathBuf, String> {
     if !src.is_dir() {
-        return Err(format!("missing fixtures in {}", checkout.display()));
+        return Err(format!("missing fixtures in {}", src.display()));
     }
-    copy_dir(&src, dest)?;
+    copy_dir(src, dest)?;
     Ok(dest.to_path_buf())
 }
 

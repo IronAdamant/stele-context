@@ -124,10 +124,21 @@ impl Engine {
         &self.server_agent
     }
 
-    pub fn set_server_agent(&mut self, id: &str) {
+    pub fn remember_server_agent(&mut self, id: &str) {
         self.server_agent = id.to_string();
+    }
+
+    pub fn register_server_agent(&self) {
+        if self.server_agent.is_empty() {
+            return;
+        }
         let root = self.cwd.display().to_string();
-        crate::locks::register_agent(&self.cwd, id, &root);
+        crate::locks::register_agent(&self.cwd, &self.server_agent, &root);
+    }
+
+    pub fn set_server_agent(&mut self, id: &str) {
+        self.remember_server_agent(id);
+        self.register_server_agent();
     }
 
     pub fn index(&mut self, paths: &[String], force: bool) -> Result<Value, String> {
@@ -565,7 +576,10 @@ impl Engine {
                 Value::string(if ready { "ready" } else { "empty" }),
             ),
             ("chunk_store_status", Value::string("ready")),
-            ("seconds_since_last_index", Value::Float(0.0)),
+            (
+                "seconds_since_last_index",
+                Value::Float(seconds_since_index(&self.storage)),
+            ),
             ("alerts", Value::Array(Vec::new())),
         ])
     }
@@ -655,11 +669,21 @@ impl Engine {
     }
 
     pub fn map(&self) -> Value {
+        self.map_with(None, None, None)
+    }
+
+    pub fn map_with(
+        &self,
+        prefix: Option<&str>,
+        max_documents: Option<usize>,
+        max_ann_chars: Option<usize>,
+    ) -> Value {
         let mut docs: Vec<Value> = self
             .store
             .state
             .documents
             .iter()
+            .filter(|doc| path_under(prefix, &doc.path))
             .map(|doc| {
                 let chunks: Vec<_> = self
                     .store
@@ -678,7 +702,10 @@ impl Engine {
                     .map(|note| {
                         Value::object(vec![
                             ("id", Value::Int(note.id.parse::<i64>().unwrap_or(0))),
-                            ("content", Value::string(&note.body)),
+                            (
+                                "content",
+                                Value::string(trim_ann(&note.body, max_ann_chars)),
+                            ),
                             (
                                 "tags",
                                 Value::Array(
@@ -705,14 +732,21 @@ impl Engine {
                         .cmp(&crate::store::string_field(right, "path")),
                 )
         });
+        let total_before_cap = docs.len();
+        if let Some(max) = max_documents {
+            if docs.len() > max {
+                docs.truncate(max);
+            }
+        }
+        let shown = docs.len() as i64;
         let total_tokens: i64 = docs
             .iter()
             .map(|doc| crate::store::int_field(doc, "total_tokens"))
             .sum();
-        let total = docs.len() as i64;
+        let total = total_before_cap as i64;
         let chunks = self.store.state.chunks.len() as i64;
         let symbols = self.store.state.symbols.len() as i64;
-        Value::object(vec![
+        let mut out = Value::object(vec![
             ("documents", Value::Array(docs)),
             ("total_documents", Value::Int(total)),
             ("total_tokens", Value::Int(total_tokens)),
@@ -725,7 +759,13 @@ impl Engine {
                 "project_root",
                 Value::string(self.cwd.display().to_string()),
             ),
-        ])
+        ]);
+        if max_documents.is_some() {
+            if let Value::Object(pairs) = &mut out {
+                pairs.push(("documents_omitted".to_string(), Value::Int(total - shown)));
+            }
+        }
+        out
     }
 
     pub fn project_brief(&self) -> Value {
@@ -815,8 +855,10 @@ impl Engine {
     }
 
     pub fn enrichment_plan(&self) -> Value {
-        let top_n = 15usize;
-        let min_tokens = 20i64;
+        self.enrichment_plan_with(15, 20)
+    }
+
+    pub fn enrichment_plan_with(&self, top_n: usize, min_tokens: i64) -> Value {
         let mut missing: Vec<Value> = Vec::new();
         let mut tier2_tokens = 0i64;
         let mut total_tokens = 0i64;
@@ -949,7 +991,10 @@ impl Engine {
         if let Value::Object(pairs) = &mut health {
             pairs.retain(|(key, _)| key != "latest_indexed_at");
             pairs.push(("latest_indexed_at".to_string(), Value::Float(now_f64())));
-            pairs.push(("seconds_since_last_index".to_string(), Value::Float(0.0)));
+            pairs.push((
+                "seconds_since_last_index".to_string(),
+                Value::Float(seconds_since_index(&self.storage)),
+            ));
         }
         let avg = if documents == 0 {
             0.0
@@ -983,15 +1028,17 @@ impl Engine {
             ("action", Value::string("ritual")),
             ("detail", Value::string(ritual)),
         ]));
-        let mut preview = self.map();
+        let mut preview = self.map_with(None, Some(8), Some(120));
         if let Value::Object(pairs) = &mut preview {
-            pairs.push(("documents_omitted".to_string(), Value::Int(0)));
             if let Some((_, health_slot)) = pairs.iter_mut().find(|(key, _)| key == "index_health")
             {
                 if let Value::Object(health_pairs) = health_slot {
                     health_pairs.retain(|(key, _)| key != "latest_indexed_at");
                     health_pairs.push(("latest_indexed_at".to_string(), Value::Float(now_f64())));
-                    health_pairs.push(("seconds_since_last_index".to_string(), Value::Float(0.0)));
+                    health_pairs.push((
+                        "seconds_since_last_index".to_string(),
+                        Value::Float(seconds_since_index(&self.storage)),
+                    ));
                 }
             }
         }
@@ -1019,7 +1066,10 @@ impl Engine {
                                 "change_history",
                                 Value::Int(self.store.state.change_log.len() as i64),
                             ),
-                            ("chunk_history", Value::Int(0)),
+                            (
+                                "chunk_history",
+                                Value::Int(self.store.state.chunk_history.len() as i64),
+                            ),
                             ("operation_log", Value::Int(self.operations as i64)),
                             (
                                 "sessions",
@@ -1033,7 +1083,7 @@ impl Engine {
                     ("page_count", Value::Null),
                     ("page_size", Value::Null),
                     ("database_size_bytes", Value::Int(store_bytes(&self.storage))),
-                    ("wal_size_bytes", Value::Int(0)),
+                    ("wal_size_bytes", Value::Int(wal_bytes(&self.storage))),
                     ("wal_autocheckpoint", Value::Null),
                     ("busy_timeout_ms", Value::Null),
                     (
@@ -1369,6 +1419,32 @@ fn busy_action(failures: u64, operations: u64) -> &'static str {
     }
 }
 
+fn path_under(prefix: Option<&str>, path: &str) -> bool {
+    let Some(prefix) = prefix else {
+        return true;
+    };
+    if prefix.is_empty() {
+        return true;
+    }
+    let path = path.replace('\\', "/");
+    let prefix = prefix.replace('\\', "/");
+    let prefix = prefix.trim_end_matches('/');
+    path == prefix || path.starts_with(&format!("{prefix}/"))
+}
+
+fn trim_ann(text: &str, max_chars: Option<usize>) -> String {
+    let Some(max) = max_chars else {
+        return text.to_string();
+    };
+    let count = text.chars().count();
+    if count <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max).collect();
+    out.push('…');
+    out
+}
+
 fn file_len(path: &Path) -> u64 {
     fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
 }
@@ -1495,24 +1571,47 @@ fn store_bytes(storage: &std::path::Path) -> i64 {
     .sum::<u64>() as i64
 }
 
+fn seconds_since_index(storage: &Path) -> f64 {
+    let path = storage.join("store").join("snapshot.json");
+    let Ok(meta) = std::fs::metadata(path) else {
+        return 0.0;
+    };
+    let Ok(modified) = meta.modified() else {
+        return 0.0;
+    };
+    modified.elapsed().map(|d| d.as_secs_f64()).unwrap_or(0.0)
+}
+
+fn wal_bytes(storage: &Path) -> i64 {
+    file_len(&storage.join("stele_context.db-wal")) as i64
+}
+
 fn host_python() -> Value {
-    for bin in ["python3", "python"] {
-        let Ok(output) = std::process::Command::new(bin)
-            .arg("-c")
-            .arg("import sys; print(sys.version.split()[0])")
-            .output()
-        else {
-            continue;
-        };
-        if !output.status.success() {
-            continue;
+    static CACHED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let text = CACHED.get_or_init(|| {
+        for bin in ["python3", "python"] {
+            let Ok(output) = std::process::Command::new(bin)
+                .arg("-c")
+                .arg("import sys; print(sys.version.split()[0])")
+                .output()
+            else {
+                continue;
+            };
+            if !output.status.success() {
+                continue;
+            }
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !text.is_empty() {
+                return text;
+            }
         }
-        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !text.is_empty() {
-            return Value::string(text);
-        }
+        String::new()
+    });
+    if text.is_empty() {
+        Value::Null
+    } else {
+        Value::string(text)
     }
-    Value::Null
 }
 
 fn plan_field<'a>(plan: &'a Value, key: &str) -> Option<&'a Value> {

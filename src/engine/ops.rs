@@ -195,6 +195,7 @@ impl Engine {
 
     pub fn rebuild_symbols(&mut self) -> Result<Value, String> {
         self.store.state.symbols.clear();
+        self.store.state.dynamic.clear();
         let chunks: Vec<_> = self.store.state.chunks.clone();
         for chunk in &chunks {
             let ext = chunk
@@ -563,10 +564,9 @@ impl Engine {
         fingerprint: Option<Vec<f64>>,
     ) -> Result<Value, String> {
         if chunk_id.is_empty() {
-            return Ok(Value::object(vec![
-                ("stored", Value::Bool(false)),
-                ("error", Value::string("chunk_id is required")),
-            ]));
+            return Err(
+                "llm_embed() missing 1 required positional argument: 'chunk_id'".to_string(),
+            );
         }
         let vector = match fingerprint {
             Some(values) if values.len() == 128 => values,

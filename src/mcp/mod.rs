@@ -87,10 +87,11 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut engine = Engine::open(storage).ok();
+    let agent = format!("stele-context-mcp-{}", std::process::id());
     if let Some(engine) = engine.as_mut() {
-        let id = format!("stele-context-mcp-{}", std::process::id());
-        engine.set_server_agent(&id);
+        engine.remember_server_agent(&agent);
     }
+    let mut registered = false;
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
@@ -123,7 +124,15 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
                 let _ = stdout.flush();
                 continue;
             }
-            "tools/call" => tools_call(engine.as_mut(), &params),
+            "tools/call" => {
+                if !registered {
+                    if let Some(engine) = engine.as_mut() {
+                        engine.register_server_agent();
+                    }
+                    registered = true;
+                }
+                tools_call(engine.as_mut(), &params)
+            }
             "ping" => Value::object(vec![]),
             _ => {
                 let _ = writeln!(stdout, "{}", error_line(id, -32601, "method not found"));
@@ -425,8 +434,14 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             }
         }
         "doctor" => Ok(engine.doctor_snapshot()),
-        "map" => Ok(engine.map()),
-        "enrichment_plan" => Ok(engine.enrichment_plan()),
+        "map" => {
+            let prefix = arg(args, "path_prefix");
+            Ok(engine.map_with(prefix.as_deref(), None, None))
+        }
+        "enrichment_plan" => Ok(engine.enrichment_plan_with(
+            int_arg(args, "top_n").unwrap_or(15).max(0) as usize,
+            int_arg(args, "min_tokens").unwrap_or(20),
+        )),
         "history" => engine.history(),
         "stats" => Ok(engine.stats()),
         "project_brief" => Ok(engine.project_brief()),

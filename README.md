@@ -131,7 +131,7 @@ Media, with no extra packages: PNG, JPEG, GIF, WAV, MP3, MP4, and PDF. Image and
 
 stele-context 1.5.x on PyPI is the Python package. 2.0.0 is this Rust binary. The Python source stays on the `python-legacy` branch. `pip install stele-context` does not install 2.0.
 
-Install 2.0 from the [v2.0.0 GitHub Release](https://github.com/IronAdamant/stele-context/releases/tag/v2.0.0): `scripts/install.sh`, `scripts/install.ps1`, or the release assets. Those assets cover Linux x86_64 (musl) and aarch64, macOS Apple silicon and Intel, and Windows x86_64 and Arm. `install.sh` and `install.ps1` install `stele-context`. `stele-context serve-mcp` is the MCP server. `stele-context-mcp-<target>` is the same server under the other file name.
+Install 2.0.1 from the [v2.0.1 GitHub Release](https://github.com/IronAdamant/stele-context/releases/tag/v2.0.1): `scripts/install.sh`, `scripts/install.ps1`, or the release assets. Those assets cover Linux x86_64 (musl) and aarch64, macOS Apple silicon and Intel, and Windows x86_64 and Arm. `install.sh` and `install.ps1` install `stele-context`. `stele-context serve-mcp` is the MCP server. `stele-context-mcp-<target>` is the same server under the other file name.
 
 A storage directory that only has a 1.5 `stele_context.db` is copied into the native store on open. The original database is not modified. `chunk_size`, `skip_dirs`, and `respect_gitignore` in `.stele-context.toml` are applied.
 
