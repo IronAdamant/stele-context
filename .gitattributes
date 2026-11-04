@@ -1,3 +1,4 @@
 parity/fixtures/** text eol=lf
+parity/fixtures/media/** binary
 parity/goldens/** text eol=lf
 bench/baseline/** text eol=lf
