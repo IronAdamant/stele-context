@@ -27,7 +27,7 @@ pub fn apply(
         "refresh" => refresh(state, shared.as_mut(), path, agent, now),
         "release" => Ok(release(state, shared.as_mut(), path, agent, false, now)),
         "release_all" => Ok(release(state, shared.as_mut(), path, agent, true, now)),
-        "status" => Ok(status(state, shared.as_ref(), path, now)),
+        "status" => Ok(status(state, shared.as_ref(), path, now, cwd)),
         "conflicts" => Ok(conflicts(state, shared.as_ref(), path)),
         "reap" => Ok(reap(state, shared.as_mut(), now)),
         _ => Err(format!("unknown document_lock action '{action}'")),
@@ -58,7 +58,11 @@ fn acquire(
             record_conflict(state, &mut shared, path, &holder, agent, now);
         }
     }
+    let coordinated = shared.is_some();
     write_lock(state, shared, path, agent, now + TTL);
+    if coordinated {
+        return Ok(Value::object(vec![("acquired", Value::Bool(true))]));
+    }
     let version = state
         .documents
         .iter()
@@ -68,7 +72,6 @@ fn acquire(
     Ok(Value::object(vec![
         ("acquired", Value::Bool(true)),
         ("doc_version", Value::Int(version)),
-        ("locked_by", Value::string(agent)),
     ]))
 }
 
@@ -86,7 +89,10 @@ fn refresh(
     match existing {
         Some((holder, _)) if holder == agent => {
             write_lock(state, shared, path, agent, now + TTL);
-            Ok(Value::object(vec![("refreshed", Value::Bool(true))]))
+            Ok(Value::object(vec![
+                ("refreshed", Value::Bool(true)),
+                ("expires_at", Value::Int(now + TTL)),
+            ]))
         }
         Some(_) => Ok(Value::object(vec![
             ("refreshed", Value::Bool(false)),
@@ -146,18 +152,29 @@ fn release(
     now: i64,
 ) -> Value {
     if all {
-        let released = state
-            .locks
-            .iter()
-            .filter(|lock| lock.agent == agent)
-            .count();
+        let documents: Vec<Value> = if let Some(shared) = shared.as_ref() {
+            shared
+                .locks
+                .iter()
+                .filter(|lock| lock.agent == agent)
+                .map(|lock| Value::string(&lock.path))
+                .collect()
+        } else {
+            state
+                .locks
+                .iter()
+                .filter(|lock| lock.agent == agent)
+                .map(|lock| Value::string(&lock.path))
+                .collect()
+        };
+        let released_count = documents.len() as i64;
         state.locks.retain(|lock| lock.agent != agent);
         if let Some(shared) = shared {
             shared.locks.retain(|lock| lock.agent != agent);
         }
         return Value::object(vec![
-            ("released", Value::Bool(true)),
-            ("count", Value::Int(released as i64)),
+            ("released_count", Value::Int(released_count)),
+            ("documents", Value::Array(documents)),
         ]);
     }
     let holder = {
@@ -183,27 +200,15 @@ fn release(
     }
 }
 
-fn status(state: &State, shared: Option<&Shared>, path: &str, now: i64) -> Value {
+fn status(state: &State, shared: Option<&Shared>, path: &str, now: i64, _cwd: &Path) -> Value {
     match live_holder(state, shared, path, now) {
-        None => Value::object(vec![
-            ("locked", Value::Bool(false)),
-            (
-                "doc_version",
-                Value::Int(
-                    state
-                        .documents
-                        .iter()
-                        .find(|doc| doc.path == path)
-                        .map(|doc| doc.doc_version as i64)
-                        .unwrap_or(0),
-                ),
-            ),
-        ]),
+        None => Value::object(vec![("locked", Value::Bool(false))]),
         Some((holder, until)) => Value::object(vec![
             ("locked", Value::Bool(true)),
             ("locked_by", Value::string(holder)),
             ("locked_at", Value::Int(until - TTL)),
             ("expires_at", Value::Int(until)),
+            ("worktree", Value::Null),
         ]),
     }
 }
@@ -231,15 +236,20 @@ fn conflicts(state: &State, shared: Option<&Shared>, path: &str) -> Value {
 }
 
 fn reap(state: &mut State, shared: Option<&mut Shared>, now: i64) -> Value {
-    let before = state.locks.len();
-    state.locks.retain(|lock| lock.until > now);
-    let mut reaped = before - state.locks.len();
-    if let Some(shared) = shared {
-        let shared_before = shared.locks.len();
+    let reaped = if let Some(shared) = shared {
+        let before = shared.locks.len();
         shared.locks.retain(|lock| lock.until > now);
-        reaped += shared_before - shared.locks.len();
-    }
-    Value::object(vec![("reaped", Value::Int(reaped as i64))])
+        state.locks.retain(|lock| lock.until > now);
+        before - shared.locks.len()
+    } else {
+        let before = state.locks.len();
+        state.locks.retain(|lock| lock.until > now);
+        before - state.locks.len()
+    };
+    Value::object(vec![
+        ("reaped_count", Value::Int(reaped as i64)),
+        ("documents", Value::Array(Vec::new())),
+    ])
 }
 
 fn refused(holder: &str, until: i64) -> Value {
@@ -502,10 +512,11 @@ pub fn note_indexed(start: &Path, paths: &[String]) {
     };
     for doc in paths {
         notes.push(Value::object(vec![
+            ("id", Value::Int((notes.len() + 1) as i64)),
             ("document_path", Value::string(doc)),
             ("change_type", Value::string("indexed")),
             ("agent_id", Value::string("")),
-            ("worktree_root", Value::string(start.display().to_string())),
+            ("worktree_root", Value::Null),
             ("created_at", Value::Int(now)),
         ]));
     }

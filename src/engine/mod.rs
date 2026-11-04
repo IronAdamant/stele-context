@@ -41,14 +41,25 @@ impl Engine {
     pub fn open(storage_flag: Option<&Path>) -> Result<Engine, String> {
         let cwd = std::env::current_dir().map_err(|err| format!("cwd: {err}"))?;
         let root = detect_project_root(&cwd);
-        let config = config::load(root.as_deref());
-        let storage = resolve_storage_dir(storage_flag, &config, root.as_deref())?;
-        Self::open_at(cwd, storage)
+        let loaded = config::load(root.as_deref());
+        let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
+        Self::finish(cwd, storage, loaded)
+    }
+
+    pub fn open_from(cwd: PathBuf, storage_flag: Option<&Path>) -> Result<Engine, String> {
+        let root = detect_project_root(&cwd);
+        let loaded = config::load(root.as_deref());
+        let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
+        Self::finish(cwd, storage, loaded)
     }
 
     pub fn open_at(cwd: PathBuf, storage: PathBuf) -> Result<Engine, String> {
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
+        Self::finish(cwd, storage, loaded)
+    }
+
+    fn finish(cwd: PathBuf, storage: PathBuf, loaded: config::Config) -> Result<Engine, String> {
         let mut store = Store::open(&storage)?;
         let legacy = storage.join("stele_context.db");
         if legacy.is_file() {
@@ -84,29 +95,29 @@ impl Engine {
         let mut fresh = Vec::new();
         let mut total_chunks = 0i64;
         let mut total_tokens = 0i64;
+        let known: std::collections::HashMap<String, (u64, i64)> = self
+            .store
+            .state
+            .documents
+            .iter()
+            .map(|doc| (doc.path.clone(), (doc.size, doc.mtime_ns)))
+            .collect();
+        let mut chunk_counts: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        for chunk in &self.store.state.chunks {
+            *chunk_counts.entry(chunk.path.clone()).or_default() += 1;
+        }
         for (rel, abs) in &files {
             seen.push(rel.clone());
             let meta = fs::metadata(abs).map_err(|err| format!("{rel}: {err}"))?;
             if !force {
-                if let Some(doc) = self
-                    .store
-                    .state
-                    .documents
-                    .iter()
-                    .find(|doc| &doc.path == rel)
-                {
-                    if doc.size == meta.len() && doc.mtime_ns == mtime_ns(&meta) {
-                        let count = self
-                            .store
-                            .state
-                            .chunks
-                            .iter()
-                            .filter(|chunk| &chunk.path == rel)
-                            .count();
+                if let Some((size, mtime)) = known.get(rel) {
+                    if *size == meta.len() && *mtime == mtime_ns(&meta) {
+                        let count = chunk_counts.get(rel).copied().unwrap_or(0);
                         skipped_rows.push(Value::object(vec![
                             ("path", Value::string(rel)),
                             ("reason", Value::string("Unchanged")),
-                            ("chunk_count", Value::Int(count as i64)),
+                            ("chunk_count", Value::Int(count)),
                         ]));
                         continue;
                     }
@@ -163,6 +174,28 @@ impl Engine {
         only: Option<&[String]>,
         limit: usize,
     ) -> Result<Value, String> {
+        if !self
+            .store
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == "default")
+        {
+            let now = now_secs();
+            self.store.state.sessions.push(crate::store::Session {
+                id: "default".to_string(),
+                searches: Vec::new(),
+                reads: Vec::new(),
+                kv: Vec::new(),
+                created_at: now,
+                updated_at: now,
+                turn: 0,
+                tokens: 0,
+                agent: String::new(),
+                attached: Vec::new(),
+                search_rows: Vec::new(),
+            });
+        }
         let files = collect(
             &self.cwd,
             &[".".to_string()],
@@ -279,6 +312,12 @@ impl Engine {
         if limit > 0 {
             truncate_detect(&mut result, limit);
         }
+        self.store.state.change_log.push(crate::store::ChangeRow {
+            at: now_secs(),
+            session: "default".to_string(),
+            summary: "detect".to_string(),
+            reason: String::new(),
+        });
         Ok(result)
     }
 
@@ -299,17 +338,67 @@ impl Engine {
     }
 
     pub fn stats(&self) -> Value {
+        let mut storage = self.storage_report();
+        if let Value::Object(pairs) = &mut storage {
+            if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "history_count") {
+                *item = Value::Int(self.store.state.change_log.len() as i64);
+            }
+        }
+        let chunks = self.store.state.chunks.len() as i64;
+        let symbols = self.store.state.symbols.len() as i64;
+        let ready = !self.store.state.symbols.is_empty();
+        Value::object(vec![
+            ("version", Value::string(crate::VERSION)),
+            ("storage", storage),
+            (
+                "index",
+                Value::object(vec![
+                    ("node_count", Value::Int(chunks)),
+                    ("max_level", Value::Int(0)),
+                    ("avg_connections", Value::Float(0.0)),
+                    ("insert_count", Value::Int(chunks)),
+                    ("chunk_count", Value::Int(chunks)),
+                ]),
+            ),
+            (
+                "config",
+                Value::object(vec![
+                    ("chunk_size", Value::Int(self.chunk_size as i64)),
+                    ("max_chunk_size", Value::Int(self.max_chunk_size as i64)),
+                    ("merge_threshold", Value::Float(self.merge_threshold)),
+                    ("change_threshold", Value::Float(self.change_threshold)),
+                    ("search_alpha", Value::Float(self.search_alpha)),
+                ]),
+            ),
+            ("index_health", self.index_health(chunks, symbols, ready)),
+            (
+                "project_root",
+                Value::string(self.cwd.display().to_string()),
+            ),
+        ])
+    }
+
+    fn index_health(&self, chunks: i64, symbols: i64, ready: bool) -> Value {
         Value::object(vec![
             (
                 "documents",
                 Value::Int(self.store.state.documents.len() as i64),
             ),
-            ("chunks", Value::Int(self.store.state.chunks.len() as i64)),
-            ("symbols", Value::Int(self.store.state.symbols.len() as i64)),
+            ("chunks", Value::Int(chunks)),
+            ("symbol_rows", Value::Int(symbols)),
+            ("symbols_ready", Value::Bool(ready)),
+            ("latest_indexed_at", Value::Float(0.0)),
             (
-                "annotations",
-                Value::Int(self.store.state.annotations.len() as i64),
+                "storage_dir",
+                Value::string(self.storage.display().to_string()),
             ),
+            (
+                "symbol_graph_status",
+                Value::string(if ready { "ready" } else { "empty" }),
+            ),
+            ("chunk_store_status", Value::string("ready")),
+            ("seconds_since_last_index", Value::Float(0.0)),
+            ("alerts", Value::Array(Vec::new())),
         ])
     }
 
@@ -426,7 +515,89 @@ impl Engine {
     }
 
     pub fn project_brief(&self) -> Value {
-        self.stats()
+        let mut files: Vec<(i64, String, i64)> = Vec::new();
+        for doc in &self.store.state.documents {
+            let chunks: Vec<_> = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .filter(|chunk| chunk.path == doc.path)
+                .collect();
+            let tokens = chunks.iter().map(|chunk| chunk.tokens as i64).sum();
+            files.push((tokens, doc.path.clone(), chunks.len() as i64));
+        }
+        files.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
+        let largest: Vec<Value> = files
+            .into_iter()
+            .take(40)
+            .map(|(tokens, path, count)| {
+                Value::object(vec![
+                    ("path", Value::string(path)),
+                    ("chunk_count", Value::Int(count)),
+                    ("total_tokens", Value::Int(tokens)),
+                    ("indexed_at", Value::Float(0.0)),
+                ])
+            })
+            .collect();
+        let mut extensions: Vec<(String, i64)> = Vec::new();
+        for doc in &self.store.state.documents {
+            let ext = Path::new(&doc.path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| format!(".{ext}"))
+                .unwrap_or_default();
+            if let Some(slot) = extensions.iter_mut().find(|(name, _)| name == &ext) {
+                slot.1 += 1;
+            } else {
+                extensions.push((ext, 1));
+            }
+        }
+        extensions.sort_by(|left, right| left.0.cmp(&right.0));
+        let tokens: i64 = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .map(|chunk| chunk.tokens as i64)
+            .sum();
+        let chunks = self.store.state.chunks.len() as i64;
+        let symbols = self.store.state.symbols.len() as i64;
+        Value::object(vec![
+            (
+                "purpose",
+                Value::string("One-screen orientation for LLM agents; use before deep search."),
+            ),
+            (
+                "totals",
+                Value::object(vec![
+                    (
+                        "documents",
+                        Value::Int(self.store.state.documents.len() as i64),
+                    ),
+                    ("chunks", Value::Int(chunks)),
+                    ("total_tokens", Value::Int(tokens)),
+                ]),
+            ),
+            (
+                "extensions",
+                Value::Object(
+                    extensions
+                        .into_iter()
+                        .map(|(ext, count)| (ext, Value::Int(count)))
+                        .collect(),
+                ),
+            ),
+            ("largest_files_by_tokens", Value::Array(largest)),
+            (
+                "index_health",
+                self.index_health(chunks, symbols, !self.store.state.symbols.is_empty()),
+            ),
+            (
+                "project_root",
+                Value::string(self.cwd.display().to_string()),
+            ),
+        ])
     }
 
     pub fn enrichment_plan(&self) -> Value {

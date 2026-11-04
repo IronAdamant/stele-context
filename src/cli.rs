@@ -15,6 +15,20 @@ pub fn run() -> i32 {
     dispatch(&args).emit()
 }
 
+pub fn dispatch_in(cwd: PathBuf, args: &[String]) -> Response {
+    match parse(args) {
+        Ok(mut parsed) => {
+            parsed.cwd = Some(cwd);
+            parsed.run()
+        }
+        Err(message) => Response::failure(
+            "",
+            EXIT_USAGE,
+            ErrorBody::new("usage", message, "run stele-context --help"),
+        ),
+    }
+}
+
 pub fn dispatch(args: &[String]) -> Response {
     if invoked_as_mcp() {
         return crate::mcp::serve();
@@ -62,6 +76,7 @@ struct Parsed {
     max_tokens: Option<i64>,
     group_by: Option<String>,
     no_index: bool,
+    cwd: Option<PathBuf>,
 }
 
 impl Parsed {
@@ -84,7 +99,20 @@ impl Parsed {
         if command == "serve-mcp" {
             return crate::mcp::serve();
         }
-        let mut engine = match Engine::open(self.storage.as_deref()) {
+        let cwd = match self.cwd.clone() {
+            Some(path) => path,
+            None => match env::current_dir() {
+                Ok(path) => path,
+                Err(err) => {
+                    return Response::failure(
+                        &command,
+                        EXIT_ERROR,
+                        ErrorBody::new("storage", format!("cwd: {err}"), "pass --storage-dir"),
+                    );
+                }
+            },
+        };
+        let mut engine = match Engine::open_from(cwd, self.storage.as_deref()) {
             Ok(engine) => engine,
             Err(message) => {
                 return Response::failure(
@@ -157,7 +185,60 @@ impl Parsed {
                         });
                     }
                 }
-                let _ = self.compact;
+                if self.compact == Some(true) {
+                    if let crate::json::Value::Array(rows) = &mut value {
+                        let total = rows.len() as i64;
+                        let mut used = 0i64;
+                        for row in rows.iter_mut() {
+                            let crate::json::Value::Object(pairs) = row else {
+                                continue;
+                            };
+                            let content = pairs.iter().find(|(key, _)| key == "content").and_then(
+                                |(_, item)| match item {
+                                    crate::json::Value::String(text) => Some(text.clone()),
+                                    _ => None,
+                                },
+                            );
+                            let Some(content) = content else {
+                                continue;
+                            };
+                            let preview = if content.chars().count() > 400 {
+                                let mut text: String = content.chars().take(400).collect();
+                                text.push('\u{2026}');
+                                text
+                            } else {
+                                content.clone()
+                            };
+                            used += (crate::chunk::estimate_tokens(&preview) + 32) as i64;
+                            pairs.retain(|(key, _)| key != "content");
+                            pairs.push((
+                                "content_preview".to_string(),
+                                crate::json::Value::string(preview),
+                            ));
+                            pairs.push((
+                                "content_token_estimate".to_string(),
+                                crate::json::Value::Int(
+                                    crate::chunk::estimate_tokens(&content) as i64
+                                ),
+                            ));
+                        }
+                        value = crate::json::Value::object(vec![
+                            (
+                                "results",
+                                std::mem::replace(&mut value, crate::json::Value::Null),
+                            ),
+                            (
+                                "meta",
+                                crate::json::Value::object(vec![
+                                    ("estimated_tokens_used", crate::json::Value::Int(used)),
+                                    ("returned", crate::json::Value::Int(total)),
+                                    ("total_results", crate::json::Value::Int(total)),
+                                    ("truncated", crate::json::Value::Bool(false)),
+                                ]),
+                            ),
+                        ]);
+                    }
+                }
                 Ok(value)
             }
             "search-text" => engine.text_search(
@@ -254,6 +335,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         max_tokens: None,
         group_by: None,
         no_index: false,
+        cwd: None,
     };
     let mut index = 0usize;
     let mut command_seen = false;
@@ -449,7 +531,14 @@ Commands:
   serve-mcp           Speak MCP on stdin
 
 JSON is the default on commands. --human prints text.
---version prints the version line and exits.
+--version prints the version line and exits. --help prints this text.
+Flags: --storage-dir --json --regex --working-tree --confirm --path-prefix
+--limit --document --document-path --session --session-id --depth
+--significance-threshold --mode --group-by --summary-mode --top-n --top-k
+--min-tokens --max-tokens --max-result-tokens --context-lines --compact
+--no-compact --no-classify --no-scope --no-dedup --no-index --scan-new
+--no-scan-new --force --search-mode --symbol --port --host --blocking
+--chunk-id --max-documents --tags --content --type --meta
 "
     )
 }

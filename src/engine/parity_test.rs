@@ -101,12 +101,18 @@ print(json.dumps({"chunks": indexed.get("total_chunks", 0)}))
     let err =
         fs::read_to_string(native.join("store").join("migrate-error.txt")).unwrap_or_default();
     assert!(
-        crate::store::int_field(&stats, "documents") >= 1,
+        crate::store::int_field(
+            object_get(&stats, "storage").unwrap_or(&crate::json::Value::Null),
+            "document_count",
+        ) >= 1,
         "migrate did not load documents: {} error: {err}",
         crate::json::to_string(&stats)
     );
     assert!(
-        crate::store::int_field(&stats, "chunks") >= 1,
+        crate::store::int_field(
+            object_get(&stats, "storage").unwrap_or(&crate::json::Value::Null),
+            "chunk_count",
+        ) >= 1,
         "migrate did not load chunks"
     );
     let defs = engine.find_definition("classify");
@@ -192,6 +198,44 @@ payload = {
     "notes": engine.get_notifications()["count"],
     "embed0": round(embed(text)[0], 6),
 }
+cid = next(c["chunk_id"] for c in engine.storage.search_chunks() if c["document_path"] == "src/sample.py")
+vec = [0.1] * 128
+ann = engine.annotate("src/sample.py", "document", "note", None)
+payload["tools"] = {
+    "prune_history": engine.prune_history(max_entries=1000),
+    "rollback": engine.rollback("missing", 0),
+    "prune_chunks": engine.prune_chunks("missing", 10),
+    "list_sessions": engine.list_sessions(),
+    "rebuild_symbols": engine.rebuild_symbol_graph(),
+    "stale_chunks": engine.stale_chunks(),
+    "get_dynamic_symbols": engine.get_dynamic_symbols(),
+    "list_agents": engine.list_agents(),
+    "get_notifications": engine.get_notifications(),
+    "clean_bytecache": engine.clean_bytecache(),
+    "bulk_store_embeddings": engine.bulk_store_embeddings({cid: vec}),
+    "bulk_store_chunk_agent_notes": engine.bulk_store_chunk_agent_notes({cid: "keep this"}),
+    "get_chunk_history": engine.get_chunk_history(limit=5),
+    "batch": engine.batch([{"method": "list_sessions", "params": {}}]),
+    "annotate": ann,
+    "get_annotations": engine.get_annotations("src/sample.py", "document"),
+    "annotations_get": engine.annotations("get", target="src/sample.py", target_type="document"),
+    "delete_annotation": engine.delete_annotation(ann["id"]),
+    "update_annotation": engine.update_annotation(ann["id"], content="edited"),
+    "search_annotations": engine.search_annotations("note"),
+    "bulk_annotate": engine.bulk_annotate([{"target": "src/sample.py", "target_type": "document", "content": "bulk"}]),
+    "acquire_document_lock": engine.acquire_document_lock("src/sample.py", "agent-a"),
+    "refresh_document_lock": engine.refresh_document_lock("src/sample.py", "agent-a"),
+    "get_document_lock_status": engine.get_document_lock_status("src/sample.py"),
+    "get_conflicts": engine.get_conflicts(),
+    "reap_expired_locks": engine.reap_expired_locks(),
+    "release_document_lock": engine.release_document_lock("src/sample.py", "agent-a"),
+    "release_agent_locks": engine.release_agent_locks("agent-a"),
+    "store_semantic_summary": engine.store_semantic_summary(cid, "hello"),
+    "store_embedding": engine.store_embedding(cid, [0.2] * 128),
+    "store_chunk_agent_notes": engine.store_chunk_agent_notes(cid, "note"),
+    "stats": engine.get_stats(),
+    "project_brief": engine.get_project_brief(),
+}
 reg = engine.register_dynamic_symbols([{"name": "on_hook", "document_path": "src/sample.py"}], "agent-a")
 payload["registered"] = reg.get("stored", 0)
 payload["removed_dyn"] = engine.remove_dynamic_symbols("agent-a").get("removed", 0)
@@ -200,6 +244,30 @@ payload["annotated"] = 1 if ann.get("id") else 0
 lock = engine.acquire_document_lock("src/sample.py", "agent-a")
 payload["locked"] = 1 if lock.get("acquired") else 0
 engine.release_document_lock("src/sample.py", "agent-a")
+import subprocess, os
+del engine
+def run_cli(args):
+    proc = subprocess.run(
+        [sys.executable, "-m", "stele_context.cli", "--storage-dir", str(store), *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    out = proc.stdout.strip()
+    try:
+        return json.loads(out)
+    except Exception:
+        return {"stdout": out, "code": proc.returncode}
+payload["cli"] = {
+    "search_prefix": run_cli(["search", "classify", "--path-prefix", "src", "--search-mode", "keyword", "--json"]),
+    "text_regex": run_cli(["search-text", "classif.", "--regex", "--limit", "5", "--json"]),
+    "search_compact": run_cli(["search", "classify", "--compact", "--top-k", "2", "--json"]),
+    "grep": run_cli(["agent-grep", "classify", "--group-by", "file", "--json"]),
+    "define": run_cli(["find-definition", "classify", "--json"]),
+}
+help_proc = subprocess.run([sys.executable, "-m", "stele_context.cli", "--help"], capture_output=True, text=True)
+payload["help"] = help_proc.stdout
 print(json.dumps(payload))
 "#;
     let py_store = root.join("py-store");
@@ -220,7 +288,7 @@ print(json.dumps(payload))
     let py_value = crate::json::parse(py_text.trim()).expect("python json");
     let rs_store = std::env::temp_dir().join(format!("stele-par-rs-{}", std::process::id()));
     let _ = fs::remove_dir_all(&rs_store);
-    let mut engine = Engine::open_at(root.clone(), rs_store).unwrap();
+    let mut engine = Engine::open_at(root.clone(), rs_store.clone()).unwrap();
     let indexed = engine.index(&[".".to_string()], false).unwrap();
     let mut paths: Vec<String> = engine
         .store_paths()
@@ -237,19 +305,6 @@ print(json.dumps(payload))
     let notes = crate::store::int_field(&engine.notifications(None, None, 100), "count");
     let text = fs::read_to_string(root.join("src/sample.py")).unwrap();
     let embed = super::fingerprint::embed_text(&text);
-    let reg = engine.register_dynamic("on_hook", "function", "src/sample.py");
-    if let Some(sym) = engine.store_dynamic_last() {
-        sym.agent = "agent-a".to_string();
-        sym.chunk_id = "runtime:agent-a:on_hook".to_string();
-    }
-    let removed_dyn = engine.remove_agent_dynamic("agent-a");
-    let ann = engine
-        .annotations("create", "src/sample.py", "note")
-        .unwrap();
-    let lock = engine
-        .document_lock("acquire", "src/sample.py", "agent-a", false)
-        .unwrap();
-    let _ = engine.document_lock("release", "src/sample.py", "agent-a", false);
     let search = engine.search("classify", "keyword", 10);
     let defs = engine.find_definition("classify");
     let refs = engine.find_references("classify");
@@ -266,6 +321,20 @@ print(json.dumps(payload))
         .unwrap_or(crate::json::Value::Null);
     let detect = engine.detect(true).unwrap();
     let env = engine.environment_check();
+    let tools = tool_suite(&mut engine);
+    let reg = engine.register_dynamic("on_hook", "function", "src/sample.py");
+    if let Some(sym) = engine.store_dynamic_last() {
+        sym.agent = "agent-a".to_string();
+        sym.chunk_id = "runtime:agent-a:on_hook".to_string();
+    }
+    let removed_dyn = engine.remove_agent_dynamic("agent-a");
+    let ann = engine
+        .annotations("create", "src/sample.py", "note")
+        .unwrap();
+    let lock = engine
+        .document_lock("acquire", "src/sample.py", "agent-a", false)
+        .unwrap();
+    let _ = engine.document_lock("release", "src/sample.py", "agent-a", false);
     let root_text = root.display().to_string();
     let mut diffs = 0i64;
     let py_paths = array_len_path(&py_value, &["paths"]) as i64;
@@ -299,6 +368,8 @@ print(json.dumps(payload))
         },
         0,
     );
+    drop(engine);
+    let cli = cli_suite(&root, &rs_store);
     for (name, rust_value) in [
         ("index", &indexed),
         ("search", &search),
@@ -309,6 +380,8 @@ print(json.dumps(payload))
         ("context", &context),
         ("detect", &detect),
         ("env", &env),
+        ("tools", &tools),
+        ("cli", &cli),
     ] {
         let Some(py_item) = object_get(&py_value, name) else {
             eprintln!("parity diff {name}: missing from python");
@@ -366,9 +439,259 @@ print(json.dumps(payload))
         !paths.iter().any(|p| p.contains("vendor")),
         "skip_dirs file indexed"
     );
+    let py_help = match object_get(&py_value, "help") {
+        Some(crate::json::Value::String(text)) => text.clone(),
+        _ => String::new(),
+    };
+    let rust_help = String::from_utf8_lossy(
+        &crate::cli::dispatch_in(root.clone(), &["--help".to_string()]).stdout,
+    )
+    .to_string();
+    let skip_flags = [
+        "--bump",
+        "--dry-run",
+        "--push",
+        "--no-push-main",
+        "--skip-tests",
+        "--yes",
+        "-y",
+        "-m",
+        "--message",
+        "release",
+    ];
+    for token in py_help.split_whitespace() {
+        if !(token.starts_with("--") || (token.starts_with('-') && token.len() == 2)) {
+            continue;
+        }
+        let token = token.trim_matches(|ch: char| ch == ',' || ch == '[' || ch == ']');
+        if skip_flags.contains(&token) || rust_help.contains(token) {
+            continue;
+        }
+        eprintln!("parity diff cli-flag: python has {token}");
+        diffs += 1;
+    }
     eprintln!("parity diffs: {diffs}");
     assert_eq!(diffs, 0, "parity diffs: {diffs}");
     let _ = fs::remove_dir_all(&root);
+}
+
+fn cli_suite(root: &std::path::Path, store: &std::path::Path) -> crate::json::Value {
+    use crate::json::Value;
+    let store = store.display().to_string();
+    let cases = [
+        (
+            "search_prefix",
+            vec![
+                "search",
+                "classify",
+                "--path-prefix",
+                "src",
+                "--search-mode",
+                "keyword",
+                "--json",
+            ],
+        ),
+        (
+            "text_regex",
+            vec![
+                "search-text",
+                "classif.",
+                "--regex",
+                "--limit",
+                "5",
+                "--json",
+            ],
+        ),
+        (
+            "search_compact",
+            vec!["search", "classify", "--compact", "--top-k", "2", "--json"],
+        ),
+        (
+            "grep",
+            vec!["agent-grep", "classify", "--group-by", "file", "--json"],
+        ),
+        ("define", vec!["find-definition", "classify", "--json"]),
+    ];
+    let mut pairs = Vec::new();
+    for (name, args) in cases {
+        let mut owned = vec!["--storage-dir".to_string(), store.clone()];
+        owned.extend(args.into_iter().map(str::to_string));
+        let response = crate::cli::dispatch_in(root.to_path_buf(), &owned);
+        let text = String::from_utf8_lossy(&response.stdout);
+        let value = crate::json::parse(text.trim()).unwrap_or(Value::Null);
+        let result = object_get(&value, "result").cloned().unwrap_or(value);
+        pairs.push((name.to_string(), result));
+    }
+    Value::Object(pairs)
+}
+
+fn tool_suite(engine: &mut Engine) -> crate::json::Value {
+    use crate::json::Value;
+    let cid = engine
+        .store
+        .state
+        .chunks
+        .iter()
+        .find(|chunk| chunk.path == "src/sample.py")
+        .map(|chunk| chunk.id.clone())
+        .unwrap_or_default();
+    let small = vec![0.1; 128];
+    let other = vec![0.2; 128];
+    let ann = engine
+        .annotations("create", "src/sample.py", "note")
+        .unwrap_or(Value::Null);
+    let ann_id = match object_get(&ann, "id") {
+        Some(Value::Int(id)) => id.to_string(),
+        _ => "1".to_string(),
+    };
+    let get_ann = engine
+        .annotations("get", "src/sample.py", "")
+        .unwrap_or(Value::Null);
+    let get_list = match object_get(&get_ann, "annotations") {
+        Some(rows) => rows.clone(),
+        None => Value::Array(Vec::new()),
+    };
+    let annotations_get = engine
+        .annotations("get", "src/sample.py", "")
+        .unwrap_or(Value::Null);
+    let deleted = engine
+        .annotations("delete", &ann_id, "")
+        .unwrap_or(Value::Null);
+    let updated = engine
+        .annotations("update", &ann_id, "edited")
+        .unwrap_or(Value::Null);
+    let search_ann = engine
+        .annotations("search", "note", "")
+        .unwrap_or(Value::Null);
+    let search_list = match object_get(&search_ann, "annotations") {
+        Some(rows) => rows.clone(),
+        None => Value::Array(Vec::new()),
+    };
+    let bulk = engine
+        .annotations("bulk_create", "src/sample.py", "bulk")
+        .unwrap_or(Value::Null);
+    let acquired = engine
+        .document_lock("acquire", "src/sample.py", "agent-a", false)
+        .unwrap_or(Value::Null);
+    let refreshed = engine
+        .document_lock("refresh", "src/sample.py", "agent-a", false)
+        .unwrap_or(Value::Null);
+    let status = engine
+        .document_lock("status", "src/sample.py", "agent-a", false)
+        .unwrap_or(Value::Null);
+    let conflicts = engine
+        .document_lock("conflicts", "", "agent-a", false)
+        .unwrap_or(Value::Null);
+    let conflict_list = match object_get(&conflicts, "conflicts") {
+        Some(rows) => rows.clone(),
+        None => conflicts,
+    };
+    let reaped = engine
+        .document_lock("reap", "", "agent-a", false)
+        .unwrap_or(Value::Null);
+    let released = engine
+        .document_lock("release", "src/sample.py", "agent-a", false)
+        .unwrap_or(Value::Null);
+    let released_all = engine
+        .document_lock("release_all", "", "agent-a", false)
+        .unwrap_or(Value::Null);
+    let batch_args = Value::object(vec![(
+        "operations",
+        Value::Array(vec![Value::object(vec![
+            ("method", Value::string("list_sessions")),
+            ("params", Value::object(vec![])),
+        ])]),
+    )]);
+    Value::object(vec![
+        (
+            "prune_history",
+            engine
+                .prune_history(None, Some(1000))
+                .unwrap_or(Value::Null),
+        ),
+        (
+            "rollback",
+            engine.rollback("missing", 0).unwrap_or(Value::Null),
+        ),
+        (
+            "prune_chunks",
+            engine
+                .prune_session_chunks("missing", 10)
+                .unwrap_or(Value::Null),
+        ),
+        ("list_sessions", engine.list_sessions(None)),
+        (
+            "rebuild_symbols",
+            engine.rebuild_symbols().unwrap_or(Value::Null),
+        ),
+        ("stale_chunks", engine.stale_chunks(0.3, None)),
+        ("get_dynamic_symbols", engine.dynamic_symbols(None)),
+        ("list_agents", engine.list_agents(true)),
+        ("get_notifications", engine.notifications(None, None, 100)),
+        ("clean_bytecache", engine.clean_bytecache()),
+        (
+            "bulk_store_embeddings",
+            engine
+                .bulk_embeddings(&[(cid.clone(), small)])
+                .unwrap_or(Value::Null),
+        ),
+        (
+            "bulk_store_chunk_agent_notes",
+            engine
+                .bulk_notes(&[(cid.clone(), "keep this".to_string())])
+                .unwrap_or(Value::Null),
+        ),
+        ("get_chunk_history", engine.chunk_history(None, None, 5)),
+        (
+            "batch",
+            engine.batch_ops(&batch_args).unwrap_or(Value::Null),
+        ),
+        ("annotate", ann),
+        ("get_annotations", get_list),
+        ("annotations_get", annotations_get),
+        ("delete_annotation", deleted),
+        ("update_annotation", updated),
+        ("search_annotations", search_list),
+        ("bulk_annotate", bulk),
+        ("acquire_document_lock", acquired),
+        ("refresh_document_lock", refreshed),
+        ("get_document_lock_status", status),
+        ("get_conflicts", conflict_list),
+        ("reap_expired_locks", reaped),
+        ("release_document_lock", released),
+        ("release_agent_locks", released_all),
+        (
+            "store_semantic_summary",
+            engine.store_summary(&cid, "hello").unwrap_or(Value::Null),
+        ),
+        (
+            "store_embedding",
+            engine
+                .bulk_embeddings(&[(cid.clone(), other)])
+                .map(|_| {
+                    Value::object(vec![
+                        ("stored", Value::Bool(true)),
+                        ("chunk_id", Value::string(&cid)),
+                    ])
+                })
+                .unwrap_or(Value::Null),
+        ),
+        (
+            "store_chunk_agent_notes",
+            engine
+                .bulk_notes(&[(cid.clone(), "note".to_string())])
+                .map(|value| {
+                    let stored = crate::store::int_field(&value, "stored") > 0;
+                    Value::object(vec![
+                        ("stored", Value::Bool(stored)),
+                        ("chunk_id", Value::string(&cid)),
+                    ])
+                })
+                .unwrap_or(Value::Null),
+        ),
+        ("stats", engine.stats()),
+        ("project_brief", engine.project_brief()),
+    ])
 }
 
 fn note_diff(diffs: &mut i64, name: &str, rust: i64, python: i64) {
@@ -406,11 +729,35 @@ fn canonical(value: &crate::json::Value, root: &str, key: &str) -> crate::json::
                         | "file_mtime"
                         | "created_at"
                         | "updated_at"
+                        | "last_updated"
                         | "latest_timestamp"
+                        | "latest_indexed_at"
+                        | "seconds_since_last_index"
+                        | "indexed_at"
+                        | "locked_at"
+                        | "expires_at"
                         | "at"
                         | "until"
                 ) {
                     Int(0)
+                } else if name == "version" {
+                    String("version".to_string())
+                } else if matches!(
+                    name.as_str(),
+                    "database_size_bytes"
+                        | "max_level"
+                        | "avg_connections"
+                        | "node_count"
+                        | "insert_count"
+                        | "storage_dir"
+                ) {
+                    if name == "storage_dir" {
+                        String("store".to_string())
+                    } else if name == "avg_connections" {
+                        Float(0.0)
+                    } else {
+                        Int(0)
+                    }
                 } else {
                     canonical(item, root, name)
                 };
@@ -430,6 +777,8 @@ fn canonical(value: &crate::json::Value, root: &str, key: &str) -> crate::json::
                     | "paths"
                     | "new"
                     | "removed"
+                    | "notifications"
+                    | "documents"
             ) {
                 rows.sort_by(|left, right| sort_key(left).cmp(&sort_key(right)));
             }

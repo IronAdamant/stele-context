@@ -34,7 +34,7 @@ impl Engine {
         } else {
             search::keyword(&self.bm25, query, top_k)
         };
-        let mut rows = self.rows(&hits);
+        let mut rows = self.rows(&hits, mode == "hybrid");
         apply_proximity(&mut rows, query);
         Value::Array(rows)
     }
@@ -570,19 +570,33 @@ impl Engine {
 
     pub fn annotations(&mut self, action: &str, path: &str, body: &str) -> Result<Value, String> {
         match action {
-            "create" | "bulk_create" => {
-                let id = hex(&sha256(format!("{path}\n{body}").as_bytes()))[..16].to_string();
+            "bulk_create" => {
+                let created = self.annotations("create", path, body)?;
+                Ok(Value::object(vec![
+                    ("created", Value::Array(vec![created])),
+                    ("errors", Value::Array(Vec::new())),
+                ]))
+            }
+            "create" => {
+                self.store.state.next_annotation += 1;
+                let id_num = self.store.state.next_annotation;
+                let id = id_num.to_string();
+                let now = super::now_secs();
                 self.store.state.annotations.push(Annotation {
                     id: id.clone(),
                     path: path.to_string(),
                     body: body.to_string(),
                     tags: Vec::new(),
                     target_type: "document".to_string(),
-                    created_at: super::now_secs(),
-                    updated_at: super::now_secs(),
+                    created_at: now,
+                    updated_at: now,
                 });
                 self.store.save("annotate", &Value::string(&id))?;
-                Ok(Value::object(vec![("id", Value::string(id))]))
+                Ok(Value::object(vec![
+                    ("id", Value::Int(id_num)),
+                    ("target", Value::string(path)),
+                    ("target_type", Value::string("document")),
+                ]))
             }
             "get" | "search" => {
                 let rows = self
@@ -593,9 +607,13 @@ impl Engine {
                     .filter(|note| path.is_empty() || note.path == path || note.body.contains(path))
                     .map(|note| {
                         Value::object(vec![
-                            ("id", Value::string(&note.id)),
-                            ("path", Value::string(&note.path)),
-                            ("body", Value::string(&note.body)),
+                            ("id", Value::Int(note.id.parse::<i64>().unwrap_or(0))),
+                            ("target", Value::string(&note.path)),
+                            ("target_type", Value::string(&note.target_type)),
+                            ("content", Value::string(&note.body)),
+                            ("tags", Value::Array(Vec::new())),
+                            ("created_at", Value::Int(note.created_at)),
+                            ("updated_at", Value::Int(note.updated_at)),
                         ])
                     })
                     .collect();
@@ -607,14 +625,15 @@ impl Engine {
                     .state
                     .annotations
                     .retain(|note| note.id != path && note.path != path);
+                let deleted = before != self.store.state.annotations.len();
                 self.store.save("annotate-delete", &Value::string(path))?;
-                Ok(Value::object(vec![(
-                    "removed",
-                    Value::Int((before - self.store.state.annotations.len()) as i64),
-                )]))
+                Ok(Value::object(vec![
+                    ("deleted", Value::Bool(deleted)),
+                    ("id", Value::Int(path.parse::<i64>().unwrap_or(0))),
+                ]))
             }
             "update" => {
-                if let Some(note) = self
+                let updated = if let Some(note) = self
                     .store
                     .state
                     .annotations
@@ -622,9 +641,16 @@ impl Engine {
                     .find(|note| note.id == path)
                 {
                     note.body = body.to_string();
-                }
+                    note.updated_at = super::now_secs();
+                    true
+                } else {
+                    false
+                };
                 self.store.save("annotate-update", &Value::string(path))?;
-                Ok(Value::object(vec![("updated", Value::string(path))]))
+                Ok(Value::object(vec![
+                    ("updated", Value::Bool(updated)),
+                    ("id", Value::Int(path.parse::<i64>().unwrap_or(0))),
+                ]))
             }
             _ => Err(format!("unknown annotations action '{action}'")),
         }
@@ -744,7 +770,10 @@ impl Engine {
         };
         chunk.summary = Some(summary.to_string());
         self.store.save("summary", &Value::string(chunk_id))?;
-        Ok(Value::object(vec![("stored", Value::Bool(true))]))
+        Ok(Value::object(vec![
+            ("stored", Value::Bool(true)),
+            ("chunk_id", Value::string(chunk_id)),
+        ]))
     }
 
     fn symbol_index(&self) -> Value {
@@ -869,7 +898,7 @@ impl Engine {
             .collect()
     }
 
-    fn rows(&self, hits: &[crate::search::Scored]) -> Vec<Value> {
+    fn rows(&self, hits: &[crate::search::Scored], tier2: bool) -> Vec<Value> {
         hits.iter()
             .filter_map(|hit| {
                 let chunk = self
@@ -889,7 +918,7 @@ impl Engine {
                     ("source".to_string(), Value::string(hit.source)),
                     (
                         "tier2_present".to_string(),
-                        Value::Bool(chunk.summary.is_some()),
+                        Value::Bool(tier2 && chunk.summary.is_some()),
                     ),
                 ];
                 if let Some(edges) = edge_block(&self.store.state.edges, &chunk.id) {

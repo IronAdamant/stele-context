@@ -353,7 +353,18 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             &arg(args, "value").unwrap_or_default(),
         ),
         "get_relevant_kv" => Ok(engine.get_kv(session.as_deref().unwrap_or("default"))),
-        "bulk_store_summaries" | "store_semantic_summary" => {
+        "store_semantic_summary" => {
+            let id = arg(args, "chunk_id").unwrap_or_default();
+            let summary = arg(args, "summary").unwrap_or_default();
+            match engine.store_summary(&id, &summary) {
+                Ok(value) => Ok(value),
+                Err(_) => Ok(Value::object(vec![
+                    ("stored", Value::Bool(false)),
+                    ("error", Value::string("chunk not found")),
+                ])),
+            }
+        }
+        "bulk_store_summaries" => {
             let mut pairs = string_pairs(args, "summaries");
             if pairs.is_empty() {
                 let id = arg(args, "chunk_id").unwrap_or_default();
@@ -364,7 +375,28 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             }
             engine.bulk_summaries(&pairs)
         }
-        "bulk_store_embeddings" | "store_embedding" => {
+        "store_embedding" => {
+            let id = arg(args, "chunk_id").unwrap_or_default();
+            let vector = float_list(args, "vector")
+                .or(float_list(args, "embedding"))
+                .unwrap_or_default();
+            let stored = engine
+                .bulk_embeddings(&[(id.clone(), vector)])
+                .map(|value| crate::store::int_field(&value, "stored") > 0)
+                .unwrap_or(false);
+            if stored {
+                Ok(Value::object(vec![
+                    ("stored", Value::Bool(true)),
+                    ("chunk_id", Value::string(id)),
+                ]))
+            } else {
+                Ok(Value::object(vec![
+                    ("stored", Value::Bool(false)),
+                    ("error", Value::string("chunk not found")),
+                ]))
+            }
+        }
+        "bulk_store_embeddings" => {
             let mut pairs = float_pairs(args, "embeddings");
             if pairs.is_empty() {
                 let id = arg(args, "chunk_id").unwrap_or_default();
@@ -375,7 +407,19 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             }
             engine.bulk_embeddings(&pairs)
         }
-        "bulk_store_chunk_agent_notes" | "store_chunk_agent_notes" => {
+        "store_chunk_agent_notes" => {
+            let id = arg(args, "chunk_id").unwrap_or_default();
+            let notes = arg(args, "notes").unwrap_or_else(|| arg(args, "body").unwrap_or_default());
+            let stored = engine
+                .bulk_notes(&[(id.clone(), notes)])
+                .map(|value| crate::store::int_field(&value, "stored") > 0)
+                .unwrap_or(false);
+            Ok(Value::object(vec![
+                ("stored", Value::Bool(stored)),
+                ("chunk_id", Value::string(id)),
+            ]))
+        }
+        "bulk_store_chunk_agent_notes" => {
             let mut pairs = string_pairs(args, "notes");
             if pairs.is_empty() {
                 let id = arg(args, "chunk_id").unwrap_or_default();
@@ -502,7 +546,13 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 .or_else(|| arg(args, "body"))
                 .unwrap_or_default(),
         ),
-        "get_annotations" => engine.annotations("get", &arg(args, "target").unwrap_or(path), ""),
+        "get_annotations" => {
+            let wrapped = engine.annotations("get", &arg(args, "target").unwrap_or(path), "")?;
+            Ok(match field(&wrapped, "annotations") {
+                Some(Value::Array(rows)) => Value::Array(rows.clone()),
+                _ => wrapped,
+            })
+        }
         "delete_annotation" => {
             engine.annotations("delete", &arg(args, "annotation_id").unwrap_or(path), "")
         }
@@ -512,7 +562,11 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             &arg(args, "content").unwrap_or_default(),
         ),
         "search_annotations" => {
-            engine.annotations("search", &arg(args, "query").unwrap_or(query), "")
+            let wrapped = engine.annotations("search", &arg(args, "query").unwrap_or(query), "")?;
+            Ok(match field(&wrapped, "annotations") {
+                Some(Value::Array(rows)) => Value::Array(rows.clone()),
+                _ => wrapped,
+            })
         }
         "bulk_annotate" => engine.annotations(
             "bulk_create",
@@ -544,7 +598,13 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             &arg(args, "agent_id").unwrap_or_else(|| "default".to_string()),
             false,
         ),
-        "get_conflicts" => engine.document_lock("conflicts", &path, "default", false),
+        "get_conflicts" => {
+            let wrapped = engine.document_lock("conflicts", &path, "default", false)?;
+            Ok(match field(&wrapped, "conflicts") {
+                Some(Value::Array(rows)) => Value::Array(rows.clone()),
+                _ => wrapped,
+            })
+        }
         "reap_expired_locks" => engine.document_lock("reap", "", "default", false),
         _ => Err(format!("unknown tool '{name}'")),
     }

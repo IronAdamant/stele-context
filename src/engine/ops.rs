@@ -170,7 +170,14 @@ impl Engine {
                 ("last_updated", Value::Int(session.updated_at)),
                 ("turn_count", Value::Int(session.turn)),
                 ("total_tokens", Value::Int(session.tokens)),
-                ("agent_id", Value::string(&session.agent)),
+                (
+                    "agent_id",
+                    if session.agent.is_empty() {
+                        Value::Null
+                    } else {
+                        Value::string(&session.agent)
+                    },
+                ),
             ]));
         }
         Value::Array(rows)
