@@ -26,8 +26,12 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Only run on version tags or published releases
-    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+    # Python packages stay on the 1.5 line. v2 tags publish Rust binaries
+    # from release-rust.yml and must not upload a wheel.
+    if: >
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v1.')) ||
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v1.'))
     steps:
     - name: Determine release trigger
       run: |

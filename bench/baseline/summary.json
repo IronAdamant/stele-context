@@ -1,0 +1,585 @@
+{
+ "info": {
+  "python": "3.13.5",
+  "platform": "Linux-6.12.94+-x86_64-with-glibc2.41",
+  "cpu_count": 8,
+  "cpu": "Intel(R) Xeon(R) Processor",
+  "mem_gb": 15.6,
+  "stele": "stele-context 1.5.1",
+  "sample": "Textualize/rich v13.9.4 tarball",
+  "runs": 7,
+  "started": "2026-11-04 07:14:53 AEDT",
+  "store_bytes": 21325110,
+  "finished": "2026-11-04 07:16:08 AEDT"
+ },
+ "results": [
+  {
+   "name": "cli --version (startup)",
+   "kind": "cli",
+   "runs": 10,
+   "median_ms": 79.4,
+   "min_ms": 75.8,
+   "max_ms": 96.1,
+   "stdev_ms": 6.2,
+   "peak_rss_mb": 25.8,
+   "out_bytes": 20,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli --help",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 75.7,
+   "min_ms": 73.2,
+   "max_ms": 78.6,
+   "stdev_ms": 2.0,
+   "peak_rss_mb": 25.8,
+   "out_bytes": 3720,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli index . (cold, empty store)",
+   "kind": "cli",
+   "runs": 3,
+   "median_ms": 10656.1,
+   "min_ms": 10447.7,
+   "max_ms": 11366.9,
+   "stdev_ms": 481.9,
+   "peak_rss_mb": 67.1,
+   "out_bytes": 51146,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli index . (warm, nothing changed)",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 197.8,
+   "min_ms": 194.8,
+   "max_ms": 200.6,
+   "stdev_ms": 2.3,
+   "peak_rss_mb": 44.3,
+   "out_bytes": 42365,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli detect (nothing changed)",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 167.9,
+   "min_ms": 166.5,
+   "max_ms": 170.2,
+   "stdev_ms": 1.5,
+   "peak_rss_mb": 47.8,
+   "out_bytes": 15855,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli stats",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 162.5,
+   "min_ms": 146.9,
+   "max_ms": 178.8,
+   "stdev_ms": 12.1,
+   "peak_rss_mb": 44.3,
+   "out_bytes": 439,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli doctor",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 189.7,
+   "min_ms": 175.3,
+   "max_ms": 206.0,
+   "stdev_ms": 12.1,
+   "peak_rss_mb": 44.4,
+   "out_bytes": 8333,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli map --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 163.3,
+   "min_ms": 159.1,
+   "max_ms": 222.5,
+   "stdev_ms": 28.9,
+   "peak_rss_mb": 44.4,
+   "out_bytes": 105553,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli project-brief --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 165.5,
+   "min_ms": 162.0,
+   "max_ms": 198.5,
+   "stdev_ms": 15.9,
+   "peak_rss_mb": 44.3,
+   "out_bytes": 7601,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli search hybrid --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 169.0,
+   "min_ms": 161.3,
+   "max_ms": 910.9,
+   "stdev_ms": 280.7,
+   "peak_rss_mb": 44.5,
+   "out_bytes": 49462,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli search keyword --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 161.2,
+   "min_ms": 159.8,
+   "max_ms": 173.4,
+   "stdev_ms": 4.7,
+   "peak_rss_mb": 44.6,
+   "out_bytes": 49462,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli search-text --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 141.9,
+   "min_ms": 140.0,
+   "max_ms": 146.9,
+   "stdev_ms": 2.6,
+   "peak_rss_mb": 46.1,
+   "out_bytes": 27090,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli agent-grep --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 228.3,
+   "min_ms": 217.8,
+   "max_ms": 240.5,
+   "stdev_ms": 8.2,
+   "peak_rss_mb": 61.1,
+   "out_bytes": 51827,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli query --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 193.5,
+   "min_ms": 190.1,
+   "max_ms": 213.1,
+   "stdev_ms": 10.1,
+   "peak_rss_mb": 49.3,
+   "out_bytes": 25935,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli find-definition --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 141.4,
+   "min_ms": 138.8,
+   "max_ms": 145.2,
+   "stdev_ms": 1.9,
+   "peak_rss_mb": 44.3,
+   "out_bytes": 83598,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli find-references --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 166.2,
+   "min_ms": 153.8,
+   "max_ms": 179.1,
+   "stdev_ms": 8.9,
+   "peak_rss_mb": 44.3,
+   "out_bytes": 247383,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli impact-radius --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 179.6,
+   "min_ms": 166.9,
+   "max_ms": 202.7,
+   "stdev_ms": 11.8,
+   "peak_rss_mb": 44.3,
+   "out_bytes": 4038,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli coupling --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 185.3,
+   "min_ms": 174.8,
+   "max_ms": 207.7,
+   "stdev_ms": 11.2,
+   "peak_rss_mb": 44.3,
+   "out_bytes": 49602,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli enrichment-plan --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 137.7,
+   "min_ms": 135.0,
+   "max_ms": 148.7,
+   "stdev_ms": 5.4,
+   "peak_rss_mb": 44.3,
+   "out_bytes": 5334,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "cli history --json",
+   "kind": "cli",
+   "runs": 7,
+   "median_ms": 135.1,
+   "min_ms": 133.6,
+   "max_ms": 145.7,
+   "stdev_ms": 4.3,
+   "peak_rss_mb": 44.3,
+   "out_bytes": 291335,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp[lite] spawn to initialize",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 366.1,
+   "min_ms": 359.1,
+   "max_ms": 384.3,
+   "stdev_ms": 9.1,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 221,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp[lite] tools/list",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 2.2,
+   "min_ms": 1.6,
+   "max_ms": 2.5,
+   "stdev_ms": 0.3,
+   "peak_rss_mb": 72.7,
+   "out_bytes": 26284,
+   "rc": [
+    0
+   ],
+   "tools": 25
+  },
+  {
+   "name": "mcp[standard] spawn to initialize",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 358.6,
+   "min_ms": 354.4,
+   "max_ms": 370.9,
+   "stdev_ms": 6.7,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 221,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp[standard] tools/list",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 2.1,
+   "min_ms": 1.8,
+   "max_ms": 2.9,
+   "stdev_ms": 0.3,
+   "peak_rss_mb": 72.8,
+   "out_bytes": 33288,
+   "rc": [
+    0
+   ],
+   "tools": 43
+  },
+  {
+   "name": "mcp[full] spawn to initialize",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 368.5,
+   "min_ms": 355.3,
+   "max_ms": 376.0,
+   "stdev_ms": 8.2,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 221,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp[full] tools/list",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 2.4,
+   "min_ms": 2.1,
+   "max_ms": 2.8,
+   "stdev_ms": 0.3,
+   "peak_rss_mb": 72.8,
+   "out_bytes": 37660,
+   "rc": [
+    0
+   ],
+   "tools": 61
+  },
+  {
+   "name": "mcp tools/call doctor",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 38.7,
+   "min_ms": 37.8,
+   "max_ms": 45.6,
+   "stdev_ms": 2.9,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 8330,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call map",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 23.2,
+   "min_ms": 22.7,
+   "max_ms": 25.3,
+   "stdev_ms": 0.9,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 105553,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call query",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 36.6,
+   "min_ms": 36.0,
+   "max_ms": 58.7,
+   "stdev_ms": 8.3,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 25937,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call search",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 11.3,
+   "min_ms": 11.0,
+   "max_ms": 11.8,
+   "stdev_ms": 0.2,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 49461,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call search_text",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 8.0,
+   "min_ms": 8.0,
+   "max_ms": 8.6,
+   "stdev_ms": 0.3,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 27089,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call agent_grep",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 81.9,
+   "min_ms": 78.8,
+   "max_ms": 108.4,
+   "stdev_ms": 10.3,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 36234,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call find_definition",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 7.7,
+   "min_ms": 7.5,
+   "max_ms": 9.1,
+   "stdev_ms": 0.6,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 83597,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call find_references",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 29.2,
+   "min_ms": 21.1,
+   "max_ms": 37.6,
+   "stdev_ms": 6.5,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 247382,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call impact_radius",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 51.2,
+   "min_ms": 42.4,
+   "max_ms": 89.4,
+   "stdev_ms": 16.0,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 4037,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call coupling",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 42.6,
+   "min_ms": 39.2,
+   "max_ms": 48.4,
+   "stdev_ms": 3.7,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 49601,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call get_context (no session, full read)",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 3.8,
+   "min_ms": 3.4,
+   "max_ms": 4.0,
+   "stdev_ms": 0.2,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 108451,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call get_context (session, repeat read)",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 3.1,
+   "min_ms": 2.8,
+   "max_ms": 3.5,
+   "stdev_ms": 0.2,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 69,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call detect_changes",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 33.5,
+   "min_ms": 32.7,
+   "max_ms": 36.9,
+   "stdev_ms": 1.5,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 17087,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp tools/call get_context after 1-line edit (diff)",
+   "kind": "mcp",
+   "runs": 7,
+   "median_ms": 12.7,
+   "min_ms": 12.2,
+   "max_ms": 13.1,
+   "stdev_ms": 0.3,
+   "peak_rss_mb": 0.0,
+   "out_bytes": 680,
+   "rc": [
+    0
+   ]
+  },
+  {
+   "name": "mcp[lite] server peak RSS after all calls",
+   "kind": "mcp",
+   "peak_rss_mb": 118.6
+  }
+ ]
+}

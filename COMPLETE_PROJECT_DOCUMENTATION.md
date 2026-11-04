@@ -1,6 +1,8 @@
 # Stele Context - Complete Project Documentation
 
-**Last updated:** 2026-11-03 · **Release:** v1.5.2 (Grok Build)
+**Last updated:** 2026-11-03 · **Release:** Python 1.5.2 in tree; Rust 2.0.0 ready to tag, not tagged
+
+Rust 2.0 sources: `src/` (chunk, pyre, search, store, engine, symbols, mcp, lang/scan, media, http_serve, locks), `Cargo.toml` with an empty `[dependencies]`. Media indexing, `serve`, and the cross-worktree lock file are std-only. Release notes: `docs/release-2.0.md`. The 1.5.3 PyPI notice is prepared in `release/pypi-1.5.3/NOTICE.md` and is not applied. `llms.txt` and `server.json` describe the 2.0 binary. `npm/stele-context` is a launcher. `.github/workflows/release-rust.yml` publishes `v2.*` binaries. `.github/workflows/publish.yml` publishes only `v1.*` to PyPI.
 
 ## Documentation (root)
 
@@ -131,9 +133,14 @@
 | `tests/test_eval_search_quality.py` | Search quality eval harness wiring | (see file) |
 | `tests/test_p0_audit_fixes.py` | MCP schema/engine alignment (session_id, query history, save_kv_state) | (see file) |
 | `tests/test_bench_gate.py` | D13 median CI and Mann-Whitney gate | (see file) |
+| `tests/test_parity_harness.py` | Phase 0 fixture goldens, extension coverage, CLI smoke | (see file) |
 | `bench/gate.py` | D13 statistics: median interval, Mann-Whitney, optional Rust floor | none |
 | `bench/ci_gate.py` | Interleaved main-versus-PR benchmark runner | bench/gate.py |
+| `parity/` | Python 1.5.2 parity harness: fixtures, goldens, corpus hashes, CLI smoke | stele_context |
 | `.github/workflows/benchmark-gate.yml` | Required-style `benchmark-gate` check on every pull request and on main | bench/ci_gate.py |
+| `.github/workflows/rust.yml` | Parity harness on 3 OSes; Rust test/check on 6 targets; B1 floor | parity, bench, Cargo.toml |
+| `Cargo.toml`, `src/` | Rust 2.0.0 std-only crate. Phases 1–2: doctor, JSON, config, root, walk, hashes, parsing core (Python and JSON) | none |
+| `scripts/check_zero_deps.py` | Fails if Cargo.toml or Cargo.lock names any crate but stele-context | none |
 
 **Total:** run `pytest` for the current count (grows with the suite). Historical snapshot: 891 pass, 1 skipped without MCP SDK (as of 2026-04-17) — do not treat that number as live truth.
 

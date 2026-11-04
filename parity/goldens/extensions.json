@@ -1,0 +1,447 @@
+{
+  "extensions": [
+    {
+      "chunker": "code",
+      "ext": "bash",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "bash",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "c",
+      "extractor": "c",
+      "grammar_key": "c",
+      "grammar_module": "tree_sitter_c",
+      "regex_fallback": "c",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "cc",
+      "extractor": "c",
+      "grammar_key": "cpp",
+      "grammar_module": "tree_sitter_cpp",
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "cfg",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "cjs",
+      "extractor": "javascript",
+      "grammar_key": "javascript",
+      "grammar_module": "tree_sitter_javascript",
+      "regex_fallback": "cjs",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "cpp",
+      "extractor": "c",
+      "grammar_key": "cpp",
+      "grammar_module": "tree_sitter_cpp",
+      "regex_fallback": "cpp",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "cs",
+      "extractor": "csharp",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "cs",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "css",
+      "extractor": "css",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "cxx",
+      "extractor": "c",
+      "grammar_key": "cpp",
+      "grammar_module": "tree_sitter_cpp",
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "go",
+      "extractor": "go",
+      "grammar_key": "go",
+      "grammar_module": "tree_sitter_go",
+      "regex_fallback": "go",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "h",
+      "extractor": "c",
+      "grammar_key": "c",
+      "grammar_module": "tree_sitter_c",
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "hpp",
+      "extractor": "c",
+      "grammar_key": "cpp",
+      "grammar_module": "tree_sitter_cpp",
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "htm",
+      "extractor": "html",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "html",
+      "extractor": "html",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "hxx",
+      "extractor": "c",
+      "grammar_key": "cpp",
+      "grammar_module": "tree_sitter_cpp",
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "ini",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "java",
+      "extractor": "java",
+      "grammar_key": "java",
+      "grammar_module": "tree_sitter_java",
+      "regex_fallback": "java",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "js",
+      "extractor": "javascript",
+      "grammar_key": "javascript",
+      "grammar_module": "tree_sitter_javascript",
+      "regex_fallback": "js",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "json",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "jsx",
+      "extractor": "javascript",
+      "grammar_key": "javascript",
+      "grammar_module": "tree_sitter_javascript",
+      "regex_fallback": "jsx",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "kt",
+      "extractor": "java",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "kts",
+      "extractor": "java",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "less",
+      "extractor": "css",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "mjs",
+      "extractor": "javascript",
+      "grammar_key": "javascript",
+      "grammar_module": "tree_sitter_javascript",
+      "regex_fallback": "mjs",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "php",
+      "extractor": "php",
+      "grammar_key": "php",
+      "grammar_module": "tree_sitter_php",
+      "regex_fallback": "php",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "py",
+      "extractor": "python-ast",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "pyw",
+      "extractor": "python-ast",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "pyx",
+      "extractor": "python-ast",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "rb",
+      "extractor": "ruby",
+      "grammar_key": "ruby",
+      "grammar_module": "tree_sitter_ruby",
+      "regex_fallback": "rb",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "rs",
+      "extractor": "rust",
+      "grammar_key": "rust",
+      "grammar_module": "tree_sitter_rust",
+      "regex_fallback": "rs",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "scala",
+      "extractor": "java",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "scss",
+      "extractor": "css",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "sh",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "sh",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "sql",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "swift",
+      "extractor": "swift",
+      "grammar_key": "swift",
+      "grammar_module": "tree_sitter_swift",
+      "regex_fallback": "swift",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "toml",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "ts",
+      "extractor": "javascript",
+      "grammar_key": "typescript",
+      "grammar_module": "tree_sitter_typescript",
+      "regex_fallback": "ts",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "tsx",
+      "extractor": "javascript",
+      "grammar_key": "typescript",
+      "grammar_module": "tree_sitter_typescript",
+      "regex_fallback": "tsx",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "code",
+      "ext": "yaml",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "yml",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "js",
+      "regex_pattern": false
+    },
+    {
+      "chunker": "code",
+      "ext": "zsh",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": "zsh",
+      "regex_pattern": true
+    },
+    {
+      "chunker": "text",
+      "ext": "adoc",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": null,
+      "regex_pattern": false
+    },
+    {
+      "chunker": "text",
+      "ext": "csv",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": null,
+      "regex_pattern": false
+    },
+    {
+      "chunker": "text",
+      "ext": "log",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": null,
+      "regex_pattern": false
+    },
+    {
+      "chunker": "text",
+      "ext": "markdown",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": null,
+      "regex_pattern": false
+    },
+    {
+      "chunker": "text",
+      "ext": "md",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": null,
+      "regex_pattern": false
+    },
+    {
+      "chunker": "text",
+      "ext": "rst",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": null,
+      "regex_pattern": false
+    },
+    {
+      "chunker": "text",
+      "ext": "tsv",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": null,
+      "regex_pattern": false
+    },
+    {
+      "chunker": "text",
+      "ext": "txt",
+      "extractor": "none",
+      "grammar_key": null,
+      "grammar_module": null,
+      "regex_fallback": null,
+      "regex_pattern": false
+    }
+  ],
+  "note": "Tree-sitter is optional in 1.5.2 and dropped in 2.0 (D3). The parity reference is the stdlib path: ast for Python, the regex extractors otherwise, and the regex or line chunker when tree-sitter is not installed. regex_fallback 'js' means get_regex_pattern returns the JavaScript pattern.",
+  "reference": "tree-sitter-off"
+}

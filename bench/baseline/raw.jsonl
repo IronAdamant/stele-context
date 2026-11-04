@@ -1,0 +1,230 @@
+{"wall_ms": 75.81978899543174, "rss_kb": 26320, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 0}
+{"wall_ms": 77.93610499356873, "rss_kb": 26428, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 1}
+{"wall_ms": 76.79508498404175, "rss_kb": 26328, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 2}
+{"wall_ms": 76.65180100593716, "rss_kb": 26336, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 3}
+{"wall_ms": 96.11641298397444, "rss_kb": 26372, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 4}
+{"wall_ms": 85.09107699501328, "rss_kb": 26348, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 5}
+{"wall_ms": 86.15785097936168, "rss_kb": 26392, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 6}
+{"wall_ms": 81.49058098206297, "rss_kb": 26404, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 7}
+{"wall_ms": 80.44508899911307, "rss_kb": 26500, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 8}
+{"wall_ms": 78.4404129954055, "rss_kb": 26484, "out_bytes": 20, "rc": 0, "stderr_tail": "", "name": "cli --version (startup)", "run": 9}
+{"wall_ms": 77.11005499004386, "rss_kb": 26204, "out_bytes": 3720, "rc": 0, "stderr_tail": "", "name": "cli --help", "run": 0}
+{"wall_ms": 77.1298489999026, "rss_kb": 26524, "out_bytes": 3720, "rc": 0, "stderr_tail": "", "name": "cli --help", "run": 1}
+{"wall_ms": 73.79071900504641, "rss_kb": 26304, "out_bytes": 3720, "rc": 0, "stderr_tail": "", "name": "cli --help", "run": 2}
+{"wall_ms": 75.66426700213924, "rss_kb": 26304, "out_bytes": 3720, "rc": 0, "stderr_tail": "", "name": "cli --help", "run": 3}
+{"wall_ms": 73.15532502252609, "rss_kb": 26456, "out_bytes": 3720, "rc": 0, "stderr_tail": "", "name": "cli --help", "run": 4}
+{"wall_ms": 78.59926798846573, "rss_kb": 26408, "out_bytes": 3720, "rc": 0, "stderr_tail": "", "name": "cli --help", "run": 5}
+{"wall_ms": 74.07639801385812, "rss_kb": 26384, "out_bytes": 3720, "rc": 0, "stderr_tail": "", "name": "cli --help", "run": 6}
+{"wall_ms": 11366.925142996479, "rss_kb": 68728, "out_bytes": 51146, "rc": 0, "stderr_tail": "", "name": "cli index . (cold, empty store)", "run": 0}
+{"wall_ms": 10447.725567006273, "rss_kb": 68956, "out_bytes": 51146, "rc": 0, "stderr_tail": "", "name": "cli index . (cold, empty store)", "run": 1}
+{"wall_ms": 10656.130905001191, "rss_kb": 68692, "out_bytes": 51146, "rc": 0, "stderr_tail": "", "name": "cli index . (cold, empty store)", "run": 2}
+{"wall_ms": 200.32678497955203, "rss_kb": 45444, "out_bytes": 42365, "rc": 0, "stderr_tail": "", "name": "cli index . (warm, nothing changed)", "run": 0}
+{"wall_ms": 197.7905530075077, "rss_kb": 45400, "out_bytes": 42365, "rc": 0, "stderr_tail": "", "name": "cli index . (warm, nothing changed)", "run": 1}
+{"wall_ms": 195.6861399812624, "rss_kb": 45300, "out_bytes": 42365, "rc": 0, "stderr_tail": "", "name": "cli index . (warm, nothing changed)", "run": 2}
+{"wall_ms": 194.79537100414746, "rss_kb": 45320, "out_bytes": 42365, "rc": 0, "stderr_tail": "", "name": "cli index . (warm, nothing changed)", "run": 3}
+{"wall_ms": 196.0869199829176, "rss_kb": 45252, "out_bytes": 42365, "rc": 0, "stderr_tail": "", "name": "cli index . (warm, nothing changed)", "run": 4}
+{"wall_ms": 198.8642259966582, "rss_kb": 45272, "out_bytes": 42365, "rc": 0, "stderr_tail": "", "name": "cli index . (warm, nothing changed)", "run": 5}
+{"wall_ms": 200.59257099637762, "rss_kb": 45456, "out_bytes": 42365, "rc": 0, "stderr_tail": "", "name": "cli index . (warm, nothing changed)", "run": 6}
+{"wall_ms": 166.8430179997813, "rss_kb": 48876, "out_bytes": 15855, "rc": 0, "stderr_tail": "", "name": "cli detect (nothing changed)", "run": 0}
+{"wall_ms": 166.52458798489533, "rss_kb": 48840, "out_bytes": 16001, "rc": 0, "stderr_tail": "", "name": "cli detect (nothing changed)", "run": 1}
+{"wall_ms": 169.90802402142435, "rss_kb": 48920, "out_bytes": 15938, "rc": 0, "stderr_tail": "", "name": "cli detect (nothing changed)", "run": 2}
+{"wall_ms": 166.963088006014, "rss_kb": 48884, "out_bytes": 15557, "rc": 0, "stderr_tail": "", "name": "cli detect (nothing changed)", "run": 3}
+{"wall_ms": 167.90888900868595, "rss_kb": 49028, "out_bytes": 15158, "rc": 0, "stderr_tail": "", "name": "cli detect (nothing changed)", "run": 4}
+{"wall_ms": 170.2458329964429, "rss_kb": 49036, "out_bytes": 16119, "rc": 0, "stderr_tail": "", "name": "cli detect (nothing changed)", "run": 5}
+{"wall_ms": 168.99268102133647, "rss_kb": 48988, "out_bytes": 15800, "rc": 0, "stderr_tail": "", "name": "cli detect (nothing changed)", "run": 6}
+{"wall_ms": 166.9629139942117, "rss_kb": 45428, "out_bytes": 439, "rc": 0, "stderr_tail": "", "name": "cli stats", "run": 0}
+{"wall_ms": 148.14889000263065, "rss_kb": 45416, "out_bytes": 439, "rc": 0, "stderr_tail": "", "name": "cli stats", "run": 1}
+{"wall_ms": 146.85057499445975, "rss_kb": 45388, "out_bytes": 439, "rc": 0, "stderr_tail": "", "name": "cli stats", "run": 2}
+{"wall_ms": 166.37316200649366, "rss_kb": 45372, "out_bytes": 439, "rc": 0, "stderr_tail": "", "name": "cli stats", "run": 3}
+{"wall_ms": 178.7762520252727, "rss_kb": 45252, "out_bytes": 439, "rc": 0, "stderr_tail": "", "name": "cli stats", "run": 4}
+{"wall_ms": 162.49055697699077, "rss_kb": 45308, "out_bytes": 439, "rc": 0, "stderr_tail": "", "name": "cli stats", "run": 5}
+{"wall_ms": 149.13171401713043, "rss_kb": 45420, "out_bytes": 439, "rc": 0, "stderr_tail": "", "name": "cli stats", "run": 6}
+{"wall_ms": 175.27056799735874, "rss_kb": 45468, "out_bytes": 8333, "rc": 0, "stderr_tail": "", "name": "cli doctor", "run": 0}
+{"wall_ms": 189.78491000598297, "rss_kb": 45300, "out_bytes": 8333, "rc": 0, "stderr_tail": "", "name": "cli doctor", "run": 1}
+{"wall_ms": 177.37977000069804, "rss_kb": 45488, "out_bytes": 8334, "rc": 0, "stderr_tail": "", "name": "cli doctor", "run": 2}
+{"wall_ms": 179.61660400032997, "rss_kb": 45312, "out_bytes": 8333, "rc": 0, "stderr_tail": "", "name": "cli doctor", "run": 3}
+{"wall_ms": 205.99468299769796, "rss_kb": 45372, "out_bytes": 8333, "rc": 0, "stderr_tail": "", "name": "cli doctor", "run": 4}
+{"wall_ms": 189.65420700260438, "rss_kb": 45504, "out_bytes": 8332, "rc": 0, "stderr_tail": "", "name": "cli doctor", "run": 5}
+{"wall_ms": 202.08836701931432, "rss_kb": 45524, "out_bytes": 8333, "rc": 0, "stderr_tail": "", "name": "cli doctor", "run": 6}
+{"wall_ms": 162.17466499074362, "rss_kb": 45476, "out_bytes": 105553, "rc": 0, "stderr_tail": "", "name": "cli map --json", "run": 0}
+{"wall_ms": 163.2733510050457, "rss_kb": 45484, "out_bytes": 105554, "rc": 0, "stderr_tail": "", "name": "cli map --json", "run": 1}
+{"wall_ms": 222.51082997536287, "rss_kb": 45312, "out_bytes": 105553, "rc": 0, "stderr_tail": "", "name": "cli map --json", "run": 2}
+{"wall_ms": 160.08226099074818, "rss_kb": 45548, "out_bytes": 105553, "rc": 0, "stderr_tail": "", "name": "cli map --json", "run": 3}
+{"wall_ms": 219.7044589847792, "rss_kb": 45356, "out_bytes": 105553, "rc": 0, "stderr_tail": "", "name": "cli map --json", "run": 4}
+{"wall_ms": 165.8902009949088, "rss_kb": 45444, "out_bytes": 105554, "rc": 0, "stderr_tail": "", "name": "cli map --json", "run": 5}
+{"wall_ms": 159.09205097705126, "rss_kb": 45296, "out_bytes": 105553, "rc": 0, "stderr_tail": "", "name": "cli map --json", "run": 6}
+{"wall_ms": 163.71945597347803, "rss_kb": 45488, "out_bytes": 7601, "rc": 0, "stderr_tail": "", "name": "cli project-brief --json", "run": 0}
+{"wall_ms": 198.45120201352984, "rss_kb": 45384, "out_bytes": 7601, "rc": 0, "stderr_tail": "", "name": "cli project-brief --json", "run": 1}
+{"wall_ms": 165.46897601801902, "rss_kb": 45280, "out_bytes": 7601, "rc": 0, "stderr_tail": "", "name": "cli project-brief --json", "run": 2}
+{"wall_ms": 166.0915949905757, "rss_kb": 45376, "out_bytes": 7600, "rc": 0, "stderr_tail": "", "name": "cli project-brief --json", "run": 3}
+{"wall_ms": 162.04842500155792, "rss_kb": 45300, "out_bytes": 7601, "rc": 0, "stderr_tail": "", "name": "cli project-brief --json", "run": 4}
+{"wall_ms": 164.09109902451746, "rss_kb": 45420, "out_bytes": 7601, "rc": 0, "stderr_tail": "", "name": "cli project-brief --json", "run": 5}
+{"wall_ms": 195.11495501501486, "rss_kb": 45380, "out_bytes": 7601, "rc": 0, "stderr_tail": "", "name": "cli project-brief --json", "run": 6}
+{"wall_ms": 910.928725003032, "rss_kb": 53324, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search hybrid --json", "run": 0}
+{"wall_ms": 179.30422801873647, "rss_kb": 45568, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search hybrid --json", "run": 1}
+{"wall_ms": 161.29854699829593, "rss_kb": 45628, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search hybrid --json", "run": 2}
+{"wall_ms": 178.7221799895633, "rss_kb": 45572, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search hybrid --json", "run": 3}
+{"wall_ms": 161.33580499445088, "rss_kb": 45516, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search hybrid --json", "run": 4}
+{"wall_ms": 162.14143199613318, "rss_kb": 45544, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search hybrid --json", "run": 5}
+{"wall_ms": 169.04638899723068, "rss_kb": 45568, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search hybrid --json", "run": 6}
+{"wall_ms": 160.873064014595, "rss_kb": 45536, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search keyword --json", "run": 0}
+{"wall_ms": 159.83246199903078, "rss_kb": 45700, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search keyword --json", "run": 1}
+{"wall_ms": 163.67928401450627, "rss_kb": 45652, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search keyword --json", "run": 2}
+{"wall_ms": 160.56364800897427, "rss_kb": 45512, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search keyword --json", "run": 3}
+{"wall_ms": 163.48270399612375, "rss_kb": 45692, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search keyword --json", "run": 4}
+{"wall_ms": 173.4445570036769, "rss_kb": 45752, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search keyword --json", "run": 5}
+{"wall_ms": 161.21568798553199, "rss_kb": 45588, "out_bytes": 49462, "rc": 0, "stderr_tail": "", "name": "cli search keyword --json", "run": 6}
+{"wall_ms": 140.00441497773863, "rss_kb": 47204, "out_bytes": 27090, "rc": 0, "stderr_tail": "", "name": "cli search-text --json", "run": 0}
+{"wall_ms": 143.84570499532856, "rss_kb": 47108, "out_bytes": 27090, "rc": 0, "stderr_tail": "", "name": "cli search-text --json", "run": 1}
+{"wall_ms": 146.94043100462295, "rss_kb": 47192, "out_bytes": 27090, "rc": 0, "stderr_tail": "", "name": "cli search-text --json", "run": 2}
+{"wall_ms": 145.56207397254184, "rss_kb": 47284, "out_bytes": 27090, "rc": 0, "stderr_tail": "", "name": "cli search-text --json", "run": 3}
+{"wall_ms": 141.5649879781995, "rss_kb": 47124, "out_bytes": 27090, "rc": 0, "stderr_tail": "", "name": "cli search-text --json", "run": 4}
+{"wall_ms": 141.90301598864608, "rss_kb": 46880, "out_bytes": 27090, "rc": 0, "stderr_tail": "", "name": "cli search-text --json", "run": 5}
+{"wall_ms": 140.44991799164563, "rss_kb": 47296, "out_bytes": 27090, "rc": 0, "stderr_tail": "", "name": "cli search-text --json", "run": 6}
+{"wall_ms": 238.5505860147532, "rss_kb": 62516, "out_bytes": 51827, "rc": 0, "stderr_tail": "", "name": "cli agent-grep --json", "run": 0}
+{"wall_ms": 231.91621399018914, "rss_kb": 62568, "out_bytes": 51827, "rc": 0, "stderr_tail": "", "name": "cli agent-grep --json", "run": 1}
+{"wall_ms": 240.54309399798512, "rss_kb": 62636, "out_bytes": 51827, "rc": 0, "stderr_tail": "", "name": "cli agent-grep --json", "run": 2}
+{"wall_ms": 222.7654840098694, "rss_kb": 62640, "out_bytes": 51827, "rc": 0, "stderr_tail": "", "name": "cli agent-grep --json", "run": 3}
+{"wall_ms": 228.29215801903047, "rss_kb": 62540, "out_bytes": 51827, "rc": 0, "stderr_tail": "", "name": "cli agent-grep --json", "run": 4}
+{"wall_ms": 217.82478099339642, "rss_kb": 62600, "out_bytes": 51827, "rc": 0, "stderr_tail": "", "name": "cli agent-grep --json", "run": 5}
+{"wall_ms": 226.72708498430438, "rss_kb": 62636, "out_bytes": 51827, "rc": 0, "stderr_tail": "", "name": "cli agent-grep --json", "run": 6}
+{"wall_ms": 190.59377099620178, "rss_kb": 50340, "out_bytes": 25935, "rc": 0, "stderr_tail": "", "name": "cli query --json", "run": 0}
+{"wall_ms": 213.0936110042967, "rss_kb": 50376, "out_bytes": 25935, "rc": 0, "stderr_tail": "", "name": "cli query --json", "run": 1}
+{"wall_ms": 207.27042300859466, "rss_kb": 50548, "out_bytes": 25934, "rc": 0, "stderr_tail": "", "name": "cli query --json", "run": 2}
+{"wall_ms": 209.73951800260693, "rss_kb": 50456, "out_bytes": 25935, "rc": 0, "stderr_tail": "", "name": "cli query --json", "run": 3}
+{"wall_ms": 193.52478699875064, "rss_kb": 50364, "out_bytes": 25935, "rc": 0, "stderr_tail": "", "name": "cli query --json", "run": 4}
+{"wall_ms": 190.06960702245124, "rss_kb": 50516, "out_bytes": 25935, "rc": 0, "stderr_tail": "", "name": "cli query --json", "run": 5}
+{"wall_ms": 192.02124699950218, "rss_kb": 50468, "out_bytes": 25934, "rc": 0, "stderr_tail": "", "name": "cli query --json", "run": 6}
+{"wall_ms": 142.47342199087143, "rss_kb": 45288, "out_bytes": 83598, "rc": 0, "stderr_tail": "", "name": "cli find-definition --json", "run": 0}
+{"wall_ms": 142.44708200567402, "rss_kb": 45416, "out_bytes": 83598, "rc": 0, "stderr_tail": "", "name": "cli find-definition --json", "run": 1}
+{"wall_ms": 138.83648699265905, "rss_kb": 45380, "out_bytes": 83598, "rc": 0, "stderr_tail": "", "name": "cli find-definition --json", "run": 2}
+{"wall_ms": 141.10938902013004, "rss_kb": 45324, "out_bytes": 83598, "rc": 0, "stderr_tail": "", "name": "cli find-definition --json", "run": 3}
+{"wall_ms": 140.95301300403662, "rss_kb": 45388, "out_bytes": 83598, "rc": 0, "stderr_tail": "", "name": "cli find-definition --json", "run": 4}
+{"wall_ms": 141.44002998364158, "rss_kb": 45500, "out_bytes": 83598, "rc": 0, "stderr_tail": "", "name": "cli find-definition --json", "run": 5}
+{"wall_ms": 145.2104930067435, "rss_kb": 45488, "out_bytes": 83598, "rc": 0, "stderr_tail": "", "name": "cli find-definition --json", "run": 6}
+{"wall_ms": 179.13386799045838, "rss_kb": 45348, "out_bytes": 247383, "rc": 0, "stderr_tail": "", "name": "cli find-references --json", "run": 0}
+{"wall_ms": 170.8096869988367, "rss_kb": 45256, "out_bytes": 247383, "rc": 0, "stderr_tail": "", "name": "cli find-references --json", "run": 1}
+{"wall_ms": 177.45381701388396, "rss_kb": 45520, "out_bytes": 247383, "rc": 0, "stderr_tail": "", "name": "cli find-references --json", "run": 2}
+{"wall_ms": 166.15904899663292, "rss_kb": 45364, "out_bytes": 247383, "rc": 0, "stderr_tail": "", "name": "cli find-references --json", "run": 3}
+{"wall_ms": 165.06331399432383, "rss_kb": 45440, "out_bytes": 247383, "rc": 0, "stderr_tail": "", "name": "cli find-references --json", "run": 4}
+{"wall_ms": 153.7719769985415, "rss_kb": 45292, "out_bytes": 247383, "rc": 0, "stderr_tail": "", "name": "cli find-references --json", "run": 5}
+{"wall_ms": 161.95223599788733, "rss_kb": 45336, "out_bytes": 247383, "rc": 0, "stderr_tail": "", "name": "cli find-references --json", "run": 6}
+{"wall_ms": 166.86369801755063, "rss_kb": 45472, "out_bytes": 4038, "rc": 0, "stderr_tail": "", "name": "cli impact-radius --json", "run": 0}
+{"wall_ms": 179.57146000117064, "rss_kb": 45524, "out_bytes": 4038, "rc": 0, "stderr_tail": "", "name": "cli impact-radius --json", "run": 1}
+{"wall_ms": 202.72276300238445, "rss_kb": 45384, "out_bytes": 4038, "rc": 0, "stderr_tail": "", "name": "cli impact-radius --json", "run": 2}
+{"wall_ms": 179.49415402836166, "rss_kb": 45348, "out_bytes": 4038, "rc": 0, "stderr_tail": "", "name": "cli impact-radius --json", "run": 3}
+{"wall_ms": 188.07777101756074, "rss_kb": 45460, "out_bytes": 4038, "rc": 0, "stderr_tail": "", "name": "cli impact-radius --json", "run": 4}
+{"wall_ms": 175.60657797730528, "rss_kb": 45260, "out_bytes": 4038, "rc": 0, "stderr_tail": "", "name": "cli impact-radius --json", "run": 5}
+{"wall_ms": 191.80111199966632, "rss_kb": 45384, "out_bytes": 4038, "rc": 0, "stderr_tail": "", "name": "cli impact-radius --json", "run": 6}
+{"wall_ms": 207.66056099091657, "rss_kb": 45324, "out_bytes": 49602, "rc": 0, "stderr_tail": "", "name": "cli coupling --json", "run": 0}
+{"wall_ms": 198.9621940010693, "rss_kb": 45300, "out_bytes": 49602, "rc": 0, "stderr_tail": "", "name": "cli coupling --json", "run": 1}
+{"wall_ms": 190.72362000588328, "rss_kb": 45256, "out_bytes": 49602, "rc": 0, "stderr_tail": "", "name": "cli coupling --json", "run": 2}
+{"wall_ms": 185.25614199461415, "rss_kb": 45552, "out_bytes": 49602, "rc": 0, "stderr_tail": "", "name": "cli coupling --json", "run": 3}
+{"wall_ms": 180.96158001571894, "rss_kb": 45368, "out_bytes": 49602, "rc": 0, "stderr_tail": "", "name": "cli coupling --json", "run": 4}
+{"wall_ms": 184.95589602389373, "rss_kb": 45368, "out_bytes": 49602, "rc": 0, "stderr_tail": "", "name": "cli coupling --json", "run": 5}
+{"wall_ms": 174.7523619851563, "rss_kb": 45444, "out_bytes": 49602, "rc": 0, "stderr_tail": "", "name": "cli coupling --json", "run": 6}
+{"wall_ms": 142.5117230101023, "rss_kb": 45408, "out_bytes": 5334, "rc": 0, "stderr_tail": "", "name": "cli enrichment-plan --json", "run": 0}
+{"wall_ms": 137.70870899315923, "rss_kb": 45244, "out_bytes": 5334, "rc": 0, "stderr_tail": "", "name": "cli enrichment-plan --json", "run": 1}
+{"wall_ms": 136.82844702270813, "rss_kb": 45452, "out_bytes": 5334, "rc": 0, "stderr_tail": "", "name": "cli enrichment-plan --json", "run": 2}
+{"wall_ms": 146.56270100385882, "rss_kb": 45452, "out_bytes": 5334, "rc": 0, "stderr_tail": "", "name": "cli enrichment-plan --json", "run": 3}
+{"wall_ms": 148.68728499277495, "rss_kb": 45360, "out_bytes": 5334, "rc": 0, "stderr_tail": "", "name": "cli enrichment-plan --json", "run": 4}
+{"wall_ms": 136.61916699493304, "rss_kb": 45420, "out_bytes": 5334, "rc": 0, "stderr_tail": "", "name": "cli enrichment-plan --json", "run": 5}
+{"wall_ms": 135.03741801832803, "rss_kb": 45368, "out_bytes": 5334, "rc": 0, "stderr_tail": "", "name": "cli enrichment-plan --json", "run": 6}
+{"wall_ms": 134.54202600405551, "rss_kb": 45320, "out_bytes": 291335, "rc": 0, "stderr_tail": "", "name": "cli history --json", "run": 0}
+{"wall_ms": 134.16553600109182, "rss_kb": 45536, "out_bytes": 291335, "rc": 0, "stderr_tail": "", "name": "cli history --json", "run": 1}
+{"wall_ms": 145.65650699660182, "rss_kb": 45444, "out_bytes": 291335, "rc": 0, "stderr_tail": "", "name": "cli history --json", "run": 2}
+{"wall_ms": 133.5837899823673, "rss_kb": 45332, "out_bytes": 291335, "rc": 0, "stderr_tail": "", "name": "cli history --json", "run": 3}
+{"wall_ms": 138.11862701550126, "rss_kb": 45488, "out_bytes": 291335, "rc": 0, "stderr_tail": "", "name": "cli history --json", "run": 4}
+{"wall_ms": 135.12742100283504, "rss_kb": 45404, "out_bytes": 291335, "rc": 0, "stderr_tail": "", "name": "cli history --json", "run": 5}
+{"wall_ms": 138.82919299066998, "rss_kb": 45260, "out_bytes": 291335, "rc": 0, "stderr_tail": "", "name": "cli history --json", "run": 6}
+{"wall_ms": 45.639293995918706, "out_bytes": 8325, "frame_bytes": 9199, "rc": 0, "name": "mcp doctor", "run": 0}
+{"wall_ms": 41.39730002498254, "out_bytes": 8331, "frame_bytes": 9205, "rc": 0, "name": "mcp doctor", "run": 1}
+{"wall_ms": 38.68713401607238, "out_bytes": 8330, "frame_bytes": 9204, "rc": 0, "name": "mcp doctor", "run": 2}
+{"wall_ms": 38.778490998083726, "out_bytes": 8330, "frame_bytes": 9204, "rc": 0, "name": "mcp doctor", "run": 3}
+{"wall_ms": 38.266661984380335, "out_bytes": 8331, "frame_bytes": 9205, "rc": 0, "name": "mcp doctor", "run": 4}
+{"wall_ms": 37.802452978212386, "out_bytes": 8330, "frame_bytes": 9204, "rc": 0, "name": "mcp doctor", "run": 5}
+{"wall_ms": 37.769857997773215, "out_bytes": 8331, "frame_bytes": 9205, "rc": 0, "name": "mcp doctor", "run": 6}
+{"wall_ms": 23.166627011960372, "out_bytes": 105552, "frame_bytes": 114723, "rc": 0, "name": "mcp map", "run": 0}
+{"wall_ms": 22.90626399917528, "out_bytes": 105551, "frame_bytes": 114723, "rc": 0, "name": "mcp map", "run": 1}
+{"wall_ms": 23.539490008261055, "out_bytes": 105553, "frame_bytes": 114725, "rc": 0, "name": "mcp map", "run": 2}
+{"wall_ms": 23.038028011796996, "out_bytes": 105552, "frame_bytes": 114724, "rc": 0, "name": "mcp map", "run": 3}
+{"wall_ms": 22.67263102112338, "out_bytes": 105553, "frame_bytes": 114725, "rc": 0, "name": "mcp map", "run": 4}
+{"wall_ms": 23.341015999903902, "out_bytes": 105553, "frame_bytes": 114725, "rc": 0, "name": "mcp map", "run": 5}
+{"wall_ms": 25.347669987240806, "out_bytes": 105553, "frame_bytes": 114725, "rc": 0, "name": "mcp map", "run": 6}
+{"wall_ms": 58.74024599324912, "out_bytes": 25937, "frame_bytes": 28490, "rc": 0, "name": "mcp query", "run": 0}
+{"wall_ms": 36.21481399750337, "out_bytes": 25937, "frame_bytes": 28490, "rc": 0, "name": "mcp query", "run": 1}
+{"wall_ms": 37.354461004724726, "out_bytes": 25937, "frame_bytes": 28490, "rc": 0, "name": "mcp query", "run": 2}
+{"wall_ms": 36.59897402394563, "out_bytes": 25937, "frame_bytes": 28490, "rc": 0, "name": "mcp query", "run": 3}
+{"wall_ms": 35.97878199070692, "out_bytes": 25937, "frame_bytes": 28490, "rc": 0, "name": "mcp query", "run": 4}
+{"wall_ms": 39.45768601261079, "out_bytes": 25937, "frame_bytes": 28490, "rc": 0, "name": "mcp query", "run": 5}
+{"wall_ms": 36.317836988018826, "out_bytes": 25937, "frame_bytes": 28490, "rc": 0, "name": "mcp query", "run": 6}
+{"wall_ms": 11.776503990404308, "out_bytes": 49461, "frame_bytes": 52786, "rc": 0, "name": "mcp search", "run": 0}
+{"wall_ms": 11.245719011640176, "out_bytes": 49461, "frame_bytes": 52786, "rc": 0, "name": "mcp search", "run": 1}
+{"wall_ms": 10.978114005411044, "out_bytes": 49461, "frame_bytes": 52786, "rc": 0, "name": "mcp search", "run": 2}
+{"wall_ms": 11.45084499148652, "out_bytes": 49461, "frame_bytes": 52786, "rc": 0, "name": "mcp search", "run": 3}
+{"wall_ms": 11.263746011536568, "out_bytes": 49461, "frame_bytes": 52786, "rc": 0, "name": "mcp search", "run": 4}
+{"wall_ms": 11.277871002675965, "out_bytes": 49461, "frame_bytes": 52786, "rc": 0, "name": "mcp search", "run": 5}
+{"wall_ms": 11.395587003789842, "out_bytes": 49461, "frame_bytes": 52786, "rc": 0, "name": "mcp search", "run": 6}
+{"wall_ms": 8.649057999718934, "out_bytes": 27089, "frame_bytes": 29763, "rc": 0, "name": "mcp search_text", "run": 0}
+{"wall_ms": 8.360239007743075, "out_bytes": 27089, "frame_bytes": 29763, "rc": 0, "name": "mcp search_text", "run": 1}
+{"wall_ms": 8.050119009567425, "out_bytes": 27089, "frame_bytes": 29763, "rc": 0, "name": "mcp search_text", "run": 2}
+{"wall_ms": 8.019764005439356, "out_bytes": 27089, "frame_bytes": 29763, "rc": 0, "name": "mcp search_text", "run": 3}
+{"wall_ms": 7.9871100024320185, "out_bytes": 27089, "frame_bytes": 29763, "rc": 0, "name": "mcp search_text", "run": 4}
+{"wall_ms": 8.004750998225063, "out_bytes": 27089, "frame_bytes": 29763, "rc": 0, "name": "mcp search_text", "run": 5}
+{"wall_ms": 8.046806993661448, "out_bytes": 27089, "frame_bytes": 29763, "rc": 0, "name": "mcp search_text", "run": 6}
+{"wall_ms": 88.84504498564638, "out_bytes": 36234, "frame_bytes": 39214, "rc": 0, "name": "mcp agent_grep", "run": 0}
+{"wall_ms": 87.54001700435765, "out_bytes": 36234, "frame_bytes": 39214, "rc": 0, "name": "mcp agent_grep", "run": 1}
+{"wall_ms": 81.88309599063359, "out_bytes": 36234, "frame_bytes": 39214, "rc": 0, "name": "mcp agent_grep", "run": 2}
+{"wall_ms": 108.40942501090467, "out_bytes": 36234, "frame_bytes": 39214, "rc": 0, "name": "mcp agent_grep", "run": 3}
+{"wall_ms": 81.3783289922867, "out_bytes": 36234, "frame_bytes": 39214, "rc": 0, "name": "mcp agent_grep", "run": 4}
+{"wall_ms": 79.6308680146467, "out_bytes": 36234, "frame_bytes": 39214, "rc": 0, "name": "mcp agent_grep", "run": 5}
+{"wall_ms": 78.82711800630204, "out_bytes": 36234, "frame_bytes": 39214, "rc": 0, "name": "mcp agent_grep", "run": 6}
+{"wall_ms": 9.121682989643887, "out_bytes": 83597, "frame_bytes": 87559, "rc": 0, "name": "mcp find_definition", "run": 0}
+{"wall_ms": 8.179251017281786, "out_bytes": 83597, "frame_bytes": 87559, "rc": 0, "name": "mcp find_definition", "run": 1}
+{"wall_ms": 7.67644599545747, "out_bytes": 83597, "frame_bytes": 87559, "rc": 0, "name": "mcp find_definition", "run": 2}
+{"wall_ms": 7.523870997829363, "out_bytes": 83597, "frame_bytes": 87559, "rc": 0, "name": "mcp find_definition", "run": 3}
+{"wall_ms": 7.814163982402533, "out_bytes": 83597, "frame_bytes": 87559, "rc": 0, "name": "mcp find_definition", "run": 4}
+{"wall_ms": 7.618475996423513, "out_bytes": 83597, "frame_bytes": 87559, "rc": 0, "name": "mcp find_definition", "run": 5}
+{"wall_ms": 7.582900987472385, "out_bytes": 83597, "frame_bytes": 87559, "rc": 0, "name": "mcp find_definition", "run": 6}
+{"wall_ms": 37.626331992214546, "out_bytes": 247382, "frame_bytes": 271392, "rc": 0, "name": "mcp find_references", "run": 0}
+{"wall_ms": 22.325650992570445, "out_bytes": 247382, "frame_bytes": 271392, "rc": 0, "name": "mcp find_references", "run": 1}
+{"wall_ms": 34.40675398451276, "out_bytes": 247382, "frame_bytes": 271392, "rc": 0, "name": "mcp find_references", "run": 2}
+{"wall_ms": 22.133521997602656, "out_bytes": 247382, "frame_bytes": 271392, "rc": 0, "name": "mcp find_references", "run": 3}
+{"wall_ms": 29.206063016317785, "out_bytes": 247382, "frame_bytes": 271392, "rc": 0, "name": "mcp find_references", "run": 4}
+{"wall_ms": 21.08678297372535, "out_bytes": 247382, "frame_bytes": 271392, "rc": 0, "name": "mcp find_references", "run": 5}
+{"wall_ms": 30.270457995356992, "out_bytes": 247382, "frame_bytes": 271392, "rc": 0, "name": "mcp find_references", "run": 6}
+{"wall_ms": 42.444785009138286, "out_bytes": 4037, "frame_bytes": 4565, "rc": 0, "name": "mcp impact_radius", "run": 0}
+{"wall_ms": 51.70814401935786, "out_bytes": 4037, "frame_bytes": 4565, "rc": 0, "name": "mcp impact_radius", "run": 1}
+{"wall_ms": 51.1980369919911, "out_bytes": 4037, "frame_bytes": 4565, "rc": 0, "name": "mcp impact_radius", "run": 2}
+{"wall_ms": 43.62746700644493, "out_bytes": 4037, "frame_bytes": 4565, "rc": 0, "name": "mcp impact_radius", "run": 3}
+{"wall_ms": 89.4253219885286, "out_bytes": 4037, "frame_bytes": 4565, "rc": 0, "name": "mcp impact_radius", "run": 4}
+{"wall_ms": 49.62460199021734, "out_bytes": 4037, "frame_bytes": 4565, "rc": 0, "name": "mcp impact_radius", "run": 5}
+{"wall_ms": 51.66344202007167, "out_bytes": 4037, "frame_bytes": 4565, "rc": 0, "name": "mcp impact_radius", "run": 6}
+{"wall_ms": 46.72094501438551, "out_bytes": 49601, "frame_bytes": 55538, "rc": 0, "name": "mcp coupling", "run": 0}
+{"wall_ms": 42.61724601383321, "out_bytes": 49601, "frame_bytes": 55538, "rc": 0, "name": "mcp coupling", "run": 1}
+{"wall_ms": 48.43570399680175, "out_bytes": 49601, "frame_bytes": 55538, "rc": 0, "name": "mcp coupling", "run": 2}
+{"wall_ms": 39.5636830071453, "out_bytes": 49601, "frame_bytes": 55538, "rc": 0, "name": "mcp coupling", "run": 3}
+{"wall_ms": 39.199679013108835, "out_bytes": 49601, "frame_bytes": 55538, "rc": 0, "name": "mcp coupling", "run": 4}
+{"wall_ms": 39.185861009173095, "out_bytes": 49601, "frame_bytes": 55538, "rc": 0, "name": "mcp coupling", "run": 5}
+{"wall_ms": 43.48717498942278, "out_bytes": 49601, "frame_bytes": 55538, "rc": 0, "name": "mcp coupling", "run": 6}
+{"wall_ms": 3.833725000731647, "out_bytes": 108451, "frame_bytes": 114342, "rc": 0, "name": "mcp get_context", "run": 0}
+{"wall_ms": 3.4586160036269575, "out_bytes": 108451, "frame_bytes": 114342, "rc": 0, "name": "mcp get_context", "run": 1}
+{"wall_ms": 3.4447250072844326, "out_bytes": 108451, "frame_bytes": 114342, "rc": 0, "name": "mcp get_context", "run": 2}
+{"wall_ms": 3.404249990126118, "out_bytes": 108451, "frame_bytes": 114342, "rc": 0, "name": "mcp get_context", "run": 3}
+{"wall_ms": 4.009503987617791, "out_bytes": 108451, "frame_bytes": 114342, "rc": 0, "name": "mcp get_context", "run": 4}
+{"wall_ms": 3.868403990054503, "out_bytes": 108451, "frame_bytes": 114342, "rc": 0, "name": "mcp get_context", "run": 5}
+{"wall_ms": 3.7836029950995, "out_bytes": 108451, "frame_bytes": 114342, "rc": 0, "name": "mcp get_context", "run": 6}
+{"wall_ms": 3.1599290086887777, "out_bytes": 69, "frame_bytes": 163, "rc": 0, "name": "mcp get_context", "run": 0}
+{"wall_ms": 2.751708001596853, "out_bytes": 69, "frame_bytes": 163, "rc": 0, "name": "mcp get_context", "run": 1}
+{"wall_ms": 3.0751010053791106, "out_bytes": 69, "frame_bytes": 163, "rc": 0, "name": "mcp get_context", "run": 2}
+{"wall_ms": 3.46950301900506, "out_bytes": 69, "frame_bytes": 163, "rc": 0, "name": "mcp get_context", "run": 3}
+{"wall_ms": 2.949846995761618, "out_bytes": 69, "frame_bytes": 163, "rc": 0, "name": "mcp get_context", "run": 4}
+{"wall_ms": 3.1813730020076036, "out_bytes": 69, "frame_bytes": 163, "rc": 0, "name": "mcp get_context", "run": 5}
+{"wall_ms": 3.020064003067091, "out_bytes": 69, "frame_bytes": 163, "rc": 0, "name": "mcp get_context", "run": 6}
+{"wall_ms": 36.8877119908575, "out_bytes": 17087, "frame_bytes": 17825, "rc": 0, "name": "mcp detect_changes", "run": 0}
+{"wall_ms": 33.93963200505823, "out_bytes": 17087, "frame_bytes": 17825, "rc": 0, "name": "mcp detect_changes", "run": 1}
+{"wall_ms": 32.662838988471776, "out_bytes": 17087, "frame_bytes": 17825, "rc": 0, "name": "mcp detect_changes", "run": 2}
+{"wall_ms": 32.942377001745626, "out_bytes": 17087, "frame_bytes": 17825, "rc": 0, "name": "mcp detect_changes", "run": 3}
+{"wall_ms": 33.47265301272273, "out_bytes": 17087, "frame_bytes": 17825, "rc": 0, "name": "mcp detect_changes", "run": 4}
+{"wall_ms": 32.818849984323606, "out_bytes": 17087, "frame_bytes": 17825, "rc": 0, "name": "mcp detect_changes", "run": 5}
+{"wall_ms": 34.57367999362759, "out_bytes": 17087, "frame_bytes": 17825, "rc": 0, "name": "mcp detect_changes", "run": 6}

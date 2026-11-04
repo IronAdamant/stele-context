@@ -1,0 +1,4 @@
+[stele-context]
+chunk_size = 256
+respect_gitignore = true
+skip_dirs = ["dist", "build"]

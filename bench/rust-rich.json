@@ -1,0 +1,262 @@
+[
+  {
+    "name": "cli --version (startup)",
+    "runs": 5,
+    "median_ms": 1.7752879994077375,
+    "min_ms": 1.6059570007200819,
+    "max_ms": 2.1167560007597785,
+    "stdev_ms": 0.17387085099556365,
+    "peak_rss_mb": 10.43359375,
+    "out_bytes": 20,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli --help",
+    "runs": 5,
+    "median_ms": 1.6999920007947367,
+    "min_ms": 1.6652850008540554,
+    "max_ms": 1.8620589999045478,
+    "stdev_ms": 0.08736778781399794,
+    "peak_rss_mb": 10.4375,
+    "out_bytes": 1316,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli index . (cold, empty store)",
+    "runs": 5,
+    "median_ms": 8541.429258999415,
+    "min_ms": 8500.011219999578,
+    "max_ms": 8580.176007999398,
+    "stdev_ms": 25.571518757194408,
+    "peak_rss_mb": 73.5546875,
+    "out_bytes": 150,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli index . (warm, nothing changed)",
+    "runs": 5,
+    "median_ms": 66.93915500000003,
+    "min_ms": 64.37301900041348,
+    "max_ms": 78.70861099945614,
+    "stdev_ms": 5.964717922980661,
+    "peak_rss_mb": 61.62109375,
+    "out_bytes": 150,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli detect (nothing changed)",
+    "runs": 5,
+    "median_ms": 60.27190900022106,
+    "min_ms": 59.259133000523434,
+    "max_ms": 64.72113400013768,
+    "stdev_ms": 1.9874659753294313,
+    "peak_rss_mb": 61.5390625,
+    "out_bytes": 120,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli stats",
+    "runs": 5,
+    "median_ms": 55.72935199961648,
+    "min_ms": 55.58621999989555,
+    "max_ms": 56.19038300028478,
+    "stdev_ms": 0.239632366736877,
+    "peak_rss_mb": 61.56640625,
+    "out_bytes": 128,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli doctor",
+    "runs": 5,
+    "median_ms": 1.7669700009719236,
+    "min_ms": 1.7095279999921331,
+    "max_ms": 1.9702059998962795,
+    "stdev_ms": 0.09199699094565908,
+    "peak_rss_mb": 10.4375,
+    "out_bytes": 398,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli map --json",
+    "runs": 5,
+    "median_ms": 82.66442099920823,
+    "min_ms": 82.17048600090493,
+    "max_ms": 84.9896780000563,
+    "stdev_ms": 1.003891082088672,
+    "peak_rss_mb": 61.63671875,
+    "out_bytes": 43033,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli project-brief --json",
+    "runs": 5,
+    "median_ms": 55.03697200038005,
+    "min_ms": 54.845900000145775,
+    "max_ms": 56.643347001227085,
+    "stdev_ms": 0.7039764657952085,
+    "peak_rss_mb": 61.515625,
+    "out_bytes": 136,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli search hybrid --json",
+    "runs": 5,
+    "median_ms": 156.27500499977032,
+    "min_ms": 155.82902200003446,
+    "max_ms": 160.32301500126778,
+    "stdev_ms": 1.6967059048880673,
+    "peak_rss_mb": 61.5546875,
+    "out_bytes": 22003,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli search keyword --json",
+    "runs": 5,
+    "median_ms": 156.3413229996513,
+    "min_ms": 155.1504830003978,
+    "max_ms": 158.1475799994223,
+    "stdev_ms": 1.0107270755161712,
+    "peak_rss_mb": 61.53515625,
+    "out_bytes": 22010,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli search-text --json",
+    "runs": 5,
+    "median_ms": 56.2286900003528,
+    "min_ms": 55.340238999633584,
+    "max_ms": 59.21916599982069,
+    "stdev_ms": 1.3351449231670005,
+    "peak_rss_mb": 61.5859375,
+    "out_bytes": 11737,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli agent-grep --json",
+    "runs": 5,
+    "median_ms": 57.593630999690504,
+    "min_ms": 56.83961999966414,
+    "max_ms": 58.024206999107264,
+    "stdev_ms": 0.4159423385246412,
+    "peak_rss_mb": 61.55859375,
+    "out_bytes": 781,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli query --json",
+    "runs": 5,
+    "median_ms": 157.8472139990481,
+    "min_ms": 156.69215000161785,
+    "max_ms": 159.2690750003385,
+    "stdev_ms": 0.9163999521360423,
+    "peak_rss_mb": 61.5546875,
+    "out_bytes": 26124,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli find-definition --json",
+    "runs": 5,
+    "median_ms": 56.674423000004026,
+    "min_ms": 56.37556500005303,
+    "max_ms": 64.2033829990396,
+    "stdev_ms": 2.9847175758978364,
+    "peak_rss_mb": 61.5703125,
+    "out_bytes": 315,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli find-references --json",
+    "runs": 5,
+    "median_ms": 57.65255900041666,
+    "min_ms": 57.121765001284075,
+    "max_ms": 58.85097999998834,
+    "stdev_ms": 0.7353989278853522,
+    "peak_rss_mb": 61.52734375,
+    "out_bytes": 90539,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli impact-radius --json",
+    "runs": 5,
+    "median_ms": 55.773153000700404,
+    "min_ms": 55.434473000786966,
+    "max_ms": 58.29283300045063,
+    "stdev_ms": 1.0449192202026967,
+    "peak_rss_mb": 61.56640625,
+    "out_bytes": 2347,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli coupling --json",
+    "runs": 5,
+    "median_ms": 76.37161599996034,
+    "min_ms": 75.32135200017365,
+    "max_ms": 78.78522400096699,
+    "stdev_ms": 1.3382472090978872,
+    "peak_rss_mb": 61.58203125,
+    "out_bytes": 2504,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli enrichment-plan --json",
+    "runs": 5,
+    "median_ms": 56.69132600087323,
+    "min_ms": 56.125981000150205,
+    "max_ms": 74.41288500012888,
+    "stdev_ms": 7.003868896256936,
+    "peak_rss_mb": 61.63671875,
+    "out_bytes": 3630,
+    "rc": [
+      0
+    ]
+  },
+  {
+    "name": "cli history --json",
+    "runs": 5,
+    "median_ms": 54.71452100027818,
+    "min_ms": 54.34019700078352,
+    "max_ms": 58.278933000110555,
+    "stdev_ms": 1.4850096902407004,
+    "peak_rss_mb": 61.5859375,
+    "out_bytes": 164,
+    "rc": [
+      0
+    ]
+  }
+]

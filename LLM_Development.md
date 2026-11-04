@@ -4,11 +4,56 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-04 - Real media fixture and symbol edges
+
+- `parity/generate_media.py` writes a PNG, JPEG, GIF, WAV, MP3, MP4, and PDF that the decoders accept. Python 1.5.2 with the extras and Rust both index that directory as 7/7/0. Python 1.5.1 raises `FileNotFoundError` on the PDF because it decodes the file as text.
+- Symbol edges follow Python's resolver with `container` dropped. On rich the multiset is 4939 on both sides. `impact_radius` and `coupling` file sets match. `find_references` does not read edges.
+
+## 2026-11-04 - Re-verification fixes on 491bd8a
+
+- The git coordination file is the lock holder for every worktree. A force steal is visible from the worktree that lost it. Two-worktree test covers steal, status, conflict log, and release.
+- Multiline call symbols use the first line of the call expression. Text and code symbol lines on rich match Python, still 32687 symbols.
+- `GET /tools` returns Python's lite `name` / `description` / `parameters` objects. `GET /health` storage has the same 20 fields. `stats` is not a lite tool.
+- `parity/fixtures/media` plus `parity/goldens/media.json` lock the media corpus at 7 documents, 7 chunks, 0 symbols. The earlier 2 symbols were `def hello(name)` in an uncommitted `sample.py`.
+- `doctor` parses `snapshot.json` and reports index health, db health, and search quality. Median 48.4 ms against the Python floor of 189.7 ms.
+
+## 2026-11-04 - Rust 2.0 parity with Python 1.5.2 on rich
+
+- Python extractor and chunker now match rich 13.9.4 with Pillow installed: 496 documents, 1118 chunks, 32687 symbols. Text and code chunk boundaries match, including Devanagari marks and `JSONHighlighter` splits. Keyword and hybrid top-10 overlap is 10/10 on the 25 audit queries.
+- Std-only image, audio, video, and PDF indexing (Flate and literal/hex text). `serve` speaks GET /health, GET /tools, POST /call. Document locks share a JSON coordination file under the git common dir and log force-steals.
+- BM25 postings are cached in `store/bm25.bin`. The 5-run floor check on this 4 vCPU host passed; keyword median 66.9 ms versus the Python 1.5.1 floor of 161.2 ms.
+
+## 2026-11-03 - Rust 2.0.0 phases 3 through 9
+
+- Text and code chunkers match the 1.5.2 fixture goldens, including rebuilt paragraph ends and f32 signatures.
+- Native store is `store/snapshot.json` plus `store/journal.jsonl`. Index skips unchanged files by mtime and size. `migrate` copies a 1.5 SQLite file and reads the copy; the original database is not opened for write.
+- Keyword search is BM25 with the Porter stemmer. Hybrid search blends that with exact cosine. User-facing regex rejects lookaround and backreferences.
+- Non-Python symbol extractors match the fixture goldens. The shared scanner round-trips rich and flask.
+- MCP stdio speaks 2026-07-28, 2025-11-25, and 2025-06-18. Lite 25, standard 43, full 61. Removed names return `tool_removed`.
+- Release workflow, install scripts, npm launcher, and the unapplied 1.5.3 PyPI notice are in the tree. Tags and secrets are in `docs/release-2.0.md`. Nothing was tagged or published.
+
+## 2026-11-03 - Rust 2.0.0 phase 2 parsing core
+
+- Shared tree plus Python and JSON grammars. Every cached rich and flask file round-trips. Broken and random bytes do not panic.
+- Python fixture symbols match the 1.5.2 golden (tree-sitter off). 1,000 random edits reparse equal to a full parse, and an interior edit reuses the surrounding functions.
+- Chunk-id and signature bit equality stays in phase 3.
+
+## 2026-11-03 - Rust 2.0.0 phase 1 skeleton
+
+- Std-only crate `stele-context` 2.0.0: JSON, contract envelopes, TOML subset, project root, gitignore walk, SHA-256, MD5, `doctor`, `--version`.
+- `[dependencies]` is empty. `stele-context-mcp` exits with `not_in_this_build` until the stdio server exists.
+- Release B1 on this 4 vCPU Linux host: `--version` median 1.65 ms, `--help` median 1.69 ms, both under the 1.5.1 floor (79.4 ms and 75.7 ms).
+
+## 2026-11-03 - Rust 2.0.0 phase 0 parity harness
+
+- Added `parity/` (fixture goldens, extension inventory, CLI smoke, rich 13.9.4 and flask 3.1.0 capture hashes) and the recorded Python 1.5.1 floor.
+- Reference capture is stele-context 1.5.2 with tree-sitter off and numpy blocked. rich capture counts match the recorded sample: 475 files, 1097 chunks, 32687 symbols.
+- Python sources are unchanged. No tag, no merge, no publish.
+
 ## 2026-11-03 - D13 benchmark gate
 
-- `.github/workflows/benchmark-gate.yml` job `benchmark-gate` compares a pull request with its base on one runner: 15 interleaved runs of CLI startup, MCP initialize, tools/list, cold and warm index, detect, and keyword search.
-- A benchmark fails when the pull request is slower beyond run-to-run noise (non-overlapping 95% median intervals, or one-sided Mann-Whitney p < 0.05). tools/list size is reported.
-- On a push to main the two sides are the same commit, so the job still runs and stays green.
+- `.github/workflows/benchmark-gate.yml` job `benchmark-gate` compares a pull request with its base on one runner: 16 interleaved runs of CLI startup, MCP initialize, tools/list, cold and warm index, detect, and keyword search.
+- A benchmark fails only when both checks agree: non-overlapping 95% median intervals and one-sided Mann-Whitney p < 0.05. tools/list size is reported. The Python-baseline floor helper stays for Rust measurements.
 
 ## 2026-11-03 - v1.5.2 patch release prep
 
