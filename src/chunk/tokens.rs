@@ -3,49 +3,48 @@
 
 pub fn estimate_tokens(text: &str) -> usize {
     let chars: Vec<char> = text.chars().collect();
-    let mut tokens: Vec<String> = Vec::new();
+    // Whitespace, a single non-alnum mark, or anything else. The merge rules
+    // only look at those three shapes, so the token text itself is not kept.
+    let mut kinds = Vec::new();
     let mut i = 0;
     while i < chars.len() {
         if let Some(end) = match_token(&chars, i) {
-            tokens.push(chars[i..end].iter().collect());
+            let kind = if chars[i].is_whitespace() {
+                Kind::Space
+            } else if end == i + 1 && !python_alnum(chars[i]) {
+                Kind::Mark
+            } else {
+                Kind::Other
+            };
+            kinds.push(kind);
             i = end;
         } else {
             i += 1;
         }
     }
-    let n = tokens.len();
+    let n = kinds.len();
     if n == 0 {
         return 1;
     }
     let mut merges = 0usize;
     let mut index = 0usize;
     while index + 1 < n {
-        let a = &tokens[index];
-        let b = &tokens[index + 1];
-        if a.chars().all(|ch| ch.is_whitespace())
-            && !b.is_empty()
-            && !b.chars().all(|ch| ch.is_whitespace())
-        {
+        let pair = (kinds[index], kinds[index + 1]);
+        if (pair.0 == Kind::Space && pair.1 != Kind::Space) || pair == (Kind::Mark, Kind::Mark) {
             merges += 1;
             index += 2;
-            continue;
+        } else {
+            index += 1;
         }
-        let a_chars: Vec<char> = a.chars().collect();
-        let b_chars: Vec<char> = b.chars().collect();
-        if a_chars.len() == 1
-            && b_chars.len() == 1
-            && !python_alnum(a_chars[0])
-            && !python_alnum(b_chars[0])
-            && !a_chars[0].is_whitespace()
-            && !b_chars[0].is_whitespace()
-        {
-            merges += 1;
-            index += 2;
-            continue;
-        }
-        index += 1;
     }
     (n - merges).max(1)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Space,
+    Mark,
+    Other,
 }
 
 fn match_token(chars: &[char], start: usize) -> Option<usize> {
