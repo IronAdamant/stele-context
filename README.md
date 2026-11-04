@@ -24,7 +24,7 @@ Stele Context is a local context cache that fixes this: index once, then only pa
 
 Everything runs **100% offline on your machine**. No internet, no API keys, no cloud, no telemetry. Just Python's standard library and SQLite.
 
-Rust 2.0 indexes images, audio, video, and PDF with the standard library alone. Python indexes `imgs/*` only when Pillow imports, so a zero-dependency Python run of rich 13.9.4 is 475 documents and 1097 chunks, while Rust (and Python with Pillow) is 496 documents and 1118 chunks. The 21 extra documents are the PNG and GIF files under `imgs/`. Rust stores header metadata for those files. Pillow stores re-encoded PNG bytes, a perceptual hash, and a histogram, so the image chunk bodies differ. Text and code stay 475 files, 1097 chunks, and 32687 symbols on both sides.
+Rust 2.0 indexes images, audio, video, and PDF with the standard library alone. Python indexes `imgs/*` only when Pillow imports, so a zero-dependency Python run of rich 13.9.4 is 475 documents and 1097 chunks, while Rust (and Python with Pillow) is 496 documents and 1118 chunks. The 21 extra documents are the PNG and GIF files under `imgs/`. Rust stores header metadata for those files. Pillow stores re-encoded PNG bytes, a perceptual hash, and a histogram, so the image chunk bodies differ. Text and code stay 475 files, 1097 chunks, and 32687 symbols on both sides. Symbol edges on that tree match Python's full rebuild: 4939. `impact_radius` and `coupling` walk those edges. `find_references` reads the symbol table. Python 1.5.1 decodes PDFs as text and `fitz.open` raises `FileNotFoundError`; 1.5.2 reads the bytes. `parity/generate_media.py` rebuilds the media fixture.
 
 ![Semantic search demo](docs/semantic-search-demo.png)
 
@@ -338,26 +338,26 @@ Measured with `bench/bench.py` on Linux 6.12.94+ x86_64, 4 vCPU, rustc 1.99.1, r
 
 | Command | Rust median | Rust min–max | Peak RSS | Python 1.5.1 median |
 |---|---:|---:|---:|---:|
-| `cli --version (startup)` | 1.8 ms | 1.7–2.3 | 10.5 MB | 79.4 ms |
-| `cli --help` | 1.8 ms | 1.6–2.1 | 10.6 MB | 75.7 ms |
-| `cli index . (cold, empty store)` | 8788.9 ms | 8772.6–8820.3 | 78.1 MB | 10656.1 ms |
-| `cli index . (warm, nothing changed)` | 69.5 ms | 69.1–74.5 | 65.2 MB | 197.8 ms |
-| `cli detect (nothing changed)` | 63.8 ms | 63.7–64.6 | 65.2 MB | 167.9 ms |
-| `cli stats` | 59.6 ms | 59.4–59.8 | 65.2 MB | 162.5 ms |
-| `cli doctor` | 48.4 ms | 48.2–48.8 | 48.9 MB | 189.7 ms |
-| `cli map --json` | 93.1 ms | 92.5–93.5 | 65.2 MB | 163.3 ms |
-| `cli project-brief --json` | 58.6 ms | 58.2–58.8 | 65.2 MB | 165.5 ms |
-| `cli search hybrid --json` | 68.7 ms | 68.3–69.0 | 65.1 MB | 169.0 ms |
-| `cli search keyword --json` | 68.3 ms | 68.1–68.6 | 65.1 MB | 161.2 ms |
-| `cli search-text --json` | 59.4 ms | 59.2–59.7 | 65.1 MB | 141.9 ms |
-| `cli agent-grep --json` | 60.9 ms | 60.8–61.1 | 65.1 MB | 228.3 ms |
-| `cli query --json` | 69.6 ms | 69.2–70.0 | 65.1 MB | 193.5 ms |
-| `cli find-definition --json` | 58.6 ms | 58.4–62.6 | 65.1 MB | 141.4 ms |
-| `cli find-references --json` | 60.2 ms | 59.9–61.3 | 65.1 MB | 166.2 ms |
-| `cli impact-radius --json` | 59.4 ms | 58.2–62.6 | 65.2 MB | 179.6 ms |
-| `cli coupling --json` | 82.8 ms | 82.1–83.7 | 65.1 MB | 185.3 ms |
-| `cli enrichment-plan --json` | 58.8 ms | 58.7–59.3 | 65.2 MB | 137.7 ms |
-| `cli history --json` | 58.1 ms | 58.1–58.2 | 65.2 MB | 135.1 ms |
+| `cli --version (startup)` | 1.8 ms | 1.7–2.5 | 10.5 MB | 79.4 ms |
+| `cli --help` | 1.7 ms | 1.7–1.8 | 10.6 MB | 75.7 ms |
+| `cli index . (cold, empty store)` | 8849.8 ms | 8823.0–8860.3 | 82.8 MB | 10656.1 ms |
+| `cli index . (warm, nothing changed)` | 72.6 ms | 71.7–75.8 | 69.6 MB | 197.8 ms |
+| `cli detect (nothing changed)` | 66.7 ms | 66.4–66.9 | 69.7 MB | 167.9 ms |
+| `cli stats` | 62.7 ms | 62.7–62.8 | 69.6 MB | 162.5 ms |
+| `cli doctor` | 50.6 ms | 50.5–51.2 | 52.0 MB | 189.7 ms |
+| `cli map --json` | 97.5 ms | 97.2–97.7 | 69.6 MB | 163.3 ms |
+| `cli project-brief --json` | 61.4 ms | 61.2–62.2 | 69.7 MB | 165.5 ms |
+| `cli search hybrid --json` | 72.2 ms | 72.1–72.3 | 69.6 MB | 169.0 ms |
+| `cli search keyword --json` | 71.9 ms | 71.5–72.3 | 69.6 MB | 161.2 ms |
+| `cli search-text --json` | 62.5 ms | 62.0–62.9 | 69.6 MB | 141.9 ms |
+| `cli agent-grep --json` | 63.9 ms | 63.7–93.6 | 69.7 MB | 228.3 ms |
+| `cli query --json` | 73.3 ms | 72.9–74.0 | 69.7 MB | 193.5 ms |
+| `cli find-definition --json` | 61.8 ms | 61.5–62.2 | 69.6 MB | 141.4 ms |
+| `cli find-references --json` | 63.7 ms | 63.3–64.0 | 69.7 MB | 166.2 ms |
+| `cli impact-radius --json` | 66.9 ms | 66.7–67.4 | 69.7 MB | 179.6 ms |
+| `cli coupling --json` | 63.4 ms | 63.0–63.5 | 69.7 MB | 185.3 ms |
+| `cli enrichment-plan --json` | 62.4 ms | 62.0–68.9 | 69.7 MB | 137.7 ms |
+| `cli history --json` | 61.7 ms | 61.2–61.9 | 69.7 MB | 135.1 ms |
 
 ## Development
 

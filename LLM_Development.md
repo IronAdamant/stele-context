@@ -4,6 +4,11 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-04 - Real media fixture and symbol edges
+
+- `parity/generate_media.py` writes a PNG, JPEG, GIF, WAV, MP3, MP4, and PDF that the decoders accept. Python 1.5.2 with the extras and Rust both index that directory as 7/7/0. Python 1.5.1 raises `FileNotFoundError` on the PDF because it decodes the file as text.
+- Symbol edges follow Python's resolver with `container` dropped. On rich the multiset is 4939 on both sides. `impact_radius` and `coupling` file sets match. `find_references` does not read edges.
+
 ## 2026-11-04 - Re-verification fixes on 491bd8a
 
 - The git coordination file is the lock holder for every worktree. A force steal is visible from the worktree that lost it. Two-worktree test covers steal, status, conflict log, and release.

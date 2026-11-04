@@ -4,6 +4,7 @@
 //! `symbol_csharp.py`, and `symbol_swift.py` from package 1.5.2.
 
 mod csharp;
+mod edges;
 mod javascript;
 mod javascript_prepass;
 mod source;
@@ -23,6 +24,8 @@ pub struct Hit {
     pub line: u32,
     pub container: Option<String>,
 }
+
+pub(crate) use edges::build as build_edges;
 
 pub fn extract(extension: &str, content: &str) -> Vec<Hit> {
     let ext = extension

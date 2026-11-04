@@ -5,6 +5,7 @@ use crate::hash::{hex, sha256};
 use crate::json::Value;
 use crate::search::{self, VectorDoc};
 use crate::store::{Annotation, Dynamic, Session};
+use std::collections::{HashSet, VecDeque};
 
 impl Engine {
     pub fn search(&mut self, query: &str, mode: &str, top_k: usize) -> Value {
@@ -139,15 +140,28 @@ impl Engine {
     }
 
     pub fn impact(&self, symbol: &str) -> Value {
+        let seeds: Vec<String> = self
+            .store
+            .state
+            .symbols
+            .iter()
+            .filter(|sym| sym.name == symbol && sym.role == "definition")
+            .map(|sym| sym.chunk_id.clone())
+            .collect();
+        let hits = dependent_chunks(&self.store.state.edges, &seeds, 2);
         let mut files = Vec::new();
-        for sym in &self.store.state.symbols {
-            if sym.name == symbol && !files.iter().any(|path| path == &sym.path) {
-                files.push(sym.path.clone());
+        for id in &hits {
+            if let Some(path) = chunk_path(&self.store.state, id) {
+                if !files.iter().any(|have| have == &path) {
+                    files.push(path);
+                }
             }
         }
+        files.sort();
         Value::object(vec![
             ("symbol", Value::string(symbol)),
-            ("files", Value::Int(files.len() as i64)),
+            ("affected_files", Value::Int(files.len() as i64)),
+            ("affected_chunks", Value::Int(hits.len() as i64)),
             (
                 "affected",
                 Value::Array(files.into_iter().map(Value::String).collect()),
@@ -157,32 +171,36 @@ impl Engine {
 
     pub fn coupling(&self, path: &str) -> Value {
         let path = path.replace('\\', "/");
-        let imports: Vec<String> = self
+        let mine: HashSet<&str> = self
             .store
             .state
-            .symbols
+            .chunks
             .iter()
-            .filter(|sym| sym.path == path && sym.role == "reference" && sym.kind == "module")
-            .map(|sym| sym.name.clone())
+            .filter(|chunk| chunk.path == path)
+            .map(|chunk| chunk.id.as_str())
             .collect();
         let mut peers = Vec::new();
-        for doc in &self.store.state.documents {
-            if doc.path == path {
-                continue;
-            }
-            let shares = self.store.state.symbols.iter().any(|sym| {
-                sym.path == doc.path
-                    && sym.role == "reference"
-                    && sym.kind == "module"
-                    && imports.iter().any(|name| name == &sym.name)
-            });
-            if shares {
-                peers.push(Value::string(&doc.path));
+        for edge in &self.store.state.edges {
+            let other = if mine.contains(edge.source.as_str()) {
+                chunk_path(&self.store.state, &edge.target)
+            } else if mine.contains(edge.target.as_str()) {
+                chunk_path(&self.store.state, &edge.source)
+            } else {
+                None
+            };
+            if let Some(other) = other {
+                if other != path && !peers.iter().any(|have| have == &other) {
+                    peers.push(other);
+                }
             }
         }
+        peers.sort();
         Value::object(vec![
             ("path", Value::string(path)),
-            ("co_importers", Value::Array(peers)),
+            (
+                "coupled_files",
+                Value::Array(peers.into_iter().map(Value::String).collect()),
+            ),
         ])
     }
 
@@ -425,17 +443,24 @@ impl Engine {
                     .chunks
                     .iter()
                     .find(|chunk| chunk.id == hit.id)?;
-                Some(Value::object(vec![
-                    ("chunk_id", Value::string(&chunk.id)),
-                    ("document_path", Value::string(&chunk.path)),
-                    ("content", Value::string(&chunk.content)),
-                    ("relevance_score", Value::Float(hit.score)),
-                    ("token_count", Value::Int(chunk.tokens as i64)),
-                    ("start_pos", Value::Int(chunk.start as i64)),
-                    ("end_pos", Value::Int(chunk.end as i64)),
-                    ("source", Value::string(hit.source)),
-                    ("tier2_present", Value::Bool(chunk.summary.is_some())),
-                ]))
+                let mut pairs = vec![
+                    ("chunk_id".to_string(), Value::string(&chunk.id)),
+                    ("document_path".to_string(), Value::string(&chunk.path)),
+                    ("content".to_string(), Value::string(&chunk.content)),
+                    ("relevance_score".to_string(), Value::Float(hit.score)),
+                    ("token_count".to_string(), Value::Int(chunk.tokens as i64)),
+                    ("start_pos".to_string(), Value::Int(chunk.start as i64)),
+                    ("end_pos".to_string(), Value::Int(chunk.end as i64)),
+                    ("source".to_string(), Value::string(hit.source)),
+                    (
+                        "tier2_present".to_string(),
+                        Value::Bool(chunk.summary.is_some()),
+                    ),
+                ];
+                if let Some(edges) = edge_block(&self.store.state.edges, &chunk.id) {
+                    pairs.push(("edges".to_string(), edges));
+                }
+                Some(Value::Object(pairs))
             })
             .collect()
     }
@@ -468,6 +493,67 @@ impl Engine {
             .find(|item| item.id == id)
             .unwrap()
     }
+}
+
+fn dependent_chunks(edges: &[crate::store::Edge], seeds: &[String], depth: usize) -> Vec<String> {
+    let mut queue: VecDeque<(String, usize)> = seeds.iter().map(|id| (id.clone(), 0)).collect();
+    let mut seen = HashSet::new();
+    let mut hits = Vec::new();
+    while let Some((id, hop)) = queue.pop_front() {
+        if hop > depth || !seen.insert(id.clone()) {
+            continue;
+        }
+        if hop > 0 {
+            hits.push(id.clone());
+        }
+        if hop == depth {
+            continue;
+        }
+        for edge in edges {
+            if edge.target == id {
+                queue.push_back((edge.source.clone(), hop + 1));
+            }
+        }
+    }
+    hits
+}
+
+fn chunk_path(state: &crate::store::State, id: &str) -> Option<String> {
+    state
+        .chunks
+        .iter()
+        .find(|chunk| chunk.id == id)
+        .map(|chunk| chunk.path.clone())
+}
+
+fn edge_block(edges: &[crate::store::Edge], id: &str) -> Option<Value> {
+    let depends: Vec<Value> = edges
+        .iter()
+        .filter(|edge| edge.source == id)
+        .map(|edge| {
+            Value::object(vec![
+                ("chunk_id", Value::string(&edge.target)),
+                ("symbol", Value::string(&edge.name)),
+            ])
+        })
+        .collect();
+    let depended: Vec<Value> = edges
+        .iter()
+        .filter(|edge| edge.target == id)
+        .map(|edge| {
+            Value::object(vec![
+                ("chunk_id", Value::string(&edge.source)),
+                ("symbol", Value::string(&edge.name)),
+            ])
+        })
+        .collect();
+    if depends.is_empty() && depended.is_empty() {
+        return None;
+    }
+    Some(Value::object(vec![
+        ("depends_on", Value::Array(depends)),
+        ("depended_on_by", Value::Array(depended)),
+    ]))
 }
 
 fn symbol_json(sym: &crate::store::Symbol) -> Value {

@@ -70,6 +70,14 @@ pub struct Conflict {
 }
 
 #[derive(Clone, Debug)]
+pub struct Edge {
+    pub source: String,
+    pub target: String,
+    pub kind: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct Session {
     pub id: String,
     pub searches: Vec<String>,
@@ -92,6 +100,7 @@ pub struct State {
     pub annotations: Vec<Annotation>,
     pub locks: Vec<Lock>,
     pub conflicts: Vec<Conflict>,
+    pub edges: Vec<Edge>,
     pub sessions: Vec<Session>,
     pub dynamic: Vec<Dynamic>,
     pub seq: u64,
@@ -218,6 +227,10 @@ impl State {
                 Value::Array(self.conflicts.iter().map(Conflict::to_json).collect()),
             ),
             (
+                "edges",
+                Value::Array(self.edges.iter().map(Edge::to_json).collect()),
+            ),
+            (
                 "sessions",
                 Value::Array(self.sessions.iter().map(Session::to_json).collect()),
             ),
@@ -315,6 +328,7 @@ impl State {
                 .collect(),
             locks: array(value, "locks").map(Lock::from_json).collect(),
             conflicts: array(value, "conflicts").map(Conflict::from_json).collect(),
+            edges: array(value, "edges").map(Edge::from_json).collect(),
             sessions: array(value, "sessions").map(Session::from_json).collect(),
             dynamic: array(value, "dynamic").map(Dynamic::from_json).collect(),
             sigs: Vec::new(),
@@ -463,6 +477,25 @@ impl Lock {
             path: string_field(value, "path"),
             agent: string_field(value, "agent"),
             until: int_field(value, "until"),
+        }
+    }
+}
+
+impl Edge {
+    fn to_json(&self) -> Value {
+        Value::object(vec![
+            ("source", Value::string(&self.source)),
+            ("target", Value::string(&self.target)),
+            ("kind", Value::string(&self.kind)),
+            ("name", Value::string(&self.name)),
+        ])
+    }
+    fn from_json(value: &Value) -> Edge {
+        Edge {
+            source: string_field(value, "source"),
+            target: string_field(value, "target"),
+            kind: string_field(value, "kind"),
+            name: string_field(value, "name"),
         }
     }
 }

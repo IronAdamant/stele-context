@@ -226,7 +226,7 @@ impl Engine {
             ("symbol_count", Value::Int(state.symbols.len() as i64)),
             ("definition_count", Value::Int(definitions)),
             ("reference_count", Value::Int(references)),
-            ("edge_count", Value::Int(0)),
+            ("edge_count", Value::Int(state.edges.len() as i64)),
             (
                 "runtime_symbol_count",
                 Value::Int(state.dynamic.len() as i64),
@@ -422,11 +422,10 @@ impl Engine {
             bm25_ready,
             ..
         } = self;
+        store.state.edges = crate::symbols::build_edges(&store.state.symbols);
         *bm25 = Bm25::new();
         for chunk in &store.state.chunks {
-            // Python indexes BM25 only when chunk content is text. Image,
-            // audio, and video chunks store bytes there, so they stay out
-            // of the keyword index. PDF page text is a string and is indexed.
+            // Image, audio, and video bytes are not keyword text. PDF text is.
             if matches!(chunk.modality.as_str(), "image" | "audio" | "video") {
                 continue;
             }
@@ -552,39 +551,10 @@ mod tests {
         assert!(crate::json::to_string(&found).contains("classify"));
         let _ = fs::remove_dir_all(&root);
     }
-
-    #[test]
-    fn media_fixture_matches_the_expected_counts() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("parity/fixtures/media");
-        let expected = fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("parity/goldens/media.json"),
-        )
-        .unwrap();
-        let store = std::env::temp_dir().join(format!(
-            "stele-media-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = fs::remove_dir_all(&store);
-        let mut engine = Engine::open_at(root, store.clone()).unwrap();
-        engine.index(&[".".to_string()], false).unwrap();
-        let stats = engine.stats();
-        let rendered = crate::json::to_string(&stats);
-        for key in ["documents", "chunks", "symbols"] {
-            let value = crate::store::int_field(&stats, key);
-            assert!(
-                expected.contains(&format!("\"{key}\": {value}"))
-                    || expected.contains(&format!("\"{key}\":{value}")),
-                "{key}={value} not in {expected}\n{rendered}"
-            );
-        }
-        let found = engine.search("Hello PDF symbols", "keyword", 3);
-        assert!(crate::json::to_string(&found).contains("note.pdf"));
-        let _ = fs::remove_dir_all(&store);
-    }
 }
+
+#[cfg(test)]
+mod media_fixture;
 
 pub fn now_secs() -> i64 {
     SystemTime::now()
