@@ -1,8 +1,19 @@
-## [Unreleased]
+## [2.0.1] - 2026-11-04
+
+### Fixed
+
+- Standard MCP tools do the work (`prune_history`, `rollback`, `prune_chunks`, `list_sessions`, `rebuild_symbols`, `stale_chunks`, `get_dynamic_symbols`, `list_agents`, `get_notifications`, `environment_check`, `clean_bytecache`, `bulk_store_embeddings`, `bulk_store_chunk_agent_notes`, `get_chunk_history`, `batch`). Full mode routes the 18 old singleton names to those implementations.
+- `migrate` reads a 1.5 SQLite database (`document_path` and the other 1.5 tables) into the native store. Opening a storage directory that only has `stele_context.db` copies it. The original database is not modified. `doctor` reports that copy.
+- `.stele-context.toml` `chunk_size`, `skip_dirs`, and `respect_gitignore` are applied. `skip_dirs` is added to the default set. `chunk_size` is the chunker target.
+- CLI accepts the 1.5 flags, including `--compact`, `--path-prefix`, `--regex`, `--working-tree`, and `--confirm`. `search-text` stays a substring unless `--regex` is set.
+- MCP `inputSchema` / HTTP `parameters` list the properties the dispatcher reads. `paths`, `summaries`, `document_paths`, and `working_tree` are honoured.
+- PDF page text from uncompressed and Flate streams keeps a trailing newline, matching PyMuPDF `get_text()` on the one-page fixture.
 
 ### Added
 
-- [MIGRATION.md](MIGRATION.md): 1.5.x Python (PyPI, `python-legacy`) to 2.0 Rust. README links it.
+- [MIGRATION.md](MIGRATION.md): 1.5.x Python (PyPI, `python-legacy`) to 2.x Rust. README links it.
+
+## [Unreleased]
 
 ### Changed
 

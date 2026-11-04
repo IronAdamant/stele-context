@@ -191,7 +191,15 @@ fn python_fixture_symbols_match_the_golden() {
         }
         let source = std::fs::read_to_string(format!("parity/fixtures/{path}")).unwrap();
         // Goldens are per chunk. A multi-chunk file is not one module.
-        if crate::chunk::chunk_document(&path, &source).len() != 1 {
+        if crate::chunk::chunk_document(
+            &path,
+            &source,
+            crate::chunk::CHUNK_SIZE,
+            crate::chunk::MAX_CHUNK_SIZE,
+        )
+        .len()
+            != 1
+        {
             continue;
         }
         let got = extract(&source);

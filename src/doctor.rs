@@ -38,23 +38,42 @@ pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
     };
     let legacy = storage.join("stele_context.db").is_file();
     let snapshot_path = storage.join("store").join("snapshot.json");
+    if legacy && !snapshot_path.is_file() {
+        let _ = crate::engine::Engine::open_at(cwd.clone(), storage.clone());
+    }
     let native = snapshot_path.is_file();
     let parsed = read_snapshot(&snapshot_path);
-    let mut steps = Vec::new();
-    if legacy {
+    let mut steps: Vec<String> = Vec::new();
+    let migrated = storage.join("store").join("migrated-from.txt").is_file();
+    let migrate_error = fs::read_to_string(storage.join("store").join("migrate-error.txt")).ok();
+    if let Some(err) = migrate_error.as_ref() {
+        steps.push(format!(
+            "migrate failed and the original stele_context.db was not modified: {err}"
+        ));
+    } else if legacy && migrated {
         steps.push(
-            "A Python 1.5.x stele_context.db is in the storage directory. It was left untouched. migrate is not in this build.",
+            "A Python 1.5.x stele_context.db was copied into the native store. The original database was not modified.".to_string(),
+        );
+    } else if legacy && native {
+        steps.push(
+            "A Python 1.5.x stele_context.db is present and was left untouched because a native store already has documents.".to_string(),
+        );
+    } else if legacy {
+        steps.push(
+            "A Python 1.5.x stele_context.db is present. Opening the store copies it into snapshot.json. The original database is not modified.".to_string(),
         );
     }
     if native && parsed.error.is_none() {
-        steps.push("A native store is present. snapshot.json parsed.");
+        steps.push("A native store is present. snapshot.json parsed.".to_string());
     } else if parsed.error.is_some() {
-        steps.push("snapshot.json did not parse. The native store was left untouched.");
+        steps.push("snapshot.json did not parse. The native store was left untouched.".to_string());
     } else {
-        steps.push("No 2.0 store yet. Index a directory to create the native store.");
+        steps.push("No 2.0 store yet. Index a directory to create the native store.".to_string());
     }
-    steps
-        .push("Image, audio, and video chunks are metadata. PDF text is the uncompressed streams.");
+    steps.push(
+        "Image, audio, and video chunks are metadata. PDF text is the uncompressed streams."
+            .to_string(),
+    );
     if human {
         let root = project_root
             .as_ref()

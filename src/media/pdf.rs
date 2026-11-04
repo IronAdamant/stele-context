@@ -18,6 +18,11 @@ pub fn pages(bytes: &[u8]) -> Vec<(String, usize, usize)> {
         .into_iter()
         .enumerate()
         .map(|(index, text)| {
+            let text = if text.ends_with('\n') {
+                text
+            } else {
+                format!("{text}\n")
+            };
             let body = format!("[Page {}]\n{text}", index + 1);
             let end = (index + 1) * 1000;
             (body, index * 1000, end)

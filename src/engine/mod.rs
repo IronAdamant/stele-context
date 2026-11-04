@@ -2,6 +2,9 @@
 //! Public methods take a project-relative path and honor mtime+size.
 
 mod migrate;
+mod ops;
+#[cfg(test)]
+mod parity_test;
 mod query;
 
 use crate::chunk::{self, Produced};
@@ -23,6 +26,10 @@ pub struct Engine {
     store: Store,
     bm25: Bm25,
     bm25_ready: bool,
+    chunk_size: usize,
+    max_chunk_size: usize,
+    respect_gitignore: bool,
+    skip_dirs: Vec<String>,
 }
 
 impl Engine {
@@ -34,19 +41,30 @@ impl Engine {
         Self::open_at(cwd, storage)
     }
 
-    fn open_at(cwd: PathBuf, storage: PathBuf) -> Result<Engine, String> {
-        let store = Store::open(&storage)?;
+    pub fn open_at(cwd: PathBuf, storage: PathBuf) -> Result<Engine, String> {
+        let root = detect_project_root(&cwd);
+        let loaded = config::load(root.as_deref());
+        let mut store = Store::open(&storage)?;
+        if let Err(err) = migrate::migrate_if_needed(&storage, &cwd, &mut store) {
+            let _ = fs::write(storage.join("store").join("migrate-error.txt"), &err);
+        } else {
+            let _ = fs::remove_file(storage.join("store").join("migrate-error.txt"));
+        }
         Ok(Engine {
             cwd,
             storage,
             store,
             bm25: Bm25::new(),
             bm25_ready: false,
+            chunk_size: loaded.chunk_size.unwrap_or(256).max(1) as usize,
+            max_chunk_size: loaded.max_chunk_size.unwrap_or(4096).max(1) as usize,
+            respect_gitignore: loaded.respect_gitignore.unwrap_or(true),
+            skip_dirs: loaded.skip_dirs.clone().unwrap_or_default(),
         })
     }
 
     pub fn index(&mut self, paths: &[String], force: bool) -> Result<Value, String> {
-        let files = collect(&self.cwd, paths)?;
+        let files = collect(&self.cwd, paths, self.respect_gitignore, &self.skip_dirs)?;
         let mut indexed = 0i64;
         let mut skipped = 0i64;
         let mut seen = Vec::new();
@@ -98,44 +116,121 @@ impl Engine {
     }
 
     pub fn detect(&mut self, scan_new: bool) -> Result<Value, String> {
-        let files = collect(&self.cwd, &[".".to_string()])?;
-        let mut changed = Vec::new();
-        let mut unchanged = 0i64;
-        let mut added = Vec::new();
-        for (rel, abs) in &files {
-            let meta = fs::metadata(abs).map_err(|err| format!("{rel}: {err}"))?;
-            match self
+        self.detect_with(scan_new, None, 200)
+    }
+
+    pub fn detect_with(
+        &mut self,
+        scan_new: bool,
+        only: Option<&[String]>,
+        limit: usize,
+    ) -> Result<Value, String> {
+        let files = collect(
+            &self.cwd,
+            &[".".to_string()],
+            self.respect_gitignore,
+            &self.skip_dirs,
+        )?;
+        let mut unchanged = Vec::new();
+        let mut modified = Vec::new();
+        let mut new_rows = Vec::new();
+        let mut removed = Vec::new();
+        let indexed: Vec<String> = if let Some(only) = only {
+            if only.is_empty() {
+                self.store
+                    .state
+                    .documents
+                    .iter()
+                    .map(|doc| doc.path.clone())
+                    .collect()
+            } else {
+                only.to_vec()
+            }
+        } else {
+            self.store
+                .state
+                .documents
+                .iter()
+                .map(|doc| doc.path.clone())
+                .collect()
+        };
+        let known: Vec<String> = files.iter().map(|(rel, _)| rel.clone()).collect();
+        if scan_new {
+            for rel in &known {
+                if !self
+                    .store
+                    .state
+                    .documents
+                    .iter()
+                    .any(|doc| &doc.path == rel)
+                {
+                    new_rows.push(Value::object(vec![
+                        ("path", Value::string(rel)),
+                        ("reason", Value::string("New file (scan)")),
+                    ]));
+                }
+            }
+        }
+        for rel in &indexed {
+            let abs = self.cwd.join(rel);
+            if !abs.is_file() {
+                removed.push(rel.clone());
+                self.drop_path(rel);
+                continue;
+            }
+            let meta = fs::metadata(&abs).map_err(|err| format!("{rel}: {err}"))?;
+            let unchanged_fast = self.store.state.documents.iter().any(|doc| {
+                &doc.path == rel && doc.size == meta.len() && doc.mtime_ns == mtime_ns(&meta)
+            });
+            if unchanged_fast {
+                unchanged.push(rel.clone());
+                continue;
+            }
+            let bytes = fs::read(&abs).map_err(|err| format!("{rel}: {err}"))?;
+            let media = crate::media::is_media(crate::chunk::extension_of(rel));
+            let sha = if media {
+                hex(&sha256(&bytes))
+            } else {
+                hex(&sha256(chunk::read_python_text(&bytes).as_bytes()))
+            };
+            let old = self
                 .store
                 .state
                 .documents
                 .iter()
                 .find(|doc| &doc.path == rel)
-            {
-                Some(doc) if doc.size == meta.len() && doc.mtime_ns == mtime_ns(&meta) => {
-                    unchanged += 1;
-                }
-                Some(_) => changed.push(rel.clone()),
-                None => added.push(rel.clone()),
+                .map(|doc| doc.sha256.clone())
+                .unwrap_or_default();
+            if old == sha {
+                unchanged.push(rel.clone());
+                continue;
             }
+            let old_short: String = old.chars().take(16).collect();
+            let new_short: String = sha.chars().take(16).collect();
+            modified.push(Value::object(vec![
+                ("path", Value::string(rel)),
+                ("old_hash", Value::string(old_short)),
+                ("new_hash", Value::string(new_short)),
+            ]));
+            self.reindex_file(rel, &abs, &meta)?;
         }
-        let known: Vec<String> = files.iter().map(|(rel, _)| rel.clone()).collect();
-        let deleted: Vec<String> = self
-            .store
-            .state
-            .documents
-            .iter()
-            .filter(|doc| !known.iter().any(|path| path == &doc.path))
-            .map(|doc| doc.path.clone())
-            .collect();
-        if scan_new && !added.is_empty() {
-            self.index(&added, false)?;
+        if !removed.is_empty() || modified.iter().len() > 0 {
+            self.rebuild_bm25();
+            self.store.save("detect", &Value::object(vec![]))?;
         }
-        Ok(Value::object(vec![
-            ("unchanged", Value::Int(unchanged)),
-            ("changed", strings(&changed)),
-            ("added", strings(&added)),
-            ("deleted", strings(&deleted)),
-        ]))
+        let mut result = Value::object(vec![
+            ("unchanged", strings(&unchanged)),
+            ("modified", Value::Array(modified)),
+            ("new", Value::Array(new_rows)),
+            ("removed", strings(&removed)),
+            ("conflicts", Value::Array(Vec::new())),
+            ("kv_restored", Value::Int(0)),
+            ("kv_reprocessed", Value::Int(0)),
+        ]);
+        if limit > 0 {
+            truncate_detect(&mut result, limit);
+        }
+        Ok(result)
     }
 
     pub fn remove(&mut self, path: &str) -> Result<Value, String> {
@@ -330,16 +425,31 @@ impl Engine {
     }
 
     pub fn migrate(&mut self) -> Result<Value, String> {
-        migrate::migrate(&self.storage, &mut self.store)?;
+        let outcome = migrate::migrate_if_needed(&self.storage, &self.cwd, &mut self.store)?;
+        self.bm25_ready = false;
         self.rebuild_bm25();
-        Ok(Value::object(vec![
-            (
-                "documents",
-                Value::Int(self.store.state.documents.len() as i64),
-            ),
-            ("chunks", Value::Int(self.store.state.chunks.len() as i64)),
-            ("legacy_untouched", Value::Bool(true)),
-        ]))
+        match outcome {
+            migrate::Legacy::Absent => {
+                Err("no Python stele_context.db in the storage directory".to_string())
+            }
+            migrate::Legacy::Kept => Ok(Value::object(vec![
+                ("migrated", Value::Bool(false)),
+                (
+                    "reason",
+                    Value::string(
+                        "native store already has documents; legacy database was left untouched",
+                    ),
+                ),
+                ("legacy_untouched", Value::Bool(true)),
+            ])),
+            migrate::Legacy::Copied { documents, chunks } => Ok(Value::object(vec![
+                ("migrated", Value::Bool(true)),
+                ("documents", Value::Int(documents)),
+                ("chunks", Value::Int(chunks)),
+                ("symbols", Value::Int(self.store.state.symbols.len() as i64)),
+                ("legacy_untouched", Value::Bool(true)),
+            ])),
+        }
     }
 
     fn reindex_file(&mut self, rel: &str, abs: &Path, meta: &fs::Metadata) -> Result<(), String> {
@@ -360,7 +470,7 @@ impl Engine {
             .unwrap_or(0)
             + 1;
         self.drop_path(rel);
-        let produced = chunk::chunk_bytes(rel, &bytes);
+        let produced = chunk::chunk_bytes(rel, &bytes, self.chunk_size, self.max_chunk_size);
         for piece in &produced {
             self.commit_piece(rel, piece);
         }
@@ -473,7 +583,52 @@ fn bm25_fingerprint(chunks: &[Chunk]) -> u64 {
     hash ^ chunks.len() as u64
 }
 
-fn collect(cwd: &Path, paths: &[String]) -> Result<Vec<(String, PathBuf)>, String> {
+fn truncate_detect(value: &mut Value, limit: usize) {
+    let Value::Object(pairs) = value else {
+        return;
+    };
+    let keys = ["unchanged", "modified", "new", "removed", "conflicts"];
+    let mut totals = Vec::new();
+    let mut truncated = false;
+    for key in keys {
+        let len = pairs
+            .iter()
+            .find(|(name, _)| name == key)
+            .and_then(|(_, item)| match item {
+                Value::Array(rows) => Some(rows.len()),
+                _ => None,
+            })
+            .unwrap_or(0);
+        totals.push((key, len));
+        if len > limit {
+            truncated = true;
+        }
+    }
+    if !truncated {
+        return;
+    }
+    for (key, _) in &totals {
+        if let Some((_, item)) = pairs.iter_mut().find(|(name, _)| name == *key) {
+            if let Value::Array(rows) = item {
+                rows.truncate(limit);
+            }
+        }
+    }
+    let mut total_pairs = Vec::new();
+    for (key, len) in totals {
+        total_pairs.push((key.to_string(), Value::Int(len as i64)));
+    }
+    total_pairs.push(("truncated".to_string(), Value::Bool(true)));
+    total_pairs.push(("limit".to_string(), Value::Int(limit as i64)));
+    pairs.push(("totals".to_string(), Value::Object(total_pairs)));
+}
+
+fn collect(
+    cwd: &Path,
+    paths: &[String],
+    respect_gitignore: bool,
+    extra_skip: &[String],
+) -> Result<Vec<(String, PathBuf)>, String> {
     let inputs: Vec<PathBuf> = if paths.is_empty() {
         vec![cwd.to_path_buf()]
     } else {
@@ -486,7 +641,9 @@ fn collect(cwd: &Path, paths: &[String]) -> Result<Vec<(String, PathBuf)>, Strin
             continue;
         }
         if input.is_dir() {
-            for rel in walk::expand(&[input.clone()], true).map_err(|err| err.to_string())? {
+            for rel in walk::expand(&[input.clone()], respect_gitignore, extra_skip)
+                .map_err(|err| err.to_string())?
+            {
                 out.push((normalize(&rel), input.join(&rel)));
             }
         }
@@ -603,6 +760,9 @@ impl Engine {
             language: piece.language.clone(),
             summary: None,
             notes: None,
+            version: 1,
+            staleness: 0.0,
+            stale_since: None,
         });
     }
 }

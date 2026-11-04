@@ -38,40 +38,270 @@ impl Engine {
     }
 
     pub fn search_text(&mut self, pattern: &str) -> Result<Value, String> {
+        self.text_search(pattern, false, None, 50, None, false)
+    }
+
+    pub fn text_search(
+        &mut self,
+        pattern: &str,
+        regex: bool,
+        document: Option<&str>,
+        limit: usize,
+        session: Option<&str>,
+        working_tree: bool,
+    ) -> Result<Value, String> {
+        if working_tree {
+            self.index_working_tree();
+        }
         let mut rows = Vec::new();
-        let literal = is_literal(pattern);
+        let limit = limit.max(1);
         for chunk in &self.store.state.chunks {
-            let hits = if literal {
-                literal_hits(pattern, &chunk.content)
-            } else {
+            if document.is_some_and(|path| chunk.path != path) {
+                continue;
+            }
+            let hits = if regex {
                 search::text_matches(pattern, &chunk.content)?
+            } else {
+                literal_hits(pattern, &chunk.content)
             };
-            for (start, end) in hits {
-                rows.push(Value::object(vec![
-                    ("path", Value::string(&chunk.path)),
-                    ("chunk_id", Value::string(&chunk.id)),
-                    ("start", Value::Int(start as i64)),
-                    ("end", Value::Int(end as i64)),
-                    (
-                        "text",
-                        Value::string(slice_chars(&chunk.content, start, end)),
-                    ),
-                ]));
-                if rows.len() >= 100 {
-                    return Ok(Value::object(vec![("matches", Value::Array(rows))]));
-                }
+            if hits.is_empty() {
+                continue;
+            }
+            let matches: Vec<Value> = hits
+                .iter()
+                .take(10)
+                .map(|(start, end)| {
+                    Value::object(vec![
+                        ("start", Value::Int(*start as i64)),
+                        ("end", Value::Int(*end as i64)),
+                        (
+                            "text",
+                            Value::string(slice_chars(&chunk.content, *start, *end)),
+                        ),
+                    ])
+                })
+                .collect();
+            let preview: String = chunk.content.chars().take(200).collect();
+            rows.push(Value::object(vec![
+                ("chunk_id", Value::string(&chunk.id)),
+                ("document_path", Value::string(&chunk.path)),
+                ("match_count", Value::Int(hits.len() as i64)),
+                ("matches", Value::Array(matches)),
+                ("content_preview", Value::string(preview)),
+                ("token_count", Value::Int(chunk.tokens as i64)),
+            ]));
+            if rows.len() >= limit {
+                break;
             }
         }
-        Ok(Value::object(vec![("matches", Value::Array(rows))]))
+        let files = {
+            let mut names = Vec::new();
+            for row in &rows {
+                let path = crate::store::string_field(row, "document_path");
+                if !names.iter().any(|have: &String| have == &path) {
+                    names.push(path);
+                }
+            }
+            names.sort();
+            names
+        };
+        let match_count: i64 = rows
+            .iter()
+            .map(|row| crate::store::int_field(row, "match_count"))
+            .sum();
+        if let Some(session) = session {
+            let checked = self.store.state.documents.len() as i64;
+            let matched = files.len() as i64;
+            self.record_search_row(session, pattern, "search_text", checked, matched);
+            let files_owned = files.clone();
+            if !files_owned.is_empty() {
+                let _ = self.index(&files_owned, false);
+            }
+        }
+        Ok(Value::object(vec![
+            ("pattern", Value::string(pattern)),
+            ("regex", Value::Bool(regex)),
+            ("match_count", Value::Int(match_count)),
+            ("chunk_count", Value::Int(rows.len() as i64)),
+            ("results", Value::Array(rows)),
+            ("files_checked", Value::Int(files.len() as i64)),
+            (
+                "files_with_matches",
+                Value::Array(files.into_iter().map(Value::String).collect()),
+            ),
+        ]))
     }
 
     pub fn agent_grep(&mut self, pattern: &str, session: Option<&str>) -> Result<Value, String> {
-        let found = self.search_text(pattern)?;
-        if let Some(session) = session {
-            self.note_search(session, pattern);
-            self.store.save("search", &Value::string(pattern))?;
+        self.grep_full(
+            pattern, false, None, true, true, "file", 4000, true, 0, session, false,
+        )
+    }
+
+    pub fn grep_full(
+        &mut self,
+        pattern: &str,
+        regex: bool,
+        document: Option<&str>,
+        classify: bool,
+        include_scope: bool,
+        group_by: &str,
+        max_tokens: i64,
+        deduplicate: bool,
+        context_lines: i64,
+        session: Option<&str>,
+        working_tree: bool,
+    ) -> Result<Value, String> {
+        if working_tree {
+            self.index_working_tree();
         }
-        Ok(found)
+        let found = self.text_search(pattern, regex, document, 10_000, None, false)?;
+        let Value::Object(pairs) = &found else {
+            return Ok(found);
+        };
+        let results = pairs
+            .iter()
+            .find(|(key, _)| key == "results")
+            .and_then(|(_, value)| match value {
+                Value::Array(rows) => Some(rows.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let mut matches = Vec::new();
+        for row in &results {
+            let file = crate::store::string_field(row, "document_path");
+            let chunk_id = crate::store::string_field(row, "chunk_id");
+            let content = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .find(|chunk| chunk.id == chunk_id)
+                .map(|chunk| chunk.content.clone())
+                .unwrap_or_default();
+            let hit_list = match object_field(row, "matches") {
+                Some(Value::Array(items)) => items.clone(),
+                _ => Vec::new(),
+            };
+            for hit in hit_list {
+                let start = crate::store::int_field(&hit, "start") as usize;
+                let line = content.chars().take(start).filter(|ch| *ch == '\n').count() + 1;
+                let excerpt = line_at(&content, line.saturating_sub(1));
+                let class = if classify {
+                    classify_line(&excerpt)
+                } else {
+                    String::new()
+                };
+                let scope = if include_scope {
+                    scope_for(self, &chunk_id, line as u32)
+                } else {
+                    String::new()
+                };
+                let _ = context_lines;
+                matches.push((file.clone(), line, excerpt, class, scope));
+            }
+        }
+        if deduplicate {
+            let mut seen = std::collections::HashSet::new();
+            matches.retain(|row| seen.insert(format!("{}:{}", row.0, row.2.trim())));
+        }
+        let total = matches.len() as i64;
+        let key_of = |row: &(String, usize, String, String, String)| -> String {
+            match group_by {
+                "scope" => {
+                    if row.4.is_empty() {
+                        "(top-level)".to_string()
+                    } else {
+                        row.4.clone()
+                    }
+                }
+                "classification" => {
+                    if row.3.is_empty() {
+                        "code".to_string()
+                    } else {
+                        row.3.clone()
+                    }
+                }
+                _ => row.0.clone(),
+            }
+        };
+        let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
+        for row in &matches {
+            let key = key_of(row);
+            let item = Value::object(vec![
+                ("file", Value::string(&row.0)),
+                ("line", Value::Int(row.1 as i64)),
+                ("excerpt", Value::string(&row.2)),
+                ("classification", Value::string(&row.3)),
+                ("scope", Value::string(&row.4)),
+            ]);
+            if let Some(group) = groups.iter_mut().find(|(name, _)| name == &key) {
+                group.1.push(item);
+            } else {
+                groups.push((key, vec![item]));
+            }
+        }
+        let budget = (max_tokens - 150).max(200);
+        let mut shown = 0i64;
+        let mut tokens = 0i64;
+        let mut kept = Vec::new();
+        for (key, rows) in groups {
+            let cost = 8 + rows.len() as i64 * 4;
+            if tokens + cost > budget && !kept.is_empty() {
+                break;
+            }
+            tokens += cost;
+            shown += rows.len() as i64;
+            kept.push(Value::object(vec![
+                ("key", Value::string(key)),
+                ("count", Value::Int(rows.len() as i64)),
+                ("matches", Value::Array(rows)),
+            ]));
+        }
+        let files = {
+            let mut names = Vec::new();
+            for row in &matches {
+                if !names.iter().any(|have: &String| have == &row.0) {
+                    names.push(row.0.clone());
+                }
+            }
+            names
+        };
+        if let Some(session) = session {
+            self.record_search_row(
+                session,
+                pattern,
+                "agent_grep",
+                self.store.state.documents.len() as i64,
+                files.len() as i64,
+            );
+            if !files.is_empty() {
+                let _ = self.index(&files, false);
+            }
+            let _ = self.store.save("search", &Value::string(pattern));
+        }
+        let summary = format!(
+            "{total} match{} in {} file{}",
+            if total == 1 { "" } else { "es" },
+            files.len(),
+            if files.len() == 1 { "" } else { "s" }
+        );
+        Ok(Value::object(vec![
+            ("summary", Value::string(summary)),
+            ("groups", Value::Array(kept)),
+            ("total_matches", Value::Int(total)),
+            ("shown_matches", Value::Int(shown)),
+            ("truncated", Value::Int((total - shown).max(0))),
+            ("total_tokens", Value::Int(tokens)),
+            (
+                "files_checked",
+                Value::Int(self.store.state.documents.len() as i64),
+            ),
+            (
+                "files_with_matches",
+                Value::Array(files.into_iter().map(Value::String).collect()),
+            ),
+        ]))
     }
 
     pub fn query(&mut self, text: &str) -> Result<Value, String> {
@@ -271,6 +501,9 @@ impl Engine {
                     path: path.to_string(),
                     body: body.to_string(),
                     tags: Vec::new(),
+                    target_type: "document".to_string(),
+                    created_at: super::now_secs(),
+                    updated_at: super::now_secs(),
                 });
                 self.store.save("annotate", &Value::string(&id))?;
                 Ok(Value::object(vec![("id", Value::string(id))]))
@@ -413,7 +646,11 @@ impl Engine {
         self.store.state.dynamic.push(Dynamic {
             name: name.to_string(),
             kind: kind.to_string(),
+            role: "definition".to_string(),
             path: path.to_string(),
+            agent: String::new(),
+            line: 0,
+            chunk_id: format!("runtime:default:{name}"),
         });
         self.store.save("dynamic", &Value::string(name))?;
         Ok(Value::object(vec![("registered", Value::string(name))]))
@@ -465,11 +702,6 @@ impl Engine {
             .collect()
     }
 
-    fn note_search(&mut self, session: &str, pattern: &str) {
-        let slot = self.session_mut(session);
-        slot.searches.push(pattern.to_string());
-    }
-
     fn note_read(&mut self, session: &str, path: &str) {
         let slot = self.session_mut(session);
         if !slot.reads.iter().any(|item| item == path) {
@@ -484,6 +716,13 @@ impl Engine {
                 searches: Vec::new(),
                 reads: Vec::new(),
                 kv: Vec::new(),
+                created_at: super::now_secs(),
+                updated_at: super::now_secs(),
+                turn: 0,
+                tokens: 0,
+                agent: String::new(),
+                attached: Vec::new(),
+                search_rows: Vec::new(),
             });
         }
         self.store
@@ -575,13 +814,74 @@ fn symbol_json(sym: &crate::store::Symbol) -> Value {
     ])
 }
 
-fn is_literal(pattern: &str) -> bool {
-    !pattern.chars().any(|ch| {
-        matches!(
-            ch,
-            '\\' | '.' | '[' | ']' | '(' | ')' | '{' | '}' | '*' | '+' | '?' | '^' | '$' | '|'
-        )
-    })
+fn object_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    let Value::Object(pairs) = value else {
+        return None;
+    };
+    pairs
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, item)| item)
+}
+
+fn line_at(content: &str, index: usize) -> String {
+    content.lines().nth(index).unwrap_or("").to_string()
+}
+
+fn classify_line(line: &str) -> String {
+    let stripped = line.trim_start();
+    if stripped.is_empty() {
+        return "blank".to_string();
+    }
+    const COMMENTS: &[&str] = &["#", "//", "--", ";", "%", "/*", "* ", "///", "/**"];
+    const IMPORTS: &[&str] = &[
+        "import ",
+        "from ",
+        "require(",
+        "use ",
+        "include ",
+        "#include",
+        "using ",
+        "extern crate ",
+    ];
+    const DEFS: &[&str] = &[
+        "def ",
+        "async def ",
+        "class ",
+        "function ",
+        "async function ",
+        "fn ",
+        "pub fn ",
+        "func ",
+        "type ",
+        "interface ",
+        "struct ",
+        "enum ",
+        "trait ",
+        "impl ",
+    ];
+    if COMMENTS.iter().any(|prefix| stripped.starts_with(prefix)) {
+        return "comment".to_string();
+    }
+    if IMPORTS.iter().any(|prefix| stripped.starts_with(prefix)) {
+        return "import".to_string();
+    }
+    if DEFS.iter().any(|prefix| stripped.starts_with(prefix)) {
+        return "definition".to_string();
+    }
+    "code".to_string()
+}
+
+fn scope_for(engine: &Engine, chunk_id: &str, line: u32) -> String {
+    engine
+        .store
+        .state
+        .symbols
+        .iter()
+        .filter(|sym| sym.chunk_id == chunk_id && sym.role == "definition" && sym.line <= line)
+        .max_by_key(|sym| sym.line)
+        .map(|sym| sym.name.clone())
+        .unwrap_or_default()
 }
 
 fn literal_hits(pattern: &str, text: &str) -> Vec<(usize, usize)> {

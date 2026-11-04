@@ -92,7 +92,8 @@ mod tests {
             let bytes = std::fs::read(Path::new("parity/fixtures").join(&rel))
                 .unwrap_or_else(|error| panic!("read {rel}: {error}"));
             let source = chunk::read_python_text(&bytes);
-            let produced = chunk::chunk_document(&rel, &source);
+            let produced =
+                chunk::chunk_document(&rel, &source, chunk::CHUNK_SIZE, chunk::MAX_CHUNK_SIZE);
             let got = flatten(&rel, &produced);
             let expected = golden_rows(file);
             if got != expected {

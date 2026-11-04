@@ -43,7 +43,11 @@ pub fn is_supported_extension(ext: &str) -> bool {
         || MEDIA_EXTENSIONS.contains(&ext)
 }
 
-pub fn expand(paths: &[PathBuf], respect_gitignore: bool) -> io::Result<Vec<String>> {
+pub fn expand(
+    paths: &[PathBuf],
+    respect_gitignore: bool,
+    extra_skip: &[String],
+) -> io::Result<Vec<String>> {
     let mut out = Vec::new();
     for path in paths {
         if path.is_file() {
@@ -56,7 +60,7 @@ pub fn expand(paths: &[PathBuf], respect_gitignore: bool) -> io::Result<Vec<Stri
             } else {
                 None
             };
-            walk_dir(path, path, matcher.as_ref(), &mut out)?;
+            walk_dir(path, path, matcher.as_ref(), extra_skip, &mut out)?;
         }
     }
     out.sort();
@@ -68,6 +72,7 @@ fn walk_dir(
     root: &Path,
     dir: &Path,
     matcher: Option<&Gitignore>,
+    extra_skip: &[String],
     out: &mut Vec<String>,
 ) -> io::Result<()> {
     let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
@@ -75,7 +80,10 @@ fn walk_dir(
     for entry in entries {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with('.') || SKIP_DIRS.contains(&name.as_ref()) {
+        if name.starts_with('.')
+            || SKIP_DIRS.contains(&name.as_ref())
+            || extra_skip.iter().any(|skip| skip == name.as_ref())
+        {
             continue;
         }
         let path = entry.path();
@@ -85,7 +93,7 @@ fn walk_dir(
             if matcher.is_some_and(|rules| rules.is_ignored(&rel, true)) {
                 continue;
             }
-            walk_dir(root, &path, matcher, out)?;
+            walk_dir(root, &path, matcher, extra_skip, out)?;
         } else if file_type.is_file() {
             let ext = path
                 .extension()
@@ -131,12 +139,12 @@ mod tests {
         fs::write(root.join("ignored.py"), "x\n").unwrap();
         fs::write(root.join("secrets").join("keys.txt"), "x\n").unwrap();
         fs::write(root.join(".hidden").join("no.py"), "x\n").unwrap();
-        let found = expand(&[root.clone()], true).unwrap();
+        let found = expand(&[root.clone()], true, &[]).unwrap();
         assert!(found.iter().any(|path| path.ends_with("kept.py")));
         assert!(!found.iter().any(|path| path.contains("ignored.py")));
         assert!(!found.iter().any(|path| path.contains("secrets")));
         assert!(!found.iter().any(|path| path.contains("hidden")));
-        let explicit = expand(&[root.join("ignored.py")], true).unwrap();
+        let explicit = expand(&[root.join("ignored.py")], true, &[]).unwrap();
         assert_eq!(explicit.len(), 1);
         let _ = fs::remove_dir_all(&root);
     }

@@ -120,8 +120,7 @@ fn health(engine: &std::sync::Mutex<Engine>) -> Value {
 }
 
 fn tools() -> Value {
-    json::parse(include_str!("mcp/http_tools.json"))
-        .unwrap_or_else(|_| Value::object(vec![("error", Value::string("tool schemas"))]))
+    mcp::tools_document()
 }
 
 fn call(engine: &std::sync::Mutex<Engine>, body: &str) -> (u16, Value) {
@@ -170,7 +169,7 @@ fn call(engine: &std::sync::Mutex<Engine>, body: &str) -> (u16, Value) {
 }
 
 fn known_tool(name: &str) -> bool {
-    mcp::lite_tools().contains(&name)
+    mcp::tool_known(name)
 }
 
 fn http(status: u16, body: &str) -> String {

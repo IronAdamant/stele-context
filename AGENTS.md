@@ -112,7 +112,7 @@ bash scripts/fetch_corpora.sh
   --binary target/release/stele-context --group b1 --runs 10 --check-floor
 ```
 
-`stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.0.0`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. The 18 old singleton names return `tool_removed`.
+`stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.0.1`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. Full mode runs the 18 old singleton names by routing them to the current tools.
 
 Fixture goldens live in `parity/goldens/`. `cargo test` checks chunks and symbols against `fixtures.json`. `bash scripts/fetch_corpora.sh` fills `parity/.cache` so the rich 13.9.4 and flask 3.1.0 round-trip tests run. Historical timings are `bench/baseline/` and `bench/rust-b1.json`.
 

@@ -1,172 +1,259 @@
 //! One-way copy from a Python 1.5.x SQLite store into the native snapshot.
 //!
-//! The original database, its WAL, and its rollback journal are copied and
-//! read from the copy. A failure deletes the temp snapshot and leaves both
-//! the legacy files and the previous native snapshot unchanged.
+//! The original database, its WAL, and its rollback journal are only read.
+//! A failure leaves the previous native snapshot unchanged.
 
-use crate::json::{self, Value};
+use crate::chunk::{self, signature_f32_hex};
+use crate::json::Value;
 use crate::store::Store;
+use crate::store::{
+    sql_blob, sql_number, sql_text, Chunk, Conflict, Document, Edge, Session, SqliteDb, State,
+    Symbol,
+};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
-pub fn migrate(storage: &Path, store: &mut Store) -> Result<(), String> {
-    let db = storage.join("stele_context.db");
-    if !db.is_file() {
-        return Err("no Python stele_context.db in the storage directory".to_string());
-    }
-    let scratch = storage.join("store").join("migrate-tmp");
-    let _ = fs::remove_dir_all(&scratch);
-    fs::create_dir_all(&scratch).map_err(|err| format!("migrate scratch: {err}"))?;
-    let copy = scratch.join("stele_context.db");
-    fs::copy(&db, &copy).map_err(|err| format!("copy db: {err}"))?;
-    for suffix in ["-wal", "-shm", "-journal"] {
-        let side = storage.join(format!("stele_context.db{suffix}"));
-        if side.is_file() {
-            fs::copy(&side, scratch.join(format!("stele_context.db{suffix}")))
-                .map_err(|err| format!("copy {suffix}: {err}"))?;
-        }
-    }
-    let script = r#"
-import json, sqlite3, sys
-con = sqlite3.connect(sys.argv[1])
-con.execute("pragma query_only=on")
-def has(name):
-    return con.execute(
-        "select 1 from sqlite_master where type='table' and name=?", (name,)
-    ).fetchone()
-def rows(sql):
-    cur = con.execute(sql)
-    names = [item[0] for item in cur.description]
-    out = []
-    for row in cur.fetchall():
-        item = {}
-        for name, value in zip(names, row):
-            if isinstance(value, bytes):
-                continue
-            item[name] = value
-        out.append(item)
-    return out
-payload = {"documents": [], "chunks": []}
-if has("documents"):
-    payload["documents"] = rows(
-        "select path, file_size, content_hash from documents"
-    )
-if has("chunks"):
-    payload["chunks"] = rows(
-        "select chunk_id, document_path, start_pos, end_pos, content, "
-        "content_hash, token_count, semantic_summary from chunks"
-    )
-json.dump(payload, sys.stdout)
-"#;
-    let output = Command::new("python3")
-        .arg("-c")
-        .arg(script)
-        .arg(&copy)
-        .output()
-        .map_err(|err| format!("python sqlite reader: {err}"))?;
-    if !output.status.success() {
-        let _ = fs::remove_dir_all(&scratch);
-        let detail = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "migrate refused; legacy database was not modified: {detail}"
-        ));
-    }
-    let value = json::parse(&String::from_utf8_lossy(&output.stdout))
-        .map_err(|err| format!("migrate payload: {}", err.message))?;
-    apply(store, &value)?;
-    store.save(
-        "migrate",
-        &Value::object(vec![("source", Value::string("stele_context.db"))]),
-    )?;
-    let _ = fs::remove_dir_all(&scratch);
-    Ok(())
+pub enum Legacy {
+    Absent,
+    Kept,
+    Copied { documents: i64, chunks: i64 },
 }
 
-fn apply(store: &mut Store, value: &Value) -> Result<(), String> {
-    let Value::Object(_) = value else {
-        return Err("migrate payload was not an object".to_string());
-    };
-    // Import is all-or-nothing: build a replacement, then swap.
-    let mut next = store.state.clone();
-    next.documents.clear();
-    next.chunks.clear();
-    next.symbols.clear();
-    if let Value::Object(pairs) = value {
-        if let Some((_, Value::Array(rows))) = pairs.iter().find(|(key, _)| key == "documents") {
-            for row in rows {
-                let path = text(row, "path").or_else(|| text(row, "document_path"));
-                let Some(path) = path else { continue };
-                next.documents.push(crate::store::Document {
-                    path,
-                    mtime_ns: 0,
-                    size: num(row, "file_size") as u64,
-                    sha256: text(row, "content_hash").unwrap_or_default(),
-                    doc_version: num(row, "doc_version") as u64,
-                });
-            }
-        }
-        if let Some((_, Value::Array(rows))) = pairs.iter().find(|(key, _)| key == "chunks") {
-            for row in rows {
-                let Some(id) = text(row, "chunk_id") else {
-                    continue;
-                };
-                let content = text(row, "content").unwrap_or_default();
-                next.chunks.push(crate::store::Chunk {
-                    id,
-                    path: text(row, "document_path").unwrap_or_default(),
-                    start: num(row, "start_pos") as usize,
-                    end: num(row, "end_pos") as usize,
-                    sha256: text(row, "content_hash").unwrap_or_default(),
-                    signature: crate::chunk::signature_f32_hex(&content),
-                    tokens: if num(row, "token_count") == 0 {
-                        crate::chunk::estimate_tokens(&content)
-                    } else {
-                        num(row, "token_count") as usize
-                    },
-                    modality: "code".to_string(),
-                    language: None,
-                    summary: text(row, "semantic_summary"),
-                    notes: None,
-                    content,
-                });
-            }
-        }
+pub fn migrate_if_needed(storage: &Path, cwd: &Path, store: &mut Store) -> Result<Legacy, String> {
+    let db = storage.join("stele_context.db");
+    if !db.is_file() {
+        return Ok(Legacy::Absent);
     }
-    if next.chunks.is_empty() && next.documents.is_empty() {
+    if !store.state.documents.is_empty() || !store.state.chunks.is_empty() {
+        return Ok(Legacy::Kept);
+    }
+    let copied = read_db(&db, cwd)?;
+    let documents = copied.documents.len() as i64;
+    let chunks = copied.chunks.len() as i64;
+    if documents == 0 && chunks == 0 {
         return Err(
             "legacy database has no documents or chunks; native store was not replaced".to_string(),
         );
     }
-    store.state = next;
-    Ok(())
+    store.state = copied;
+    store.save(
+        "migrate",
+        &Value::object(vec![("source", Value::string("stele_context.db"))]),
+    )?;
+    let _ = fs::write(
+        storage.join("store").join("migrated-from.txt"),
+        "stele_context.db\n",
+    );
+    Ok(Legacy::Copied { documents, chunks })
 }
 
-fn text(value: &Value, key: &str) -> Option<String> {
-    let Value::Object(pairs) = value else {
-        return None;
-    };
-    pairs
-        .iter()
-        .find(|(name, _)| name == key)
-        .and_then(|(_, item)| match item {
-            Value::String(text) => Some(text.clone()),
-            Value::Int(number) => Some(number.to_string()),
-            _ => None,
-        })
+fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
+    let opened = SqliteDb::open(db)?;
+    let mut state = State::default();
+    for row in opened
+        .table("documents")
+        .map_err(|err| format!("documents: {err}"))?
+    {
+        let path = sql_text(&row, "document_path");
+        if path.is_empty() {
+            continue;
+        }
+        let size = sql_number(&row, "file_size") as u64;
+        let (mtime_ns, size) = live_stat(cwd, &path, size);
+        state.documents.push(Document {
+            path,
+            mtime_ns,
+            size,
+            sha256: sql_text(&row, "content_hash"),
+            doc_version: sql_number(&row, "doc_version") as u64,
+        });
+    }
+    for row in opened
+        .table("chunks")
+        .map_err(|err| format!("chunks: {err}"))?
+    {
+        let id = sql_text(&row, "chunk_id");
+        if id.is_empty() {
+            continue;
+        }
+        let content = sql_text(&row, "content");
+        let blob = sql_blob(&row, "semantic_signature");
+        let signature = if blob.len() == 128 * 4 {
+            signature_f32_hex_from_blob(&blob)
+        } else {
+            signature_f32_hex(&content)
+        };
+        let mut tokens = sql_number(&row, "token_count") as usize;
+        if tokens == 0 {
+            tokens = chunk::estimate_tokens(&content).max(1);
+        }
+        state.chunks.push(Chunk {
+            id,
+            path: sql_text(&row, "document_path"),
+            start: sql_number(&row, "start_pos") as usize,
+            end: sql_number(&row, "end_pos") as usize,
+            content,
+            sha256: sql_text(&row, "content_hash"),
+            signature,
+            tokens,
+            modality: "code".to_string(),
+            language: None,
+            summary: empty_none(sql_text(&row, "semantic_summary")),
+            notes: empty_none(sql_text(&row, "agent_notes")),
+            version: sql_number(&row, "version") as u64,
+            staleness: sql_number(&row, "staleness_score"),
+            stale_since: nonzero_opt(sql_number(&row, "stale_since")),
+        });
+    }
+    for row in opened.table("symbols").unwrap_or_default() {
+        let name = sql_text(&row, "name");
+        if name.is_empty() {
+            continue;
+        }
+        let chunk_id = sql_text(&row, "chunk_id");
+        if chunk_id.starts_with("runtime:") {
+            state.dynamic.push(crate::store::Dynamic {
+                name: name.clone(),
+                kind: sql_text(&row, "kind"),
+                role: sql_text(&row, "role"),
+                path: sql_text(&row, "document_path"),
+                agent: runtime_agent(&chunk_id),
+                line: sql_number(&row, "line_number") as u32,
+                chunk_id,
+            });
+            continue;
+        }
+        state.symbols.push(Symbol {
+            name,
+            kind: sql_text(&row, "kind"),
+            role: sql_text(&row, "role"),
+            line: sql_number(&row, "line_number") as u32,
+            container: empty_none(sql_text(&row, "container")),
+            chunk_id,
+            path: sql_text(&row, "document_path"),
+            chunk_index: 0,
+        });
+    }
+    for row in opened.table("symbol_edges").unwrap_or_default() {
+        state.edges.push(Edge {
+            source: sql_text(&row, "source_chunk_id"),
+            target: sql_text(&row, "target_chunk_id"),
+            kind: sql_text(&row, "edge_type"),
+            name: sql_text(&row, "symbol_name"),
+        });
+    }
+    for row in opened.table("annotations").unwrap_or_default() {
+        let id = sql_number(&row, "id") as i64;
+        state.annotations.push(crate::store::Annotation {
+            id: id.to_string(),
+            path: sql_text(&row, "target"),
+            body: sql_text(&row, "content"),
+            tags: split_tags(&sql_text(&row, "tags")),
+            target_type: sql_text(&row, "target_type"),
+            created_at: sql_number(&row, "created_at") as i64,
+            updated_at: sql_number(&row, "updated_at") as i64,
+        });
+    }
+    for row in opened.table("sessions").unwrap_or_default() {
+        state.sessions.push(Session {
+            id: sql_text(&row, "session_id"),
+            searches: Vec::new(),
+            reads: Vec::new(),
+            kv: Vec::new(),
+            created_at: sql_number(&row, "created_at") as i64,
+            updated_at: sql_number(&row, "last_updated") as i64,
+            turn: sql_number(&row, "turn_count") as i64,
+            tokens: sql_number(&row, "total_tokens") as i64,
+            agent: sql_text(&row, "agent_id"),
+            attached: Vec::new(),
+            search_rows: Vec::new(),
+        });
+    }
+    for row in opened.table("document_conflicts").unwrap_or_default() {
+        state.conflicts.push(Conflict {
+            path: sql_text(&row, "document_path"),
+            holder: sql_text(&row, "agent_a"),
+            requester: sql_text(&row, "agent_b"),
+            at: sql_number(&row, "created_at") as i64,
+            kind: sql_text(&row, "conflict_type"),
+        });
+    }
+    for row in opened.table("chunk_history").unwrap_or_default() {
+        state.chunk_history.push(crate::store::ChunkHist {
+            chunk_id: sql_text(&row, "chunk_id"),
+            version: sql_number(&row, "version") as u64,
+            hash: sql_text(&row, "content_hash"),
+            at: sql_number(&row, "created_at") as i64,
+            path: String::new(),
+        });
+    }
+    Ok(state)
 }
 
-fn num(value: &Value, key: &str) -> i64 {
-    let Value::Object(pairs) = value else {
-        return 0;
-    };
-    pairs
-        .iter()
-        .find(|(name, _)| name == key)
-        .and_then(|(_, item)| match item {
-            Value::Int(number) => Some(*number),
-            Value::Float(number) => Some(*number as i64),
-            _ => None,
-        })
+fn live_stat(cwd: &Path, path: &str, recorded: u64) -> (i64, u64) {
+    let abs = cwd.join(path);
+    if let Ok(meta) = fs::metadata(&abs) {
+        if recorded == 0 || meta.len() == recorded {
+            return (mtime_ns(&meta), meta.len());
+        }
+    }
+    (0, recorded)
+}
+
+fn mtime_ns(meta: &fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos() as i64)
         .unwrap_or(0)
+}
+
+fn signature_f32_hex_from_blob(blob: &[u8]) -> String {
+    let mut hex = String::with_capacity(blob.len() * 2);
+    for byte in blob {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
+fn empty_none(text: String) -> Option<String> {
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn nonzero_opt(value: f64) -> Option<i64> {
+    if value == 0.0 {
+        None
+    } else {
+        Some(value as i64)
+    }
+}
+
+fn split_tags(text: &str) -> Vec<String> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    if let Some(rest) = text.strip_prefix('[') {
+        return rest
+            .trim_end_matches(']')
+            .split(',')
+            .map(|part| part.trim().trim_matches('"').trim_matches('\'').to_string())
+            .filter(|part| !part.is_empty())
+            .collect();
+    }
+    text.split(',')
+        .map(|part| part.trim().to_string())
+        .filter(|part| !part.is_empty())
+        .collect()
+}
+
+fn runtime_agent(chunk_id: &str) -> String {
+    chunk_id
+        .strip_prefix("runtime:")
+        .and_then(|rest| rest.split(':').next())
+        .unwrap_or("")
+        .to_string()
 }

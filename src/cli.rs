@@ -45,6 +45,23 @@ struct Parsed {
     scan_new: bool,
     port: u16,
     host: String,
+    regex: bool,
+    working_tree: bool,
+    confirm: bool,
+    compact: Option<bool>,
+    path_prefix: Option<String>,
+    document: Option<String>,
+    limit: Option<usize>,
+    depth: Option<usize>,
+    significance: Option<f64>,
+    mode: Option<String>,
+    summary_mode: bool,
+    chunk_id: Option<String>,
+    top_n: Option<usize>,
+    min_tokens: Option<usize>,
+    max_tokens: Option<i64>,
+    group_by: Option<String>,
+    no_index: bool,
 }
 
 impl Parsed {
@@ -112,18 +129,70 @@ impl Parsed {
         match self.command.as_deref().unwrap_or("") {
             "index" => engine.index(&self.positionals, self.force),
             "remove" => engine.remove(positional),
-            "detect" => engine.detect(self.scan_new),
+            "detect" => engine.detect_with(self.scan_new, None, self.limit.unwrap_or(200)),
             "stats" => Ok(engine.stats()),
             "map" => Ok(engine.map()),
             "project-brief" => Ok(engine.project_brief()),
             "enrichment-plan" => Ok(engine.enrichment_plan()),
             "history" => engine.history(),
-            "clear" => engine.clear(),
+            "clear" => {
+                if !self.confirm {
+                    return Ok(Value::object(vec![
+                        ("cancelled", Value::Bool(true)),
+                        ("reason", Value::string("pass --confirm to clear the store")),
+                    ]));
+                }
+                engine.clear()
+            }
             "migrate" => engine.migrate(),
-            "search" => Ok(engine.search(positional, &self.search_mode, self.top_k)),
-            "search-text" => engine.search_text(positional),
-            "agent-grep" => engine.agent_grep(positional, self.session.as_deref()),
-            "query" => engine.query(positional),
+            "search" => {
+                if self.working_tree {
+                    engine.index_working_tree();
+                }
+                let mut value = engine.search(positional, &self.search_mode, self.top_k);
+                if let Some(prefix) = &self.path_prefix {
+                    if let crate::json::Value::Object(pairs) = &mut value {
+                        if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "results")
+                        {
+                            if let crate::json::Value::Array(rows) = item {
+                                rows.retain(|row| {
+                                    crate::store::string_field(row, "document_path")
+                                        .starts_with(prefix)
+                                });
+                            }
+                        }
+                    }
+                }
+                let _ = self.compact;
+                Ok(value)
+            }
+            "search-text" => engine.text_search(
+                positional,
+                self.regex,
+                self.document.as_deref(),
+                self.limit.unwrap_or(50),
+                self.session.as_deref(),
+                self.working_tree,
+            ),
+            "agent-grep" => engine.grep_full(
+                positional,
+                self.regex,
+                self.document.as_deref(),
+                true,
+                true,
+                self.group_by.as_deref().unwrap_or("file"),
+                self.max_tokens.unwrap_or(4000),
+                true,
+                0,
+                self.session.as_deref(),
+                self.working_tree,
+            ),
+            "query" => {
+                if self.working_tree {
+                    engine.index_working_tree();
+                }
+                engine.query(positional)
+            }
             "find-definition" => Ok(engine.find_definition(positional)),
             "find-references" => Ok(engine.find_references(positional)),
             "impact-radius" => Ok(engine.impact(self.symbol.as_deref().unwrap_or(positional))),
@@ -174,6 +243,23 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         scan_new: true,
         port: 9876,
         host: "127.0.0.1".to_string(),
+        regex: false,
+        working_tree: false,
+        confirm: false,
+        compact: None,
+        path_prefix: None,
+        document: None,
+        limit: None,
+        depth: None,
+        significance: None,
+        mode: None,
+        summary_mode: false,
+        chunk_id: None,
+        top_n: None,
+        min_tokens: None,
+        max_tokens: None,
+        group_by: None,
+        no_index: false,
     };
     let mut index = 0usize;
     let mut command_seen = false;
@@ -219,8 +305,21 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                 "--human" => parsed.human = true,
                 "--json" => {}
                 "--force" | "--force-reindex" => parsed.force = true,
-                "--summary-mode" => {}
+                "--summary-mode" => parsed.summary_mode = true,
+                "--no-summary-mode" => parsed.summary_mode = false,
+                "--regex" => parsed.regex = true,
+                "--working-tree" => parsed.working_tree = true,
+                "--confirm" => parsed.confirm = true,
+                "--compact" => parsed.compact = Some(true),
+                "--no-compact" => parsed.compact = Some(false),
+                "--meta" => {}
+                "--no-classify" => {}
+                "--no-scope" => {}
+                "--no-dedup" => {}
+                "--no-index" => parsed.no_index = true,
+                "--blocking" => {}
                 "--no-scan-new" => parsed.scan_new = false,
+                "--scan-new" => parsed.scan_new = true,
                 "--storage-dir" => {
                     parsed.storage = Some(PathBuf::from(take_value(args, &mut index)?))
                 }
@@ -239,6 +338,68 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                         .map_err(|_| "--port needs an integer".to_string())?;
                 }
                 "--host" => parsed.host = take_value(args, &mut index)?,
+                "--path-prefix" => parsed.path_prefix = Some(take_value(args, &mut index)?),
+                "--document" | "--document-path" => {
+                    parsed.document = Some(take_value(args, &mut index)?)
+                }
+                "--limit" => {
+                    parsed.limit = Some(
+                        take_value(args, &mut index)?
+                            .parse()
+                            .map_err(|_| "--limit needs an integer".to_string())?,
+                    );
+                }
+                "--depth" => {
+                    parsed.depth = Some(
+                        take_value(args, &mut index)?
+                            .parse()
+                            .map_err(|_| "--depth needs an integer".to_string())?,
+                    );
+                }
+                "--significance-threshold" => {
+                    parsed.significance = Some(
+                        take_value(args, &mut index)?
+                            .parse()
+                            .map_err(|_| "--significance-threshold needs a number".to_string())?,
+                    );
+                }
+                "--mode" | "--group-by" | "--type" => {
+                    let value = take_value(args, &mut index)?;
+                    if arg == "--group-by" {
+                        parsed.group_by = Some(value);
+                    } else if arg == "--mode" {
+                        parsed.mode = Some(value);
+                    }
+                }
+                "--chunk-id" => parsed.chunk_id = Some(take_value(args, &mut index)?),
+                "--top-n" => {
+                    parsed.top_n = Some(
+                        take_value(args, &mut index)?
+                            .parse()
+                            .map_err(|_| "--top-n needs an integer".to_string())?,
+                    );
+                }
+                "--min-tokens"
+                | "--max-tokens"
+                | "--max-result-tokens"
+                | "--context-lines"
+                | "--max-documents" => {
+                    let value: i64 = take_value(args, &mut index)?
+                        .parse()
+                        .map_err(|_| format!("{arg} needs an integer"))?;
+                    if arg == "--max-tokens" {
+                        parsed.max_tokens = Some(value);
+                    }
+                    if arg == "--min-tokens" {
+                        parsed.min_tokens = Some(value as usize);
+                    }
+                }
+                "--content" | "--tags" | "--session" => {
+                    let value = take_value(args, &mut index)?;
+                    if arg == "--session" {
+                        parsed.session = Some(value);
+                    }
+                }
                 other => return Err(format!("unknown flag '{other}'")),
             }
             index += 1;
@@ -322,7 +483,7 @@ mod tests {
     fn version_line_is_twenty_bytes() {
         let response = dispatch(&["--version".to_string()]);
         assert_eq!(response.code, 0);
-        assert_eq!(response.stdout, b"stele-context 2.0.0\n");
+        assert_eq!(response.stdout, b"stele-context 2.0.1\n");
         assert_eq!(response.stdout.len(), 20);
     }
 
@@ -334,7 +495,7 @@ mod tests {
         let value = json::parse(text.trim_end()).unwrap();
         let rendered = json::to_string(&value);
         assert!(rendered.contains("\"ok\":true"));
-        assert!(rendered.contains("\"version\":\"2.0.0\""));
+        assert!(rendered.contains("\"version\":\"2.0.1\""));
         assert!(rendered.contains("\"implementation\":\"rust\""));
         assert!(rendered.contains("No 2.0 store yet") || rendered.contains("native store"));
     }

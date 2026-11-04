@@ -49,6 +49,10 @@ jobs:
           RUSTFLAGS: "-D warnings"
         run: cargo test --release --target ${{ matrix.target }} --lib cargo_manifest_and_lock_are_std_only -- --exact
 
+      - name: Fetch Python 1.5 reference
+        if: matrix.test
+        run: git fetch --depth=1 origin python-legacy
+
       - name: Fetch parity corpora
         if: matrix.test
         shell: bash

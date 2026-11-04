@@ -3,7 +3,7 @@
 # Usage: curl -fsSL .../install.sh | sh
 # Override with STELE_VERSION (default 2.0.0) and STELE_PREFIX (default ~/.local).
 set -eu
-version="${STELE_VERSION:-2.0.0}"
+version="${STELE_VERSION:-2.0.1}"
 prefix="${STELE_PREFIX:-$HOME/.local}"
 repo="${STELE_REPO:-IronAdamant/stele-context}"
 os=$(uname -s)

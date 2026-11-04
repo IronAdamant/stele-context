@@ -1,6 +1,27 @@
 # Migrating from stele-context 1.5.x (Python) to 2.0 (Rust)
 
-This is the list of differences between the Python package on PyPI (1.5.x, source on the `python-legacy` branch) and the Rust 2.0.0 binary on `main`. It was checked against that branch, `parity/goldens`, `CHANGELOG.md`, and [PR #5](https://github.com/IronAdamant/stele-context/pull/5) (merged as the Rust rewrite; the parity notes are the PR body plus commit `491bd8a`).
+2.0.1 closes the gaps below that 2.0.0 left open. Rows marked **same** now match 1.5.2 for that input. Rows that are still different stay marked **intentional change** or **not supported**, with the reason.
+
+Closed in 2.0.1 (same, unless noted):
+
+- Standard tools that used to return `note: accepted` run: `prune_history`, `rollback`, `prune_chunks`, `list_sessions`, `rebuild_symbols`, `stale_chunks`, `get_dynamic_symbols`, `list_agents`, `get_notifications`, `environment_check`, `clean_bytecache`, `bulk_store_embeddings`, `bulk_store_chunk_agent_notes`, `get_chunk_history`, `batch`.
+- Full mode runs the 18 old singleton names by calling those implementations. They do not return `tool_removed`.
+- `migrate` reads `document_path` and the other 1.5 tables (`chunks`, `symbols`, `symbol_edges`, `annotations`, `sessions`, `chunk_history`, `document_conflicts`). A storage directory that has `stele_context.db` and no native documents is copied on open. The original database is not written. `doctor` says the copy happened.
+- `chunk_size`, `skip_dirs` (added to the defaults, not a replacement), and `respect_gitignore` are applied.
+- CLI flags `--compact`, `--path-prefix`, `--regex`, `--working-tree`, `--confirm`, `--limit`, `--document`, `--session`, `--depth`, `--significance-threshold`, `--mode`, `--group-by`, `--summary-mode`, `--top-n`, and `--min-tokens` are accepted. `--regex` is required before a pattern is a regex. `--confirm` is required before `clear` deletes the store.
+- Stdio `inputSchema` and HTTP `parameters` list the properties the dispatcher reads. `paths`, `summaries`, `document_paths`, and `working_tree` are honoured.
+- PDF page text from uncompressed and Flate streams ends with a newline, so the one-page fixture matches PyMuPDF `get_text()` (`[Page 1]\nHello PDF symbols\n`).
+
+Still not the same, and why:
+
+- Image, audio, and video chunk bodies are header metadata. Pixel hashes, MFCC, and decoded frames need Pillow, librosa, or OpenCV, which 2.x does not link.
+- PDF text is literal and hex strings in stream order. PyMuPDF layout, fonts, and reading order are not reproduced. A PDF that is not `%PDF` or has no text streams is one metadata chunk, not an empty PyMuPDF document.
+- User-facing regex rejects lookaround and backreferences.
+- There is no on-disk HNSW graph. Hybrid search uses exact cosine of the 128-d signature, and the HNSW cut only when the corpus is above 4096 chunks.
+- `environment_check` reports stale `__pycache__` only. It does not compare pip editable installs or egg-info, which are Python packaging facts.
+- The CLI still prints the `ok` / `schema_version` / `command` / `result` envelope. `--human` prints `result` only.
+
+This is the list of differences between the Python package on PyPI (1.5.x, source on the `python-legacy` branch) and the Rust 2.0.1 binary on `main`. It was checked against that branch, `parity/goldens`, `CHANGELOG.md`, and [PR #5](https://github.com/IronAdamant/stele-context/pull/5) (merged as the Rust rewrite; the parity notes are the PR body plus commit `491bd8a`).
 
 Each row is marked:
 
@@ -64,8 +85,8 @@ The parity audit's six extractor and token gaps were Rust defects. They were fix
 | `coordination.db` | not supported | Not read. Old holders do not carry over. |
 | Sessions, annotations, embeddings, `agent_signature` blobs, chunk history, operation log, search history | not supported | Not imported. |
 | Re-index | the path that works | `stele-context index .` builds the native store from the tree. |
-| `stele-context migrate` | not supported on a 1.5 database | The command is in this build. The reader runs `select path, file_size, content_hash from documents`. The 1.5 column is `document_path`, not `path`. sqlite3 returns `no such column: path`. The scratch copy is deleted and the native snapshot is not replaced. Checked against a database created with the 1.5 `documents` columns (`document_path`, `content_hash`, `chunk_count`, `indexed_at`, `last_modified`, `file_size`). The chunk SELECT would succeed; the document SELECT fails first. `apply` would also drop symbols and keep only documents and chunks, with `mtime_ns` 0 and modality `code`. |
-| `doctor` text when the db file exists | not the same as the CLI | `next_steps` includes: `A Python 1.5.x stele_context.db is in the storage directory. It was left untouched. migrate is not in this build.` The CLI does contain `migrate`. The sentence is wrong, and the command does not import the database (row above). This doc does not change that string. |
+| `stele-context migrate` and open | same | A 1.5 database is read in place, including its `-wal` file. `documents.document_path` is the path column. Chunks, symbols, edges, annotations, sessions, chunk history, and conflicts are copied. The original files are not written. If the native store already has documents, the database is left untouched. |
+| `doctor` when the db was copied | same | `next_steps` says the database was copied into the native store and was not modified. |
 
 `version_count` in `GET /health` is 0. There is no `chunk_history` table.
 
@@ -101,17 +122,20 @@ Non-Python symbols follow the 1.5.2 regex extractors. 2.0 does not add names a f
 | Key | Mark | 2.0 |
 | --- | --- | --- |
 | `storage_dir` | same | Used, after the flag and before the environment variable |
-| `chunk_size`, `max_chunk_size`, `merge_threshold`, `change_threshold`, `search_alpha`, `max_history_entries`, `skip_dirs`, `respect_gitignore` | not supported | Parsed into the config struct. The indexer uses chunk size 256, max 4096, and `walk::expand(..., respect_gitignore: true)` with the fixed skip list. A toml `chunk_size` or `skip_dirs` does not change the walk or the chunks. `respect_gitignore = false` does not index gitignored files. |
+| `chunk_size`, `max_chunk_size` | same | Passed to the text and code chunkers. Default 256 and 4096. |
+| `skip_dirs` | same | Added to the default skip set. Names starting with `.` are still skipped, as in 1.5.2. |
+| `respect_gitignore` | same | `false` indexes gitignored files during a directory walk. An explicit file path is still indexed. |
+| `merge_threshold`, `change_threshold`, `search_alpha`, `max_history_entries` | not supported | Parsed. The indexer uses merge threshold 0.7, and hybrid search uses alpha 0.42. The journal is not capped at `max_history_entries`. |
 
 ## CLI
 
 2.0 prints one JSON object on stdout for commands:
 
 ```json
-{"ok": true, "schema_version": "2.0.0", "command": "stats", "result": {}}
+{"ok": true, "schema_version": "2.0.1", "command": "stats", "result": {}}
 ```
 
-`--human` prints `result` only, still JSON, not the 1.5 prose. `--json` is accepted and changes nothing, because JSON is already the default. `--version` prints `stele-context 2.0.0` and `--help` prints text. Neither is JSON.
+`--human` prints `result` only, still JSON, not the 1.5 prose. `--json` is accepted and changes nothing, because JSON is already the default. `--version` prints `stele-context 2.0.1` and `--help` prints text. Neither is JSON.
 
 1.5 prints prose for `index`, `detect`, `stats`, `search`, `search-text`, and `agent-grep` unless `--json` is set. `query`, `find-definition`, `find-references`, `impact-radius`, and `coupling` default to indented JSON of the engine object, with no `ok` or `schema_version` wrapper. 1.5.3 also prints the Rust release URL on stderr before the command.
 
@@ -152,8 +176,8 @@ Exit codes in 2.0: 0 success, 1 operation error, 2 usage. A closed stdout pipe e
 | Storage or command failure | intentional change | Exit 1, `error.code` `storage` or `command_failed` |
 | Regex lookaround or backreference | not supported | `regex_lookaround` or `regex_backreference` from the search call. 1.5 `re` would run those patterns. |
 | MCP unknown method | same class of error | JSON-RPC error, code `-32700` on a line that is not JSON. A notification (no `id`) is ignored. |
-| Removed MCP name | intentional change | Full mode lists the name. The call returns text `{"ok":false,"error":{"code":"tool_removed","message":"<name> was removed in 2.0","replacement":"<name>"}}`. 1.5 full mode still runs the old tool. |
-| Tool that is listed and not implemented | not supported | Stdio and HTTP return success with `{"ok": true, "tool": "<name>", "note": "accepted"}`. Nothing is stored. The names are in the MCP section. |
+| Old singleton MCP name | same | Full mode runs the name. The call is the unified tool (`annotations`, `document_lock`, `doctor`, `bulk_store_summaries`, `bulk_store_embeddings`, or `bulk_store_chunk_agent_notes`). |
+| Listed tool with no body | same | The 15 standard names run. An unknown name returns `unknown tool`. |
 
 ## MCP tool names and schemas
 
@@ -173,27 +197,27 @@ Calls that send only the 1.5 property names therefore miss:
 | Tool | Mark | What happens |
 | --- | --- | --- |
 | `index` | not supported for the 1.5 body | Schema requires `paths` (array). The dispatcher reads `path`. A call with only `paths` indexes `.`. `force_reindex`, `summaries`, and `expected_versions` are ignored. |
-| `search` | not supported for those knobs | `top_k` is fixed at 10. `compact`, `max_result_tokens`, `path_prefix`, `working_tree`, and `session_id` are ignored. `search_mode` is read. |
-| `search_text`, `agent_grep` | not supported for those knobs | Same regex rule as the CLI. `regex`, `document_path` as a scope, `limit`, classification, grouping, and `working_tree` are ignored. `session_id` on `agent_grep` records the pattern and does not auto-index. |
+| `search` | same for the knobs that change the set | `top_k`, `search_mode`, `path_prefix`, and `working_tree` are read. `compact` and `max_result_tokens` are accepted and do not trim bodies. |
+| `search_text`, `agent_grep` | same | `regex` defaults off, so `file.py` is a substring. `document_path`, `limit`, `group_by`, `max_tokens`, and `working_tree` are read. `session_id` records the search and indexes files that matched. |
 | `query` | intentional change | See the CLI row. Not a merged list. |
-| `get_context` | intentional change | One `path`. No `diff_since_cache`. `document_paths` is ignored, so a 1.5 call that only sends that array looks up an empty path. |
-| `detect_changes` | intentional change | Always scans for new files and indexes them. `document_paths`, `limit`, `session_id`, and `scan_new: false` are ignored. |
+| `get_context` | same for the path list | `document_paths` returns `unchanged`, `changed`, and `new`. There is no `diff_since_cache` unified diff. |
+| `detect_changes` | same | `document_paths`, `limit`, and `scan_new` are read. New files are reported and not indexed. Changed files are reindexed. |
 | `impact_radius` | intentional change | Symbol only, depth 2. `chunk_id`, `document_path`, `summary_mode`, `significance_threshold`, `direction`, and `depth` are ignored. |
 | `coupling` | intentional change | `document_path` only. `mode` and `significance_threshold` are ignored. |
 | `annotations` | intentional change | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `bulk_create` stores one note. The dispatcher reads `path`, not `target`, and `body`, not `content`. Tags and `annotation_id` are ignored. `delete` matches id or path. |
 | `document_lock` | intentional change | Actions `acquire`, `release`, `refresh`, `status`, `release_all`, `reap`, `conflicts`. `ttl` and `limit` are ignored (TTL 300). `force` is read. Storage is the JSON coordination file, not `coordination.db`. |
-| `bulk_store_summaries` | not supported for the 1.5 body | Schema sends `summaries` (object of chunk id to text). The dispatcher reads `chunk_id` and `summary` (one pair). A 1.5 body stores nothing useful. |
-| `register_dynamic_symbols` | not supported for the 1.5 body | Schema sends `symbols` (array) and `agent_id`. The dispatcher reads one `symbol` or `name`, kind `function`, and `path`. |
-| `remove_dynamic_symbols` | not supported for the 1.5 body | Schema removes by `agent_id`. The dispatcher removes one `symbol` name. |
-| `llm_embed` | not supported | Returns `embedding: "caller-supplied"` and a note to pass vectors to `bulk_store_embeddings`. It does not store a fingerprint or update an index. |
+| `bulk_store_summaries` | same | `summaries` is a chunk id to text object. One `chunk_id` plus `summary` still works. |
+| `register_dynamic_symbols` | same | `symbols` is a list, stored under `runtime:<agent_id>:<name>`. |
+| `remove_dynamic_symbols` | same | `agent_id` removes that agent's runtime symbols. |
+| `llm_embed` | intentional change | A 32 or 128 `fingerprint_values` list is stored on the chunk (32 values use the 1.5 Gaussian spread). With no fingerprint, 2.0.1 stores a deterministic hash vector, not 1.5 `semantic_fingerprint`. |
 | `get_search_history`, `get_session_read_files` | same role, smaller payload | Session id defaults to `default` when omitted. |
 | `save_kv_state`, `get_relevant_kv` | intentional change | Standard mode. KV is a list of `{k, v}` strings on the session. Not the 1.5 relevance lookup. |
 | `history` | intentional change | Standard mode. The journal, not `change_history`. |
 | `doctor`, `map`, `enrichment_plan`, `detect_modality`, `get_supported_formats` | intentional change | They run. Shapes are the 2.0 objects, not the schema's 1.5 description. `get_supported_formats` reports metadata for images, one metadata line for non-WAV audio, WAV duration (30s segments when longer), container brand for video, and uncompressed or Flate PDF text. |
 
-Standard and full names that return `note: accepted` and do no 1.5 work (**not supported**): `prune_history`, `rollback`, `prune_chunks`, `list_sessions`, `rebuild_symbols`, `stale_chunks`, `get_dynamic_symbols`, `list_agents`, `get_notifications`, `environment_check`, `clean_bytecache`, `bulk_store_embeddings`, `bulk_store_chunk_agent_notes`, `get_chunk_history`, `batch`.
+Those 15 standard names run in 2.0.1 (**same**).
 
-Full-mode names that return `tool_removed` (**intentional change**; 1.5 full mode still runs them):
+Full-mode names run in 2.0.1 by calling the tool in the replacement column (**same**):
 
 | Removed name | Replacement named in the error |
 | --- | --- |
@@ -204,7 +228,7 @@ Full-mode names that return `tool_removed` (**intentional change**; 1.5 full mod
 | `store_embedding` | `bulk_store_embeddings` |
 | `store_chunk_agent_notes` | `bulk_store_chunk_agent_notes` |
 
-`stats` and `project_brief` still run as CLI commands. The MCP names do not.
+`stats` and `project_brief` run as CLI commands and as full-mode MCP tools. `stats` calls `doctor`'s count object. |
 
 There is no self-healing `hint` on HTTP tool errors beyond the `error` string. 1.5 attaches hints for some failures. Mark: **not supported**.
 
@@ -252,8 +276,8 @@ Removed, relative to a 1.5.2 process that had the extras installed:
 - PyPI install of 2.0, tree-sitter, numpy, Pillow, PyMuPDF, librosa, OpenCV, msgspec
 - SQLite store, `indices/`, `coordination.db`, bytecache, operation log, chunk history
 - CLI `release` and the singular annotation commands
-- MCP singleton tools in full mode (they answer `tool_removed`)
-- The standard tools listed as stubs above, including `batch`, `stale_chunks`, `environment_check`, and `bulk_store_embeddings`
+- Lookaround and backreference regex
+- Pip egg-info and editable-install checks inside `environment_check`
 - `working_tree` auto-index, `diff_since_cache`, HNSW files, pickle (already gone in 1.5; 2.0 has none)
 
 Added in 2.0:

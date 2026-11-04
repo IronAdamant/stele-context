@@ -2,7 +2,12 @@
 //!
 //! The snapshot is the readable state. The journal records each successful
 //! mutation. A crash while writing the temp snapshot leaves the previous
-//! snapshot in place. The legacy SQLite file is never opened here.
+//! snapshot in place. The legacy SQLite file is not opened by the snapshot
+//! loader. `sqlite` reads a 1.5 database when `migrate` asks it to.
+
+mod sqlite;
+
+pub use sqlite::{blob as sql_blob, number as sql_number, text as sql_text, SqliteDb};
 
 use crate::json::{self, Value};
 use std::fs::{self, File};
@@ -32,6 +37,9 @@ pub struct Chunk {
     pub language: Option<String>,
     pub summary: Option<String>,
     pub notes: Option<String>,
+    pub version: u64,
+    pub staleness: f64,
+    pub stale_since: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +60,9 @@ pub struct Annotation {
     pub path: String,
     pub body: String,
     pub tags: Vec<String>,
+    pub target_type: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -67,6 +78,7 @@ pub struct Conflict {
     pub holder: String,
     pub requester: String,
     pub at: i64,
+    pub kind: String,
 }
 
 #[derive(Clone, Debug)]
@@ -83,13 +95,50 @@ pub struct Session {
     pub searches: Vec<String>,
     pub reads: Vec<String>,
     pub kv: Vec<(String, String)>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub turn: i64,
+    pub tokens: i64,
+    pub agent: String,
+    pub attached: Vec<(String, i64, f64)>,
+    pub search_rows: Vec<SearchRow>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchRow {
+    pub pattern: String,
+    pub tool: String,
+    pub files_checked: i64,
+    pub files_with_matches: i64,
+    pub at: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ChunkHist {
+    pub chunk_id: String,
+    pub version: u64,
+    pub hash: String,
+    pub at: i64,
+    pub path: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ChangeRow {
+    pub at: i64,
+    pub session: String,
+    pub summary: String,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug)]
 pub struct Dynamic {
     pub name: String,
     pub kind: String,
+    pub role: String,
     pub path: String,
+    pub agent: String,
+    pub line: u32,
+    pub chunk_id: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -103,6 +152,9 @@ pub struct State {
     pub edges: Vec<Edge>,
     pub sessions: Vec<Session>,
     pub dynamic: Vec<Dynamic>,
+    pub chunk_history: Vec<ChunkHist>,
+    pub change_log: Vec<ChangeRow>,
+    pub next_annotation: i64,
     pub seq: u64,
     /// Parallel to `chunks`. Not part of the JSON snapshot; `signatures.bin`.
     pub sigs: Vec<[f32; 128]>,
@@ -331,6 +383,9 @@ impl State {
             edges: array(value, "edges").map(Edge::from_json).collect(),
             sessions: array(value, "sessions").map(Session::from_json).collect(),
             dynamic: array(value, "dynamic").map(Dynamic::from_json).collect(),
+            chunk_history: Vec::new(),
+            change_log: Vec::new(),
+            next_annotation: int_field(value, "next_annotation"),
             sigs: Vec::new(),
         }
     }
@@ -371,6 +426,9 @@ impl Chunk {
             ("language", opt_string(&self.language)),
             ("summary", opt_string(&self.summary)),
             ("notes", opt_string(&self.notes)),
+            ("version", Value::Int(self.version as i64)),
+            ("staleness", Value::Float(self.staleness)),
+            ("stale_since", opt_int(self.stale_since)),
         ])
     }
     fn from_json(value: &Value) -> Chunk {
@@ -387,6 +445,9 @@ impl Chunk {
             language: opt_string_field(value, "language"),
             summary: opt_string_field(value, "summary"),
             notes: opt_string_field(value, "notes"),
+            version: int_field(value, "version") as u64,
+            staleness: float_field(value, "staleness"),
+            stale_since: opt_int_field(value, "stale_since"),
         }
     }
 }
@@ -428,6 +489,9 @@ impl Annotation {
                 "tags",
                 Value::Array(self.tags.iter().cloned().map(Value::String).collect()),
             ),
+            ("target_type", Value::string(&self.target_type)),
+            ("created_at", Value::Int(self.created_at)),
+            ("updated_at", Value::Int(self.updated_at)),
         ])
     }
     fn from_json(value: &Value) -> Annotation {
@@ -441,6 +505,9 @@ impl Annotation {
                     _ => None,
                 })
                 .collect(),
+            target_type: string_field(value, "target_type"),
+            created_at: int_field(value, "created_at"),
+            updated_at: int_field(value, "updated_at"),
         }
     }
 }
@@ -452,6 +519,7 @@ impl Conflict {
             ("holder", Value::string(&self.holder)),
             ("requester", Value::string(&self.requester)),
             ("at", Value::Int(self.at)),
+            ("kind", Value::string(&self.kind)),
         ])
     }
     fn from_json(value: &Value) -> Conflict {
@@ -460,6 +528,14 @@ impl Conflict {
             holder: string_field(value, "holder"),
             requester: string_field(value, "requester"),
             at: int_field(value, "at"),
+            kind: {
+                let kind = string_field(value, "kind");
+                if kind.is_empty() {
+                    "lock_stolen".to_string()
+                } else {
+                    kind
+                }
+            },
         }
     }
 }
@@ -526,6 +602,11 @@ impl Session {
                         .collect(),
                 ),
             ),
+            ("created_at", Value::Int(self.created_at)),
+            ("updated_at", Value::Int(self.updated_at)),
+            ("turn", Value::Int(self.turn)),
+            ("tokens", Value::Int(self.tokens)),
+            ("agent", Value::string(&self.agent)),
         ])
     }
     fn from_json(value: &Value) -> Session {
@@ -536,6 +617,13 @@ impl Session {
             kv: array(value, "kv")
                 .map(|item| (string_field(item, "k"), string_field(item, "v")))
                 .collect(),
+            created_at: int_field(value, "created_at"),
+            updated_at: int_field(value, "updated_at"),
+            turn: int_field(value, "turn"),
+            tokens: int_field(value, "tokens"),
+            agent: string_field(value, "agent"),
+            attached: Vec::new(),
+            search_rows: Vec::new(),
         }
     }
 }
@@ -545,15 +633,53 @@ impl Dynamic {
         Value::object(vec![
             ("name", Value::string(&self.name)),
             ("kind", Value::string(&self.kind)),
+            ("role", Value::string(&self.role)),
             ("path", Value::string(&self.path)),
+            ("agent", Value::string(&self.agent)),
+            ("line", Value::Int(self.line as i64)),
+            ("chunk_id", Value::string(&self.chunk_id)),
         ])
     }
     fn from_json(value: &Value) -> Dynamic {
         Dynamic {
             name: string_field(value, "name"),
             kind: string_field(value, "kind"),
+            role: {
+                let role = string_field(value, "role");
+                if role.is_empty() {
+                    "definition".to_string()
+                } else {
+                    role
+                }
+            },
             path: string_field(value, "path"),
+            agent: string_field(value, "agent"),
+            line: int_field(value, "line") as u32,
+            chunk_id: string_field(value, "chunk_id"),
         }
+    }
+}
+
+fn opt_int(value: Option<i64>) -> Value {
+    match value {
+        Some(number) => Value::Int(number),
+        None => Value::Null,
+    }
+}
+
+fn float_field(value: &Value, key: &str) -> f64 {
+    match field(value, key) {
+        Some(Value::Float(number)) => *number,
+        Some(Value::Int(number)) => *number as f64,
+        _ => 0.0,
+    }
+}
+
+fn opt_int_field(value: &Value, key: &str) -> Option<i64> {
+    match field(value, key) {
+        Some(Value::Int(number)) => Some(*number),
+        Some(Value::Float(number)) => Some(*number as i64),
+        _ => None,
     }
 }
 

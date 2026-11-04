@@ -129,6 +129,7 @@ fn record_conflict(
         holder: holder.to_string(),
         requester: agent.to_string(),
         at: now,
+        kind: "lock_stolen".to_string(),
     };
     state.conflicts.push(row.clone());
     if let Some(shared) = shared.as_mut() {
@@ -373,6 +374,14 @@ impl Shared {
                     holder: text_field(row, "holder"),
                     requester: text_field(row, "requester"),
                     at: int_field(row, "at"),
+                    kind: {
+                        let kind = text_field(row, "kind");
+                        if kind.is_empty() {
+                            "lock_stolen".to_string()
+                        } else {
+                            kind
+                        }
+                    },
                 })
                 .collect(),
             _ => Vec::new(),
@@ -419,6 +428,7 @@ impl Shared {
                                 ("holder", Value::string(&row.holder)),
                                 ("requester", Value::string(&row.requester)),
                                 ("at", Value::Int(row.at)),
+                                ("kind", Value::string(&row.kind)),
                             ])
                         })
                         .collect(),

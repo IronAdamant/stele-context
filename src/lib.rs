@@ -23,7 +23,7 @@ pub mod syntax;
 pub mod walk;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const SCHEMA_VERSION: &str = "2.0.0";
+pub const SCHEMA_VERSION: &str = "2.0.1";
 
 #[cfg(test)]
 mod zero_deps {
