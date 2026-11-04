@@ -87,6 +87,12 @@ impl Cursor<'_> {
                 }
                 return;
             }
+            // Keyword argument names are not loads. `print(style="x")` must
+            // not record `style`, matching CPython's ast walk.
+            if *depth > 0 && self.next_real_is("=") {
+                self.bump();
+                return;
+            }
             let name = self.ident_text().unwrap_or_default();
             let line = self.line_here();
             let is_call = self.next_real_is("(");

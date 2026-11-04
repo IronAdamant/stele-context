@@ -4,6 +4,15 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-03 - Rust 2.0.0 phases 3 through 9
+
+- Text and code chunkers match the 1.5.2 fixture goldens, including rebuilt paragraph ends and f32 signatures.
+- Native store is `store/snapshot.json` plus `store/journal.jsonl`. Index skips unchanged files by mtime and size. `migrate` copies a 1.5 SQLite file and reads the copy; the original database is not opened for write.
+- Keyword search is BM25 with the Porter stemmer. Hybrid search blends that with exact cosine. User-facing regex rejects lookaround and backreferences.
+- Non-Python symbol extractors match the fixture goldens. The shared scanner round-trips rich and flask.
+- MCP stdio speaks 2026-07-28, 2025-11-25, and 2025-06-18. Lite 25, standard 43, full 61. Removed names return `tool_removed`.
+- Release workflow, install scripts, npm launcher, and the unapplied 1.5.3 PyPI notice are in the tree. Tags and secrets are in `docs/release-2.0.md`. Nothing was tagged or published.
+
 ## 2026-11-03 - Rust 2.0.0 phase 2 parsing core
 
 - Shared tree plus Python and JSON grammars. Every cached rich and flask file round-trips. Broken and random bytes do not panic.

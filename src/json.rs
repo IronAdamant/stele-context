@@ -170,12 +170,24 @@ impl<'a> Parser<'a> {
 
     fn string(&mut self) -> Result<String, ParseError> {
         self.index += 1;
-        let mut out = String::new();
-        while let Some(byte) = self.bytes.get(self.index).copied() {
-            self.index += 1;
-            match byte {
-                b'"' => return Ok(out),
+        let mut out = Vec::new();
+        loop {
+            let rest = &self.bytes[self.index..];
+            let special = rest
+                .iter()
+                .position(|byte| *byte == b'"' || *byte == b'\\' || *byte < 0x20);
+            let Some(special) = special else {
+                return Err(self.error("unterminated string"));
+            };
+            out.extend_from_slice(&rest[..special]);
+            self.index += special;
+            match self.bytes[self.index] {
+                b'"' => {
+                    self.index += 1;
+                    return String::from_utf8(out).map_err(|_| self.error("invalid utf-8"));
+                }
                 b'\\' => {
+                    self.index += 1;
                     let esc = self
                         .bytes
                         .get(self.index)
@@ -183,32 +195,23 @@ impl<'a> Parser<'a> {
                         .ok_or_else(|| self.error("truncated escape"))?;
                     self.index += 1;
                     match esc {
-                        b'"' | b'\\' | b'/' => out.push(esc as char),
-                        b'b' => out.push('\u{0008}'),
-                        b'f' => out.push('\u{000c}'),
-                        b'n' => out.push('\n'),
-                        b'r' => out.push('\r'),
-                        b't' => out.push('\t'),
-                        b'u' => out.push(self.unicode_escape()?),
+                        b'"' | b'\\' | b'/' => out.push(esc),
+                        b'b' => out.push(0x08),
+                        b'f' => out.push(0x0c),
+                        b'n' => out.push(b'\n'),
+                        b'r' => out.push(b'\r'),
+                        b't' => out.push(b'\t'),
+                        b'u' => {
+                            let ch = self.unicode_escape()?;
+                            let mut buf = [0u8; 4];
+                            out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                        }
                         _ => return Err(self.error("invalid escape")),
                     }
                 }
-                0x00..=0x1f => return Err(self.error("unescaped control character")),
-                _ => {
-                    let width = utf8_width(byte).ok_or_else(|| self.error("invalid utf-8"))?;
-                    let start = self.index - 1;
-                    let end = start + width;
-                    if end > self.bytes.len() {
-                        return Err(self.error("truncated utf-8"));
-                    }
-                    let text = std::str::from_utf8(&self.bytes[start..end])
-                        .map_err(|_| self.error("invalid utf-8"))?;
-                    out.push_str(text);
-                    self.index = end;
-                }
+                _ => return Err(self.error("unescaped control character")),
             }
         }
-        Err(self.error("unterminated string"))
     }
 
     fn unicode_escape(&mut self) -> Result<char, ParseError> {
@@ -276,20 +279,6 @@ impl<'a> Parser<'a> {
             return Err(self.error("non-finite number"));
         }
         Ok(Value::Float(float))
-    }
-}
-
-fn utf8_width(byte: u8) -> Option<usize> {
-    if byte < 0x80 {
-        Some(1)
-    } else if byte & 0xe0 == 0xc0 {
-        Some(2)
-    } else if byte & 0xf0 == 0xe0 {
-        Some(3)
-    } else if byte & 0xf8 == 0xf0 {
-        Some(4)
-    } else {
-        None
     }
 }
 

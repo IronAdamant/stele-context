@@ -1,8 +1,10 @@
 //! Hand-written argument parser. JSON is the default for commands.
 //! `--version` and `--help` stay single-purpose text, matching the bench.
 
-use crate::contract::{ErrorBody, Response, EXIT_USAGE};
+use crate::contract::{ErrorBody, Response, EXIT_ERROR, EXIT_USAGE};
 use crate::doctor;
+use crate::engine::Engine;
+use crate::json::Value;
 use crate::VERSION;
 use std::env;
 use std::ffi::OsString;
@@ -15,15 +17,7 @@ pub fn run() -> i32 {
 
 pub fn dispatch(args: &[String]) -> Response {
     if invoked_as_mcp() {
-        return Response::failure(
-            "serve-mcp",
-            crate::contract::EXIT_ERROR,
-            ErrorBody::new(
-                "not_in_this_build",
-                "the stdio MCP server is not in this build",
-                "MCP arrives in a later 2.0 phase; this binary does not pretend to serve",
-            ),
-        );
+        return crate::mcp::serve();
     }
     match parse(args) {
         Ok(parsed) => parsed.run(),
@@ -41,6 +35,14 @@ struct Parsed {
     human: bool,
     storage: Option<PathBuf>,
     command: Option<String>,
+    positionals: Vec<String>,
+    search_mode: String,
+    symbol: Option<String>,
+    session: Option<String>,
+    action: Option<String>,
+    top_k: usize,
+    force: bool,
+    scan_new: bool,
 }
 
 impl Parsed {
@@ -48,25 +50,95 @@ impl Parsed {
         if self.version {
             return Response::text(0, &format!("stele-context {VERSION}"));
         }
-        match self.command.as_deref() {
-            None | Some("help") => Response::text(0, &help_text()),
-            Some("doctor") => {
-                if self.help {
-                    return Response::text(0, &help_text());
-                }
-                doctor::report(self.storage.as_deref(), self.human)
+        if self.help && self.command.is_none() {
+            return Response::text(0, &help_text());
+        }
+        let Some(command) = self.command.clone() else {
+            return Response::text(0, &help_text());
+        };
+        if self.help {
+            return Response::text(0, &help_text());
+        }
+        if command == "doctor" {
+            return doctor::report(self.storage.as_deref(), self.human);
+        }
+        if command == "serve-mcp" {
+            return crate::mcp::serve();
+        }
+        let mut engine = match Engine::open(self.storage.as_deref()) {
+            Ok(engine) => engine,
+            Err(message) => {
+                return Response::failure(
+                    &command,
+                    EXIT_ERROR,
+                    ErrorBody::new("storage", message, "pass --storage-dir or set HOME"),
+                );
             }
-            Some(other) => Response::failure(
-                other,
-                EXIT_USAGE,
-                ErrorBody::new(
-                    "unknown_command",
-                    format!("unknown command '{other}'"),
-                    "this build implements doctor; indexing and search arrive in later phases",
-                ),
+        };
+        let result = self.execute(&mut engine);
+        match result {
+            Ok(value) => {
+                if self.human {
+                    Response::text(0, &crate::json::to_string(&value))
+                } else {
+                    Response::success(&command, value)
+                }
+            }
+            Err(message) => Response::failure(
+                &command,
+                EXIT_ERROR,
+                ErrorBody::new("command_failed", message, "see the message"),
             ),
         }
     }
+
+    fn execute(&self, engine: &mut Engine) -> Result<Value, String> {
+        let positional = self.positionals.first().map(String::as_str).unwrap_or("");
+        match self.command.as_deref().unwrap_or("") {
+            "index" => engine.index(&self.positionals, self.force),
+            "remove" => engine.remove(positional),
+            "detect" => engine.detect(self.scan_new),
+            "stats" => Ok(engine.stats()),
+            "map" => Ok(engine.map()),
+            "project-brief" => Ok(engine.project_brief()),
+            "enrichment-plan" => Ok(engine.enrichment_plan()),
+            "history" => engine.history(),
+            "clear" => engine.clear(),
+            "migrate" => engine.migrate(),
+            "search" => Ok(engine.search(positional, &self.search_mode, self.top_k)),
+            "search-text" => engine.search_text(positional),
+            "agent-grep" => engine.agent_grep(positional, self.session.as_deref()),
+            "query" => engine.query(positional),
+            "find-definition" => Ok(engine.find_definition(positional)),
+            "find-references" => Ok(engine.find_references(positional)),
+            "impact-radius" => Ok(engine.impact(self.symbol.as_deref().unwrap_or(positional))),
+            "coupling" => Ok(engine.coupling(positional)),
+            "get-context" => engine.get_context(positional, self.session.as_deref()),
+            "init" => init_marker(&engine.cwd),
+            "annotations" => engine.annotations(
+                self.action.as_deref().unwrap_or("get"),
+                positional,
+                self.positionals.get(1).map(String::as_str).unwrap_or(""),
+            ),
+            "document-lock" => engine.document_lock(
+                self.action.as_deref().unwrap_or("status"),
+                positional,
+                self.session.as_deref().unwrap_or("default"),
+            ),
+            other => Err(format!("unknown command '{other}'")),
+        }
+    }
+}
+
+fn init_marker(cwd: &std::path::Path) -> Result<Value, String> {
+    let path = cwd.join(".stele-context.toml");
+    if !path.exists() {
+        std::fs::write(&path, "# stele-context 2.0\n").map_err(|err| err.to_string())?;
+    }
+    Ok(Value::object(vec![(
+        "path",
+        Value::string(path.display().to_string()),
+    )]))
 }
 
 fn parse(args: &[String]) -> Result<Parsed, String> {
@@ -76,50 +148,92 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         human: false,
         storage: None,
         command: None,
+        positionals: Vec::new(),
+        search_mode: "keyword".to_string(),
+        symbol: None,
+        session: None,
+        action: None,
+        top_k: 10,
+        force: false,
+        scan_new: true,
     };
-    let mut index = 0;
+    let mut index = 0usize;
+    let mut command_seen = false;
     while index < args.len() {
         let arg = &args[index];
-        if arg == "--" {
-            index += 1;
-            break;
-        }
-        if let Some(path) = arg.strip_prefix("--storage-dir=") {
-            parsed.storage = Some(PathBuf::from(path));
+        if let Some(value) = arg.strip_prefix("--storage-dir=") {
+            parsed.storage = Some(PathBuf::from(value));
             index += 1;
             continue;
         }
-        match arg.as_str() {
-            "--version" => parsed.version = true,
-            "--help" | "-h" => parsed.help = true,
-            "--human" => parsed.human = true,
-            "--json" => {}
-            "--storage-dir" => {
-                index += 1;
-                let path = args
-                    .get(index)
-                    .ok_or_else(|| "--storage-dir needs a path".to_string())?;
-                parsed.storage = Some(PathBuf::from(path));
-            }
-            other if other.starts_with('-') => {
-                return Err(format!("unknown flag '{other}'"));
-            }
-            other => {
-                if parsed.command.is_some() {
-                    return Err(format!("unexpected argument '{other}'"));
-                }
-                parsed.command = Some(other.to_string());
-            }
+        if let Some(value) = arg.strip_prefix("--search-mode=") {
+            parsed.search_mode = value.to_string();
+            index += 1;
+            continue;
         }
+        if arg == "--" {
+            parsed.positionals.extend(args[index + 1..].iter().cloned());
+            break;
+        }
+        if arg.starts_with('-') && parsed.command.is_none() && !command_seen {
+            match arg.as_str() {
+                "--version" => parsed.version = true,
+                "--help" | "-h" => parsed.help = true,
+                "--human" => parsed.human = true,
+                "--json" => {}
+                "--storage-dir" => {
+                    parsed.storage = Some(PathBuf::from(take_value(args, &mut index)?))
+                }
+                other => return Err(format!("unknown flag '{other}'")),
+            }
+            index += 1;
+            continue;
+        }
+        if !command_seen && !arg.starts_with('-') {
+            parsed.command = Some(arg.clone());
+            command_seen = true;
+            index += 1;
+            continue;
+        }
+        if arg.starts_with('-') {
+            match arg.as_str() {
+                "--help" | "-h" => parsed.help = true,
+                "--human" => parsed.human = true,
+                "--json" => {}
+                "--force" | "--force-reindex" => parsed.force = true,
+                "--summary-mode" => {}
+                "--no-scan-new" => parsed.scan_new = false,
+                "--storage-dir" => {
+                    parsed.storage = Some(PathBuf::from(take_value(args, &mut index)?))
+                }
+                "--search-mode" => parsed.search_mode = take_value(args, &mut index)?,
+                "--symbol" => parsed.symbol = Some(take_value(args, &mut index)?),
+                "--session-id" => parsed.session = Some(take_value(args, &mut index)?),
+                "--action" => parsed.action = Some(take_value(args, &mut index)?),
+                "--top-k" => {
+                    parsed.top_k = take_value(args, &mut index)?
+                        .parse()
+                        .map_err(|_| "--top-k needs an integer".to_string())?;
+                }
+                other => return Err(format!("unknown flag '{other}'")),
+            }
+            index += 1;
+            continue;
+        }
+        parsed.positionals.push(arg.clone());
         index += 1;
     }
-    if index < args.len() {
-        return Err(format!("unexpected argument '{}'", args[index]));
-    }
-    if parsed.help && parsed.command.is_none() {
-        parsed.command = None;
+    if parsed.command.as_deref() == Some("index") && parsed.positionals.is_empty() {
+        parsed.positionals.push(".".to_string());
     }
     Ok(parsed)
+}
+
+fn take_value(args: &[String], index: &mut usize) -> Result<String, String> {
+    *index += 1;
+    args.get(*index)
+        .cloned()
+        .ok_or_else(|| format!("{} needs a value", args[*index - 1]))
 }
 
 fn help_text() -> String {
@@ -133,7 +247,26 @@ Usage:
   stele-context [--storage-dir DIR] [--human] <command>
 
 Commands:
-  doctor    Report version, project root, storage, and whether a Python store is present
+  doctor              Health, storage, and whether a legacy store is present
+  index [PATH...]     Chunk and store files. Unchanged files are skipped
+  remove PATH         Drop one document from the store
+  detect              Compare mtime and size. New files are indexed
+  stats               Document, chunk, and symbol counts
+  map                 One row per indexed file
+  project-brief       The same counts, for the 1.5 command name
+  search QUERY        Keyword search. --search-mode hybrid blends cosine
+  search-text PATTERN Linear-time search. Lookaround is rejected
+  agent-grep PATTERN  The same search, recorded when --session-id is set
+  query TEXT          Search, definitions, and text search
+  find-definition NAME
+  find-references NAME
+  impact-radius       --symbol NAME
+  coupling PATH
+  enrichment-plan     Chunks that still need a summary
+  history             Journal of store mutations
+  migrate             Copy a 1.5 SQLite store. The original is not modified
+  init                Write .stele-context.toml
+  serve-mcp           Speak MCP on stdin
 
 JSON is the default on commands. --human prints text.
 --version prints the version line and exits.
@@ -183,11 +316,11 @@ mod tests {
 
     #[test]
     fn unknown_command_is_not_ok() {
-        let response = dispatch(&["index".to_string()]);
-        assert_eq!(response.code, 2);
+        let response = dispatch(&["nope".to_string()]);
+        assert_eq!(response.code, 1);
         let text = std::str::from_utf8(&response.stdout).unwrap();
         assert!(text.contains("\"ok\":false"));
-        assert!(text.contains("unknown_command"));
+        assert!(text.contains("unknown command"));
     }
 
     #[test]
@@ -196,5 +329,6 @@ mod tests {
         assert_eq!(response.code, 0);
         let text = std::str::from_utf8(&response.stdout).unwrap();
         assert!(text.contains("doctor"));
+        assert!(text.contains("index"));
     }
 }

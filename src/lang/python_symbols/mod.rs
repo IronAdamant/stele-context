@@ -452,6 +452,17 @@ mod tests {
     use crate::json::{self, Value};
 
     #[test]
+    fn keyword_only_params_still_walk_the_body() {
+        let source = "class Spinner:\n    def __init__(self, name: str, *, style: \"T\" = None) -> None:\n        self.style = style\n";
+        let hits = extract(source);
+        assert!(
+            hits.iter()
+                .any(|hit| hit.name == "self" && hit.role == "reference"),
+            "{hits:?}"
+        );
+    }
+
+    #[test]
     fn garbled_and_truncated_inputs_yield_symbols() {
         let samples = ["", "\0\u{fffd}", "def (", "((((", "class\n", "def ok(\n"];
         for sample in samples {

@@ -1,0 +1,8 @@
+# stele-context
+
+Local context cache for coding agents. Version 2.0.0 is a std-only Rust binary. The Python package stops at 1.5.x and points at those binaries.
+
+Install: GitHub Release assets for v2.0.0, or scripts/install.sh and scripts/install.ps1.
+Commands: doctor, index, detect, search, query, agent-grep, find-definition, find-references.
+MCP: stele-context serve-mcp. Default mode is lite. Set STELE_MCP_MODE=standard or full.
+No embedding model is bundled. Summaries and vectors are supplied by the caller.

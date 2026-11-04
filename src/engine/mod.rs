@@ -1,0 +1,487 @@
+//! Index, detect, and the commands that read the native store.
+//! Public methods take a project-relative path and honor mtime+size.
+
+mod migrate;
+mod query;
+
+use crate::chunk::{self, Produced};
+use crate::config;
+use crate::hash::{hex, sha256};
+use crate::json::Value;
+use crate::root::{detect_project_root, resolve_storage_dir};
+use crate::search::Bm25;
+use crate::store::{Chunk, Document, Store, Symbol};
+use crate::symbols;
+use crate::walk;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub struct Engine {
+    pub cwd: PathBuf,
+    pub storage: PathBuf,
+    store: Store,
+    bm25: Bm25,
+    bm25_ready: bool,
+}
+
+impl Engine {
+    pub fn open(storage_flag: Option<&Path>) -> Result<Engine, String> {
+        let cwd = std::env::current_dir().map_err(|err| format!("cwd: {err}"))?;
+        let root = detect_project_root(&cwd);
+        let config = config::load(root.as_deref());
+        let storage = resolve_storage_dir(storage_flag, &config, root.as_deref())?;
+        Self::open_at(cwd, storage)
+    }
+
+    fn open_at(cwd: PathBuf, storage: PathBuf) -> Result<Engine, String> {
+        let store = Store::open(&storage)?;
+        Ok(Engine {
+            cwd,
+            storage,
+            store,
+            bm25: Bm25::new(),
+            bm25_ready: false,
+        })
+    }
+
+    pub fn index(&mut self, paths: &[String], force: bool) -> Result<Value, String> {
+        let files = collect(&self.cwd, paths)?;
+        let mut indexed = 0i64;
+        let mut skipped = 0i64;
+        let mut seen = Vec::new();
+        for (rel, abs) in &files {
+            seen.push(rel.clone());
+            let meta = fs::metadata(abs).map_err(|err| format!("{rel}: {err}"))?;
+            if !force {
+                if let Some(doc) = self
+                    .store
+                    .state
+                    .documents
+                    .iter()
+                    .find(|doc| &doc.path == rel)
+                {
+                    if doc.size == meta.len() && doc.mtime_ns == mtime_ns(&meta) {
+                        skipped += 1;
+                        continue;
+                    }
+                }
+            }
+            self.reindex_file(rel, abs, &meta)?;
+            indexed += 1;
+        }
+        let before = self.store.state.documents.len();
+        self.drop_unseen(paths, &seen);
+        let removed = before as i64 - self.store.state.documents.len() as i64;
+        if indexed > 0 || removed > 0 || force {
+            self.rebuild_bm25();
+            self.store.save(
+                "index",
+                &Value::object(vec![
+                    ("indexed", Value::Int(indexed)),
+                    ("skipped", Value::Int(skipped)),
+                    ("removed", Value::Int(removed.max(0))),
+                ]),
+            )?;
+        }
+        Ok(Value::object(vec![
+            ("indexed", Value::Int(indexed)),
+            ("skipped", Value::Int(skipped)),
+            ("removed", Value::Int(removed.max(0))),
+            (
+                "documents",
+                Value::Int(self.store.state.documents.len() as i64),
+            ),
+            ("chunks", Value::Int(self.store.state.chunks.len() as i64)),
+            ("symbols", Value::Int(self.store.state.symbols.len() as i64)),
+        ]))
+    }
+
+    pub fn detect(&mut self, scan_new: bool) -> Result<Value, String> {
+        let files = collect(&self.cwd, &[".".to_string()])?;
+        let mut changed = Vec::new();
+        let mut unchanged = 0i64;
+        let mut added = Vec::new();
+        for (rel, abs) in &files {
+            let meta = fs::metadata(abs).map_err(|err| format!("{rel}: {err}"))?;
+            match self
+                .store
+                .state
+                .documents
+                .iter()
+                .find(|doc| &doc.path == rel)
+            {
+                Some(doc) if doc.size == meta.len() && doc.mtime_ns == mtime_ns(&meta) => {
+                    unchanged += 1;
+                }
+                Some(_) => changed.push(rel.clone()),
+                None => added.push(rel.clone()),
+            }
+        }
+        let known: Vec<String> = files.iter().map(|(rel, _)| rel.clone()).collect();
+        let deleted: Vec<String> = self
+            .store
+            .state
+            .documents
+            .iter()
+            .filter(|doc| !known.iter().any(|path| path == &doc.path))
+            .map(|doc| doc.path.clone())
+            .collect();
+        if scan_new && !added.is_empty() {
+            self.index(&added, false)?;
+        }
+        Ok(Value::object(vec![
+            ("unchanged", Value::Int(unchanged)),
+            ("changed", strings(&changed)),
+            ("added", strings(&added)),
+            ("deleted", strings(&deleted)),
+        ]))
+    }
+
+    pub fn remove(&mut self, path: &str) -> Result<Value, String> {
+        let rel = normalize(path);
+        let before = self.store.state.chunks.len();
+        self.drop_path(&rel);
+        let removed = before - self.store.state.chunks.len();
+        self.rebuild_bm25();
+        self.store.save(
+            "remove",
+            &Value::object(vec![("path", Value::string(&rel))]),
+        )?;
+        Ok(Value::object(vec![
+            ("path", Value::string(rel)),
+            ("chunks_removed", Value::Int(removed as i64)),
+        ]))
+    }
+
+    pub fn stats(&self) -> Value {
+        Value::object(vec![
+            (
+                "documents",
+                Value::Int(self.store.state.documents.len() as i64),
+            ),
+            ("chunks", Value::Int(self.store.state.chunks.len() as i64)),
+            ("symbols", Value::Int(self.store.state.symbols.len() as i64)),
+            (
+                "annotations",
+                Value::Int(self.store.state.annotations.len() as i64),
+            ),
+        ])
+    }
+
+    pub fn map(&self) -> Value {
+        let mut files: Vec<Value> = self
+            .store
+            .state
+            .documents
+            .iter()
+            .map(|doc| {
+                let chunks = self
+                    .store
+                    .state
+                    .chunks
+                    .iter()
+                    .filter(|chunk| chunk.path == doc.path)
+                    .count();
+                let symbols = self
+                    .store
+                    .state
+                    .symbols
+                    .iter()
+                    .filter(|sym| sym.path == doc.path)
+                    .count();
+                Value::object(vec![
+                    ("path", Value::string(&doc.path)),
+                    ("chunks", Value::Int(chunks as i64)),
+                    ("symbols", Value::Int(symbols as i64)),
+                    ("bytes", Value::Int(doc.size as i64)),
+                ])
+            })
+            .collect();
+        files.sort_by(|left, right| json_path(left).cmp(&json_path(right)));
+        Value::object(vec![
+            (
+                "documents",
+                Value::Int(self.store.state.documents.len() as i64),
+            ),
+            ("files", Value::Array(files)),
+        ])
+    }
+
+    pub fn project_brief(&self) -> Value {
+        self.stats()
+    }
+
+    pub fn enrichment_plan(&self) -> Value {
+        let pending: Vec<Value> = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.summary.is_none())
+            .take(50)
+            .map(|chunk| {
+                Value::object(vec![
+                    ("chunk_id", Value::string(&chunk.id)),
+                    ("path", Value::string(&chunk.path)),
+                ])
+            })
+            .collect();
+        let missing = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.summary.is_none())
+            .count();
+        Value::object(vec![
+            ("chunks_missing_summary", Value::Int(missing as i64)),
+            ("next", Value::Array(pending)),
+        ])
+    }
+
+    pub fn history(&self) -> Result<Value, String> {
+        let rows = self.store.history()?;
+        Ok(Value::object(vec![
+            ("entries", Value::Int(rows.len() as i64)),
+            ("history", Value::Array(rows)),
+        ]))
+    }
+
+    pub fn clear(&mut self) -> Result<Value, String> {
+        self.store.state = crate::store::State::default();
+        self.bm25 = Bm25::new();
+        self.bm25_ready = true;
+        self.store.save("clear", &Value::object(vec![]))?;
+        Ok(Value::object(vec![("cleared", Value::Bool(true))]))
+    }
+
+    pub fn migrate(&mut self) -> Result<Value, String> {
+        migrate::migrate(&self.storage, &mut self.store)?;
+        self.rebuild_bm25();
+        Ok(Value::object(vec![
+            (
+                "documents",
+                Value::Int(self.store.state.documents.len() as i64),
+            ),
+            ("chunks", Value::Int(self.store.state.chunks.len() as i64)),
+            ("legacy_untouched", Value::Bool(true)),
+        ]))
+    }
+
+    fn reindex_file(&mut self, rel: &str, abs: &Path, meta: &fs::Metadata) -> Result<(), String> {
+        let bytes = fs::read(abs).map_err(|err| format!("{rel}: {err}"))?;
+        let text = chunk::read_python_text(&bytes);
+        let sha = hex(&sha256(text.as_bytes()));
+        self.drop_path(rel);
+        let produced = chunk::chunk_document(rel, &text);
+        for piece in &produced {
+            self.commit_piece(rel, piece);
+        }
+        self.store.state.documents.push(Document {
+            path: rel.to_string(),
+            mtime_ns: mtime_ns(meta),
+            size: meta.len(),
+            sha256: sha,
+        });
+        Ok(())
+    }
+
+    fn drop_unseen(&mut self, paths: &[String], seen: &[String]) {
+        let whole = paths.is_empty() || paths.iter().any(|path| path == "." || path == "./");
+        let prefixes: Vec<String> = paths
+            .iter()
+            .filter_map(|path| {
+                let abs = self.cwd.join(path);
+                abs.is_dir()
+                    .then(|| normalize(path).trim_end_matches('/').to_string())
+            })
+            .filter(|prefix| prefix != "." && !prefix.is_empty())
+            .collect();
+        let drop_doc = |path: &str| {
+            if seen.iter().any(|item| item == path) {
+                return false;
+            }
+            if whole {
+                return true;
+            }
+            prefixes
+                .iter()
+                .any(|prefix| path == prefix || path.starts_with(&format!("{prefix}/")))
+        };
+        self.store
+            .state
+            .documents
+            .retain(|doc| !drop_doc(&doc.path));
+        self.store
+            .state
+            .chunks
+            .retain(|chunk| !drop_doc(&chunk.path));
+        self.store.state.symbols.retain(|sym| !drop_doc(&sym.path));
+    }
+
+    fn drop_path(&mut self, rel: &str) {
+        self.store.state.documents.retain(|doc| doc.path != rel);
+        self.store.state.chunks.retain(|chunk| chunk.path != rel);
+        self.store.state.symbols.retain(|sym| sym.path != rel);
+    }
+
+    fn rebuild_bm25(&mut self) {
+        let Engine {
+            store,
+            bm25,
+            bm25_ready,
+            ..
+        } = self;
+        *bm25 = Bm25::new();
+        for chunk in &store.state.chunks {
+            bm25.add(&chunk.id, &chunk.content);
+        }
+        *bm25_ready = true;
+    }
+
+    fn ensure_bm25(&mut self) {
+        if !self.bm25_ready {
+            self.rebuild_bm25();
+        }
+    }
+}
+
+fn collect(cwd: &Path, paths: &[String]) -> Result<Vec<(String, PathBuf)>, String> {
+    let inputs: Vec<PathBuf> = if paths.is_empty() {
+        vec![cwd.to_path_buf()]
+    } else {
+        paths.iter().map(|path| cwd.join(path)).collect()
+    };
+    let mut out = Vec::new();
+    for input in inputs {
+        if input.is_file() {
+            out.push((rel_of(cwd, &input), input));
+            continue;
+        }
+        if input.is_dir() {
+            for rel in walk::expand(&[input.clone()], true).map_err(|err| err.to_string())? {
+                out.push((normalize(&rel), input.join(&rel)));
+            }
+        }
+    }
+    out.sort_by(|left, right| left.0.cmp(&right.0));
+    out.dedup_by(|left, right| left.0 == right.0);
+    Ok(out)
+}
+
+fn rel_of(cwd: &Path, path: &Path) -> String {
+    path.strip_prefix(cwd)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn normalize(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn mtime_ns(meta: &fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos() as i64)
+        .unwrap_or(0)
+}
+
+fn strings(values: &[String]) -> Value {
+    Value::Array(values.iter().cloned().map(Value::String).collect())
+}
+
+fn json_path(value: &Value) -> String {
+    crate::store::string_field(value, "path")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn index_then_search_matches_a_fixture_symbol() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("stele-index-{stamp}"));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("sample.py"), "def classify(n):\n    return n\n").unwrap();
+        let store = root.join("store-dir");
+        let mut engine = Engine::open_at(root.clone(), store).unwrap();
+        let first = engine.index(&[".".to_string()], false).unwrap();
+        assert!(crate::store::int_field(&first, "indexed") >= 1);
+        let second = engine.index(&[".".to_string()], false).unwrap();
+        assert_eq!(crate::store::int_field(&second, "skipped"), 1);
+        let defs = engine.find_definition("classify");
+        let rendered = crate::json::to_string(&defs);
+        assert!(rendered.contains("classify"), "{rendered}");
+        let found = engine.search("classify", "keyword", 5);
+        assert!(crate::json::to_string(&found).contains("classify"));
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+pub fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+// The piece signature must be computed from the chunk text, not from a
+// moved value. `store_piece` above is replaced by the helper in this impl
+// once the borrow is split. See `commit_piece`.
+impl Engine {
+    pub fn store_dynamic_remove(&mut self, name: &str) {
+        self.store.state.dynamic.retain(|sym| sym.name != name);
+    }
+
+    pub fn commit_piece(&mut self, rel: &str, piece: &Produced) {
+        let digest = chunk::content_sha256(&piece.content);
+        let id = chunk::chunk_id(rel, piece.start, piece.end, &digest);
+        let ext = piece
+            .language
+            .clone()
+            .unwrap_or_else(|| extension_of(rel).to_string());
+        for hit in symbols::extract(&ext, &piece.content) {
+            self.store.state.symbols.push(Symbol {
+                name: hit.name,
+                kind: hit.kind,
+                role: hit.role,
+                line: hit.line,
+                container: hit.container,
+                chunk_id: id.clone(),
+                path: rel.to_string(),
+                chunk_index: piece.index,
+            });
+        }
+        self.store.state.chunks.push(Chunk {
+            id,
+            path: rel.to_string(),
+            start: piece.start,
+            end: piece.end,
+            content: piece.content.clone(),
+            sha256: digest,
+            signature: chunk::signature_f32_hex(&piece.content),
+            tokens: chunk::estimate_tokens(&piece.content),
+            modality: piece.modality.clone(),
+            language: piece.language.clone(),
+            summary: None,
+            notes: None,
+        });
+    }
+}
+
+fn extension_of(path: &str) -> &str {
+    path.rsplit(['/', '\\'])
+        .next()
+        .and_then(|name| name.rsplit_once('.'))
+        .map(|(_, ext)| ext)
+        .unwrap_or("")
+}

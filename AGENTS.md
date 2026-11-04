@@ -98,9 +98,9 @@ Cold-start ritual: `doctor` → `query` (with `session_id`) → `agent_grep` / `
 
 HTTP returns `{"success", "result"}` or `{"error"}`. Stdio MCP returns the **bare** tool result. Both are intentional; do not unify silently.
 
-## Rust 2.0 (in progress, not released)
+## Rust 2.0
 
-The rewrite lives in this repo beside the Python package. `[dependencies]` stays empty.
+The rewrite lives in this repo beside the Python package. `[dependencies]` stays empty. Release steps, tag names, and secrets are in [docs/release-2.0.md](docs/release-2.0.md).
 
 ```bash
 cargo test
@@ -110,6 +110,11 @@ python -m bench --binary target/release/stele-context --group b1 --runs 10 --che
 python scripts/check_zero_deps.py
 ```
 
-`stele-context doctor` is JSON by default (`--human` for text). `--version` prints `stele-context 2.0.0`. Commands that are not implemented yet return `ok: false` and a non-zero exit. `stele-context-mcp` does the same until the stdio server lands. Do not tag, merge, or publish from a rewrite branch.
+`stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.0.0`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. The 18 old singleton names return `tool_removed`.
 
-`cargo test` also checks the parsing core: Python and JSON round-trip, fixture symbol parity, and incremental reparse. A corpus cache from `python -m parity capture` makes the round-trip test cover rich and flask; without the cache that test skips.
+### Adding a language
+
+1. Add the extension to `src/walk.rs` (`CODE_EXTENSIONS` or `TEXT_EXTENSIONS`) and to `src/chunk/patterns.rs` if chunk boundaries are not the JavaScript pattern.
+2. Teach `src/symbols/` to emit the same names, kinds, roles, lines, and containers as `SymbolExtractor` in package 1.5.2. The fixture golden is `parity/goldens/fixtures.json`.
+3. The shared scanner in `src/lang/scan.rs` already round-trips other extensions. A dedicated grammar replaces that scanner only when it still renders the original bytes, including the corpus cache.
+4. Re-run `cargo test` and `python -m parity verify --skip-corpora`.

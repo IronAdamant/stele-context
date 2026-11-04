@@ -1,12 +1,13 @@
-//! Language dispatch. Python and JSON have grammars; every other extension
-//! is one opaque span so the bytes still round-trip.
+//! Language dispatch. Python and JSON keep their grammars. Every other
+//! extension uses the shared lossless scanner.
 
 mod json;
 pub mod kind;
-mod python;
+pub(crate) mod python;
 pub(crate) mod python_symbols;
+mod scan;
 
-use crate::syntax::cst::{Builder, Tree};
+use crate::syntax::cst::Tree;
 use crate::syntax::query::SymbolHit;
 
 pub fn parse(extension: &str, source: &str) -> Tree {
@@ -17,14 +18,37 @@ pub fn parse_with_symbols(extension: &str, source: &str) -> (Tree, Vec<SymbolHit
     match extension {
         "py" | "pyw" | "pyx" => python::parse(source),
         "json" => (json::parse(source), Vec::new()),
-        _ => (opaque(source), Vec::new()),
+        other => (
+            scan::parse(source),
+            crate::symbols::extract(other, source)
+                .into_iter()
+                .map(|hit| SymbolHit {
+                    name: hit.name,
+                    kind: static_label(&hit.kind),
+                    role: static_label(&hit.role),
+                    line: hit.line,
+                    container: hit.container,
+                })
+                .collect(),
+        ),
     }
 }
 
-fn opaque(source: &str) -> Tree {
-    let mut builder = Builder::new();
-    builder.start(kind::FILE, 0);
-    builder.leaf(kind::STRING, 0, source.len() as u32);
-    builder.finish(source.len() as u32);
-    builder.tree()
+fn static_label(text: &str) -> &'static str {
+    match text {
+        "function" => "function",
+        "class" => "class",
+        "variable" => "variable",
+        "module" => "module",
+        "import" => "import",
+        "css_class" => "css_class",
+        "css_id" => "css_id",
+        "definition" => "definition",
+        "reference" => "reference",
+        "method" => "method",
+        "type" => "type",
+        "constant" => "constant",
+        "field" => "field",
+        _ => "symbol",
+    }
 }

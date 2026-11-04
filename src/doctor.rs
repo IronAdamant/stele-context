@@ -1,5 +1,4 @@
-//! Environment report. This build does not index; it says so instead of
-//! inventing index counts.
+//! Environment report. Counts come from the native snapshot when it exists.
 
 use crate::config::Config;
 use crate::contract::{ErrorBody, Response, EXIT_ERROR};
@@ -44,10 +43,12 @@ pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
         );
     }
     if native {
-        steps.push("A native store file is present.");
+        steps.push("A native store is present.");
     } else {
-        steps.push("No 2.0 store yet. Indexing is not in this build.");
+        steps.push("No 2.0 store yet. Index a directory to create the native store.");
     }
+    steps
+        .push("Image, audio, and video chunks are metadata. PDF text is the uncompressed streams.");
     if human {
         let root = project_root
             .as_ref()
