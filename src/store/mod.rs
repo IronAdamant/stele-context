@@ -187,6 +187,33 @@ impl Store {
         })
     }
 
+    /// Document rows only. `detect` uses this while mtime and size still match,
+    /// so it does not parse chunk bodies or the signature file.
+    pub fn open_documents(storage: &Path) -> Result<Store, String> {
+        let dir = storage.join("store");
+        fs::create_dir_all(&dir).map_err(|err| format!("create store: {err}"))?;
+        let lock_path = dir.join("lock");
+        let lock = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&lock_path)
+            .map_err(|err| format!("open lock: {err}"))?;
+        lock.lock().map_err(|err| format!("lock store: {err}"))?;
+        let state = load_documents_only(&dir.join("snapshot.json"))
+            .unwrap_or_else(|| load_snapshot(&dir.join("snapshot.json")).unwrap_or_default());
+        Ok(Store {
+            dir,
+            state,
+            _lock: lock,
+        })
+    }
+
+    pub fn reload_full(&mut self) -> Result<(), String> {
+        self.state = load_snapshot(&self.dir.join("snapshot.json")).unwrap_or_default();
+        Ok(())
+    }
+
     pub fn save(&mut self, op: &str, detail: &Value) -> Result<(), String> {
         self.state.seq = self.state.seq.saturating_add(1);
         if self.state.sigs.len() != self.state.chunks.len() {
@@ -303,6 +330,60 @@ fn load_snapshot(path: &Path) -> Option<State> {
         state.sigs = read_sigs(&dir.join("signatures.bin"), state.chunks.len());
     }
     Some(state)
+}
+
+fn load_documents_only(path: &Path) -> Option<State> {
+    let text = fs::read_to_string(path).ok()?;
+    let slice = documents_array(&text)?;
+    let value = json::parse(slice).ok()?;
+    let crate::json::Value::Array(rows) = value else {
+        return None;
+    };
+    let mut state = State::default();
+    state.documents = rows.iter().map(Document::from_json).collect();
+    Some(state)
+}
+
+/// The top-level `documents` array. It is written before chunk bodies, so the
+/// first match is the key rather than a string inside a chunk.
+fn documents_array(text: &str) -> Option<&str> {
+    let key = "\"documents\":";
+    let start = text.find(key)? + key.len();
+    let bytes = text.as_bytes();
+    let mut index = start;
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    if bytes.get(index) != Some(&b'[') {
+        return None;
+    }
+    let begin = index;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if escape {
+                escape = false;
+            } else if byte == b'\\' {
+                escape = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+        } else if byte == b'"' {
+            in_string = true;
+        } else if byte == b'[' {
+            depth += 1;
+        } else if byte == b']' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(&text[begin..=index]);
+            }
+        }
+        index += 1;
+    }
+    None
 }
 
 fn write_sigs(path: &Path, state: &State) -> Result<(), String> {

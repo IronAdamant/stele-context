@@ -112,7 +112,12 @@ impl Parsed {
                 }
             },
         };
-        let mut engine = match Engine::open_from(cwd, self.storage.as_deref()) {
+        let opened = if command == "detect" {
+            Engine::open_detect(cwd, self.storage.as_deref())
+        } else {
+            Engine::open_from(cwd, self.storage.as_deref())
+        };
+        let mut engine = match opened {
             Ok(engine) => engine,
             Err(message) => {
                 return Response::failure(

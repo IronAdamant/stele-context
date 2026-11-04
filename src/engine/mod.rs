@@ -35,6 +35,9 @@ pub struct Engine {
     change_threshold: f64,
     search_alpha: f64,
     max_history_entries: i64,
+    /// Detect can answer from document mtime and size. Chunk bodies stay
+    /// unloaded until a file actually differs.
+    documents_only: bool,
 }
 
 impl Engine {
@@ -43,25 +46,44 @@ impl Engine {
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
-        Self::finish(cwd, storage, loaded)
+        Self::finish(cwd, storage, loaded, false)
     }
 
     pub fn open_from(cwd: PathBuf, storage_flag: Option<&Path>) -> Result<Engine, String> {
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
-        Self::finish(cwd, storage, loaded)
+        Self::finish(cwd, storage, loaded, false)
+    }
+
+    /// Open for `detect`. Document rows are enough while every indexed file
+    /// still matches mtime and size.
+    pub fn open_detect(cwd: PathBuf, storage_flag: Option<&Path>) -> Result<Engine, String> {
+        let root = detect_project_root(&cwd);
+        let loaded = config::load(root.as_deref());
+        let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
+        Self::finish(cwd, storage, loaded, true)
     }
 
     pub fn open_at(cwd: PathBuf, storage: PathBuf) -> Result<Engine, String> {
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
-        Self::finish(cwd, storage, loaded)
+        Self::finish(cwd, storage, loaded, false)
     }
 
-    fn finish(cwd: PathBuf, storage: PathBuf, loaded: config::Config) -> Result<Engine, String> {
-        let mut store = Store::open(&storage)?;
+    fn finish(
+        cwd: PathBuf,
+        storage: PathBuf,
+        loaded: config::Config,
+        documents_only: bool,
+    ) -> Result<Engine, String> {
         let legacy = storage.join("stele_context.db");
+        let documents_only = documents_only && !legacy.is_file();
+        let mut store = if documents_only {
+            Store::open_documents(&storage)?
+        } else {
+            Store::open(&storage)?
+        };
         if legacy.is_file() {
             let err_path = storage.join("store").join("migrate-error.txt");
             if let Err(err) = migrate::migrate_if_needed(&storage, &cwd, &mut store) {
@@ -84,6 +106,7 @@ impl Engine {
             change_threshold: loaded.change_threshold.unwrap_or(0.85),
             search_alpha: loaded.search_alpha.unwrap_or(0.42),
             max_history_entries: loaded.max_history_entries.unwrap_or(1000),
+            documents_only,
         })
     }
 
@@ -261,6 +284,10 @@ impl Engine {
                     reason: String::new(),
                 });
                 return Ok(result);
+            }
+            if self.documents_only {
+                self.store.reload_full()?;
+                self.documents_only = false;
             }
             unchanged.clear();
         }
