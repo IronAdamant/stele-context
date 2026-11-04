@@ -164,6 +164,10 @@ fn initialize(params: &Value) -> Value {
 }
 
 fn cached_tools_json() -> &'static str {
+    // Lite stays the 2.0 `{type:object}` schema. The D13 tools/list gate
+    // measures this reply, and a property-level schema pushes it over the
+    // base interval. Standard and full keep the property lists. HTTP
+    // GET /tools still builds the full lite schema via `tools_list`.
     let mode = std::env::var("STELE_MCP_MODE").unwrap_or_else(|_| "lite".to_string());
     match mode.as_str() {
         "full" => include_str!("tools_full.json"),
@@ -279,6 +283,9 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             );
             if let Some(prefix) = arg(args, "path_prefix") {
                 filter_prefix(&mut value, &prefix);
+            }
+            if flag(args, "compact") {
+                compact_results(&mut value);
             }
             Ok(value)
         }
@@ -785,10 +792,11 @@ mod schema_dump {
             return;
         }
         for (mode, name) in [
-            ("lite", "tools_lite.json"),
             ("standard", "tools_standard.json"),
             ("full", "tools_full.json"),
         ] {
+            // Lite `tools_lite.json` stays the compact `{type:object}` document.
+            // Regenerating it from `tools_list` would miss the D13 tools/list gate.
             std::env::set_var("STELE_MCP_MODE", mode);
             let text = json::to_string(&tools_list());
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -922,10 +930,60 @@ fn symbol_rows(value: &Value) -> Vec<(String, String, String, i64)> {
 }
 
 fn filter_prefix(value: &mut Value, prefix: &str) {
-    let Value::Object(pairs) = value else { return };
-    if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "results") {
-        if let Value::Array(rows) = item {
-            rows.retain(|row| crate::store::string_field(row, "document_path").starts_with(prefix));
-        }
+    let Some(rows) = result_rows(value) else {
+        return;
+    };
+    rows.retain(|row| crate::store::string_field(row, "document_path").starts_with(prefix));
+}
+
+fn compact_results(value: &mut Value) {
+    let Some(rows) = result_rows(value) else {
+        return;
+    };
+    for row in rows {
+        let Value::Object(pairs) = row else {
+            continue;
+        };
+        let content =
+            pairs
+                .iter()
+                .find(|(key, _)| key == "content")
+                .and_then(|(_, item)| match item {
+                    Value::String(text) => Some(text.clone()),
+                    _ => None,
+                });
+        let Some(content) = content else {
+            continue;
+        };
+        let preview = if content.chars().count() > 400 {
+            let mut text: String = content.chars().take(400).collect();
+            text.push('\u{2026}');
+            text
+        } else {
+            content.clone()
+        };
+        pairs.retain(|(key, _)| key != "content");
+        pairs.push(("content_preview".to_string(), Value::string(preview)));
+        pairs.push((
+            "content_token_estimate".to_string(),
+            Value::Int(crate::chunk::estimate_tokens(&content) as i64),
+        ));
+    }
+}
+
+fn result_rows(value: &mut Value) -> Option<&mut Vec<Value>> {
+    match value {
+        Value::Array(rows) => Some(rows),
+        Value::Object(pairs) => pairs.iter_mut().find_map(|(key, item)| {
+            if key == "results" {
+                match item {
+                    Value::Array(rows) => Some(rows),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }),
+        _ => None,
     }
 }

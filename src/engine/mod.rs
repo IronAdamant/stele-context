@@ -78,10 +78,12 @@ impl Engine {
 
     pub fn index(&mut self, paths: &[String], force: bool) -> Result<Value, String> {
         let files = collect(&self.cwd, paths, self.respect_gitignore, &self.skip_dirs)?;
-        let mut indexed = 0i64;
-        let mut skipped = 0i64;
+        let mut indexed_rows = Vec::new();
+        let mut skipped_rows = Vec::new();
         let mut seen = Vec::new();
         let mut fresh = Vec::new();
+        let mut total_chunks = 0i64;
+        let mut total_tokens = 0i64;
         for (rel, abs) in &files {
             seen.push(rel.clone());
             let meta = fs::metadata(abs).map_err(|err| format!("{rel}: {err}"))?;
@@ -94,43 +96,60 @@ impl Engine {
                     .find(|doc| &doc.path == rel)
                 {
                     if doc.size == meta.len() && doc.mtime_ns == mtime_ns(&meta) {
-                        skipped += 1;
+                        let count = self
+                            .store
+                            .state
+                            .chunks
+                            .iter()
+                            .filter(|chunk| &chunk.path == rel)
+                            .count();
+                        skipped_rows.push(Value::object(vec![
+                            ("path", Value::string(rel)),
+                            ("reason", Value::string("Unchanged")),
+                            ("chunk_count", Value::Int(count as i64)),
+                        ]));
                         continue;
                     }
                 }
             }
-            self.reindex_file(rel, abs, &meta)?;
+            let (chunk_count, tokens, modality) = self.reindex_file(rel, abs, &meta)?;
+            total_chunks += chunk_count;
+            total_tokens += tokens;
             fresh.push(rel.clone());
-            indexed += 1;
+            indexed_rows.push(Value::object(vec![
+                ("path", Value::string(rel)),
+                ("chunk_count", Value::Int(chunk_count)),
+                ("total_tokens", Value::Int(tokens)),
+                ("modality", Value::string(modality)),
+            ]));
         }
         let before = self.store.state.documents.len();
         self.drop_unseen(paths, &seen);
         let removed = before as i64 - self.store.state.documents.len() as i64;
-        if indexed > 0 || removed > 0 || force {
+        if !indexed_rows.is_empty() || removed > 0 || force {
             self.rebuild_bm25();
             self.store.save(
                 "index",
                 &Value::object(vec![
-                    ("indexed", Value::Int(indexed)),
-                    ("skipped", Value::Int(skipped)),
+                    ("indexed", Value::Int(indexed_rows.len() as i64)),
+                    ("skipped", Value::Int(skipped_rows.len() as i64)),
                     ("removed", Value::Int(removed.max(0))),
                 ]),
             )?;
-            if self.max_history_entries > 0 {
+            if self.max_history_entries > 0
+                && self.store.state.change_log.len() > self.max_history_entries as usize
+            {
                 let _ = self.prune_history(None, Some(self.max_history_entries));
             }
             crate::locks::note_indexed(&self.cwd, &fresh);
         }
         Ok(Value::object(vec![
-            ("indexed", Value::Int(indexed)),
-            ("skipped", Value::Int(skipped)),
-            ("removed", Value::Int(removed.max(0))),
-            (
-                "documents",
-                Value::Int(self.store.state.documents.len() as i64),
-            ),
-            ("chunks", Value::Int(self.store.state.chunks.len() as i64)),
-            ("symbols", Value::Int(self.store.state.symbols.len() as i64)),
+            ("indexed", Value::Array(indexed_rows)),
+            ("skipped", Value::Array(skipped_rows)),
+            ("errors", Value::Array(Vec::new())),
+            ("conflicts", Value::Array(Vec::new())),
+            ("total_chunks", Value::Int(total_chunks)),
+            ("total_tokens", Value::Int(total_tokens)),
         ]))
     }
 
@@ -482,7 +501,12 @@ impl Engine {
         }
     }
 
-    fn reindex_file(&mut self, rel: &str, abs: &Path, meta: &fs::Metadata) -> Result<(), String> {
+    fn reindex_file(
+        &mut self,
+        rel: &str,
+        abs: &Path,
+        meta: &fs::Metadata,
+    ) -> Result<(i64, i64, String), String> {
         let bytes = fs::read(abs).map_err(|err| format!("{rel}: {err}"))?;
         let media = crate::media::is_media(crate::chunk::extension_of(rel));
         let sha = if media {
@@ -517,7 +541,19 @@ impl Engine {
             sha256: sha,
             doc_version: version,
         });
-        Ok(())
+        let mine: Vec<_> = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.path == rel)
+            .collect();
+        let tokens = mine.iter().map(|chunk| chunk.tokens as i64).sum();
+        let modality = mine
+            .first()
+            .map(|chunk| chunk.modality.clone())
+            .unwrap_or_else(|| "code".to_string());
+        Ok((mine.len() as i64, tokens, modality))
     }
 
     fn drop_unseen(&mut self, paths: &[String], seen: &[String]) {
@@ -734,9 +770,17 @@ mod tests {
         let store = root.join("store-dir");
         let mut engine = Engine::open_at(root.clone(), store).unwrap();
         let first = engine.index(&[".".to_string()], false).unwrap();
-        assert!(crate::store::int_field(&first, "indexed") >= 1);
+        assert!(crate::json::to_string(&first).contains("sample.py"));
         let second = engine.index(&[".".to_string()], false).unwrap();
-        assert_eq!(crate::store::int_field(&second, "skipped"), 1);
+        let skipped = match &second {
+            Value::Object(pairs) => pairs.iter().find(|(key, _)| key == "skipped"),
+            _ => None,
+        };
+        let skipped_n = match skipped.map(|(_, value)| value) {
+            Some(Value::Array(rows)) => rows.len(),
+            _ => 0,
+        };
+        assert_eq!(skipped_n, 1);
         let defs = engine.find_definition("classify");
         let rendered = crate::json::to_string(&defs);
         assert!(rendered.contains("classify"), "{rendered}");

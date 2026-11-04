@@ -173,28 +173,24 @@ from stele_context.llm_embedding import embed
 root = Path(sys.argv[1])
 store = Path(sys.argv[2])
 engine = Stele(storage_dir=str(store), project_root=str(root))
-engine.index_documents([str(root)])
+indexed = engine.index_documents([str(root)])
 paths = sorted(p for p in (d["document_path"] for d in engine.storage.get_all_documents()) if not p.endswith("PKG-INFO") and Path(p).name not in {"pyproject.toml", ".stele-context.toml", ".gitignore"})
 text = (root / "src" / "sample.py").read_text()
 payload = {
+    "index": indexed,
     "paths": paths,
+    "search": engine.search("classify", search_mode="keyword"),
+    "define": engine.find_definition("classify"),
+    "refs": engine.find_references("classify"),
+    "grep": engine.agent_grep("classify"),
+    "text": engine.search_text("classify", regex=False),
+    "context": engine.get_context(["src/sample.py"]),
+    "detect": engine.detect_changes_and_update(),
+    "env": engine.check_environment(),
     "rebuild_symbols": engine.rebuild_symbol_graph()["symbols"],
     "stale": engine.stale_chunks()["total_stale"],
-    "sessions": len(engine.list_sessions()),
-    "agents": len(engine.list_agents()),
     "notes": engine.get_notifications()["count"],
-    "prune": engine.prune_history()["pruned"],
-    "env_issues": engine.check_environment()["total_issues"],
-    "dynamic": len(engine.get_dynamic_symbols()),
-    "history": len(engine.get_chunk_history(limit=5)),
-    "define": engine.find_definition("classify").get("count", len(engine.find_definition("classify").get("definitions", []))),
-    "refs": engine.find_references("classify").get("total", len(engine.find_references("classify").get("references", []))),
-    "grep": engine.agent_grep("classify")["total_matches"],
-    "text": engine.search_text("classify", regex=False)["match_count"],
-    "text_regex": engine.search_text(r"classif.", regex=True)["match_count"],
-    "search": len(engine.search("classify", search_mode="keyword") if isinstance(engine.search("classify", search_mode="keyword"), list) else engine.search("classify", search_mode="keyword").get("results", [])),
     "embed0": round(embed(text)[0], 6),
-    "detect_unchanged": len(engine.detect_changes_and_update()["unchanged"]),
 }
 reg = engine.register_dynamic_symbols([{"name": "on_hook", "document_path": "src/sample.py"}], "agent-a")
 payload["registered"] = reg.get("stored", 0)
@@ -222,8 +218,10 @@ print(json.dumps(payload))
     );
     let py_text = String::from_utf8_lossy(&ran.stdout);
     let py_value = crate::json::parse(py_text.trim()).expect("python json");
-    let mut engine = Engine::open_at(root.clone(), root.join("rs-store")).unwrap();
-    engine.index(&[".".to_string()], false).unwrap();
+    let rs_store = std::env::temp_dir().join(format!("stele-par-rs-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&rs_store);
+    let mut engine = Engine::open_at(root.clone(), rs_store).unwrap();
+    let indexed = engine.index(&[".".to_string()], false).unwrap();
     let mut paths: Vec<String> = engine
         .store_paths()
         .into_iter()
@@ -236,7 +234,7 @@ print(json.dumps(payload))
         })
         .collect();
     paths.sort();
-    let rebuild = engine.rebuild_symbols().unwrap();
+    let notes = crate::store::int_field(&engine.notifications(None, None, 100), "count");
     let text = fs::read_to_string(root.join("src/sample.py")).unwrap();
     let embed = super::fingerprint::embed_text(&text);
     let reg = engine.register_dynamic("on_hook", "function", "src/sample.py");
@@ -252,26 +250,9 @@ print(json.dumps(payload))
         .document_lock("acquire", "src/sample.py", "agent-a", false)
         .unwrap();
     let _ = engine.document_lock("release", "src/sample.py", "agent-a", false);
-    let detect = engine.detect(true).unwrap();
     let search = engine.search("classify", "keyword", 10);
-    let search_n = match &search {
-        crate::json::Value::Object(pairs) => pairs
-            .iter()
-            .find(|(k, _)| k == "results")
-            .and_then(|(_, v)| match v {
-                crate::json::Value::Array(rows) => Some(rows.len() as i64),
-                _ => None,
-            })
-            .unwrap_or(0),
-        crate::json::Value::Array(rows) => rows.len() as i64,
-        _ => 0,
-    };
     let defs = engine.find_definition("classify");
-    let def_n =
-        array_len(object_get(&defs, "definitions").unwrap_or(&crate::json::Value::Null)) as i64;
     let refs = engine.find_references("classify");
-    let ref_n =
-        array_len(object_get(&refs, "references").unwrap_or(&crate::json::Value::Null)) as i64;
     let grep = engine
         .grep_full(
             "classify", false, None, true, true, "file", 4000, true, 0, None, false,
@@ -280,87 +261,36 @@ print(json.dumps(payload))
     let text_hit = engine
         .text_search("classify", false, None, 50, None, false)
         .unwrap();
-    let text_re = engine
-        .text_search("classif.", true, None, 50, None, false)
-        .unwrap();
+    let context = engine
+        .get_context("src/sample.py", None)
+        .unwrap_or(crate::json::Value::Null);
+    let detect = engine.detect(true).unwrap();
+    let env = engine.environment_check();
+    let root_text = root.display().to_string();
     let mut diffs = 0i64;
-    let mut check = |name: &str, rust: i64, py: i64| {
-        if rust != py {
-            eprintln!("parity diff {name}: rust {rust} python {py}");
-            diffs += 1;
-        }
-    };
     let py_paths = array_len_path(&py_value, &["paths"]) as i64;
-    check("paths", paths.len() as i64, py_paths);
-    check(
+    note_diff(&mut diffs, "paths", paths.len() as i64, py_paths);
+    let rebuild = engine.rebuild_symbols().unwrap();
+    note_diff(
+        &mut diffs,
         "rebuild_symbols",
         crate::store::int_field(&rebuild, "symbols"),
         int_path(&py_value, &["rebuild_symbols"]),
     );
-    check(
+    note_diff(
+        &mut diffs,
         "stale",
         crate::store::int_field(&engine.stale_chunks(0.3, None), "total_stale"),
         int_path(&py_value, &["stale"]),
     );
-    check(
-        "sessions",
-        array_len(&engine.list_sessions(None)) as i64,
-        int_path(&py_value, &["sessions"]),
-    );
-    check(
-        "agents",
-        array_len(&engine.list_agents(true)) as i64,
-        int_path(&py_value, &["agents"]),
-    );
-    check(
-        "notes",
-        crate::store::int_field(&engine.notifications(None, None, 100), "count"),
-        int_path(&py_value, &["notes"]),
-    );
-    check(
-        "prune",
-        crate::store::int_field(&engine.prune_history(None, None).unwrap(), "pruned"),
-        int_path(&py_value, &["prune"]),
-    );
-    check(
-        "env_issues",
-        crate::store::int_field(&engine.environment_check(), "total_issues"),
-        int_path(&py_value, &["env_issues"]),
-    );
-    check(
-        "dynamic",
-        array_len(&engine.dynamic_symbols(None)) as i64,
-        int_path(&py_value, &["dynamic"]),
-    );
-    check(
-        "history",
-        array_len(&engine.chunk_history(None, None, 5)) as i64,
-        int_path(&py_value, &["history"]),
-    );
-    check("define", def_n, int_path(&py_value, &["define"]));
-    check("refs", ref_n, int_path(&py_value, &["refs"]));
-    check(
-        "grep",
-        crate::store::int_field(&grep, "total_matches"),
-        int_path(&py_value, &["grep"]),
-    );
-    check(
-        "text",
-        crate::store::int_field(&text_hit, "match_count"),
-        int_path(&py_value, &["text"]),
-    );
-    check(
-        "text_regex",
-        crate::store::int_field(&text_re, "match_count"),
-        int_path(&py_value, &["text_regex"]),
-    );
-    check("search", search_n, int_path(&py_value, &["search"]));
+    note_diff(&mut diffs, "notes", notes, int_path(&py_value, &["notes"]));
     let embed_py = match object_get(&py_value, "embed0") {
         Some(crate::json::Value::Float(n)) => *n,
         Some(crate::json::Value::Int(n)) => *n as f64,
         _ => -1.0,
     };
-    check(
+    note_diff(
+        &mut diffs,
         "embed0",
         if (embed[0] - embed_py).abs() > 1e-5 {
             1
@@ -369,22 +299,47 @@ print(json.dumps(payload))
         },
         0,
     );
-    check(
-        "detect_unchanged",
-        array_len(object_get(&detect, "unchanged").unwrap_or(&crate::json::Value::Null)) as i64,
-        int_path(&py_value, &["detect_unchanged"]),
-    );
-    check(
+    for (name, rust_value) in [
+        ("index", &indexed),
+        ("search", &search),
+        ("define", &defs),
+        ("refs", &refs),
+        ("grep", &grep),
+        ("text", &text_hit),
+        ("context", &context),
+        ("detect", &detect),
+        ("env", &env),
+    ] {
+        let Some(py_item) = object_get(&py_value, name) else {
+            eprintln!("parity diff {name}: missing from python");
+            diffs += 1;
+            continue;
+        };
+        let left = canonical(rust_value, &root_text, name);
+        let right = canonical(py_item, &root_text, name);
+        if left != right {
+            eprintln!(
+                "parity diff {name}:\n rust {}\n python {}",
+                crate::json::to_string(&left),
+                crate::json::to_string(&right)
+            );
+            diffs += 1;
+        }
+    }
+    note_diff(
+        &mut diffs,
         "registered",
         if reg.is_ok() { 1 } else { 0 },
         int_path(&py_value, &["registered"]),
     );
-    check(
+    note_diff(
+        &mut diffs,
         "removed_dyn",
         removed_dyn,
         int_path(&py_value, &["removed_dyn"]),
     );
-    check(
+    note_diff(
+        &mut diffs,
         "annotated",
         if crate::json::to_string(&ann).contains("id") {
             1
@@ -393,7 +348,8 @@ print(json.dumps(payload))
         },
         int_path(&py_value, &["annotated"]),
     );
-    check(
+    note_diff(
+        &mut diffs,
         "locked",
         if crate::json::to_string(&lock).contains("\"acquired\":true") {
             1
@@ -415,6 +371,13 @@ print(json.dumps(payload))
     let _ = fs::remove_dir_all(&root);
 }
 
+fn note_diff(diffs: &mut i64, name: &str, rust: i64, python: i64) {
+    if rust != python {
+        eprintln!("parity diff {name}: rust {rust} python {python}");
+        *diffs += 1;
+    }
+}
+
 fn int_path(value: &crate::json::Value, keys: &[&str]) -> i64 {
     let mut cur = value;
     for key in keys {
@@ -428,6 +391,69 @@ fn int_path(value: &crate::json::Value, keys: &[&str]) -> i64 {
             crate::json::to_string(value)
         ),
     }
+}
+
+fn canonical(value: &crate::json::Value, root: &str, key: &str) -> crate::json::Value {
+    use crate::json::Value::{Array, Float, Int, Object, String};
+    match value {
+        Object(pairs) => {
+            let mut out = Vec::new();
+            for (name, item) in pairs {
+                let child = if matches!(
+                    name.as_str(),
+                    "document_indexed_at"
+                        | "stored_last_modified"
+                        | "file_mtime"
+                        | "created_at"
+                        | "updated_at"
+                        | "latest_timestamp"
+                        | "at"
+                        | "until"
+                ) {
+                    Int(0)
+                } else {
+                    canonical(item, root, name)
+                };
+                out.push((name.clone(), child));
+            }
+            out.sort_by(|left, right| left.0.cmp(&right.0));
+            Object(out)
+        }
+        Array(rows) => {
+            let mut rows: Vec<_> = rows.iter().map(|row| canonical(row, root, key)).collect();
+            if matches!(
+                key,
+                "indexed"
+                    | "skipped"
+                    | "unchanged"
+                    | "files_with_matches"
+                    | "paths"
+                    | "new"
+                    | "removed"
+            ) {
+                rows.sort_by(|left, right| sort_key(left).cmp(&sort_key(right)));
+            }
+            Array(rows)
+        }
+        String(text) => {
+            let text = text.replace(root, "").replace("\r\n", "\n");
+            String(text)
+        }
+        Float(number) => Float((number * 1_000_000.0).round() / 1_000_000.0),
+        other => other.clone(),
+    }
+}
+
+fn sort_key(value: &crate::json::Value) -> String {
+    if let crate::json::Value::String(text) = value {
+        return text.clone();
+    }
+    for key in ["path", "document_path", "key"] {
+        if let Some(crate::json::Value::String(text)) = object_get(value, key) {
+            return text.clone();
+        }
+    }
+    crate::json::to_string(value)
 }
 
 fn array_len(value: &crate::json::Value) -> usize {

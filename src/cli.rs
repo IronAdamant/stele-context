@@ -151,16 +151,10 @@ impl Parsed {
                 }
                 let mut value = engine.search(positional, &self.search_mode, self.top_k);
                 if let Some(prefix) = &self.path_prefix {
-                    if let crate::json::Value::Object(pairs) = &mut value {
-                        if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "results")
-                        {
-                            if let crate::json::Value::Array(rows) = item {
-                                rows.retain(|row| {
-                                    crate::store::string_field(row, "document_path")
-                                        .starts_with(prefix)
-                                });
-                            }
-                        }
+                    if let crate::json::Value::Array(rows) = &mut value {
+                        rows.retain(|row| {
+                            crate::store::string_field(row, "document_path").starts_with(prefix)
+                        });
                     }
                 }
                 let _ = self.compact;
@@ -435,7 +429,7 @@ Commands:
   doctor              Health, storage, and whether a legacy store is present
   index [PATH...]     Chunk and store files. Unchanged files are skipped
   remove PATH         Drop one document from the store
-  detect              Compare mtime and size. New files are indexed
+  detect              Compare mtime and size. New files are listed
   stats               Document, chunk, and symbol counts
   map                 One row per indexed file
   project-brief       The same counts, for the 1.5 command name

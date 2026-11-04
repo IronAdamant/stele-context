@@ -8,7 +8,8 @@
 - CLI accepts the 1.5 flags, including `--compact`, `--path-prefix`, `--regex`, `--working-tree`, and `--confirm`. `search-text` stays a substring unless `--regex` is set.
 - MCP `inputSchema` / HTTP `parameters` list the properties the dispatcher reads. `paths`, `summaries`, `document_paths`, and `working_tree` are honoured.
 - PDF page text from uncompressed and Flate streams keeps a trailing newline, matching PyMuPDF `get_text()` on the one-page fixture.
-- `merge_threshold`, `change_threshold`, `search_alpha`, and `max_history_entries` follow 1.5.2. `get_context` includes `diff_since_cache` when the file on disk does not match the index. `llm_embed` without a fingerprint uses the 1.5.2 statistical fingerprint. `environment_check` flags stale `*.egg-info` against `pyproject.toml`.
+- `merge_threshold`, `change_threshold`, `search_alpha`, and `max_history_entries` follow 1.5.2. `get_context` returns the 1.5 `{unchanged, changed, new}` object and includes `diff_since_cache` when the file on disk does not match the index. `llm_embed` without a fingerprint uses the 1.5.2 statistical fingerprint. `environment_check` flags stale `*.egg-info` against `pyproject.toml` (orphaned name and version versus the project). It does not walk `importlib.metadata`.
+- `index` returns the 1.5 `indexed` / `skipped` arrays. Keyword `search` returns the 1.5 list, including the proximity nudge. `find_definition` and `find_references` return the 1.5 payloads. Lite stdio `tools/list` stays the compact `{type:object}` schema (2522 bytes) so the tools/list benchmark matches 2.0.0. HTTP `GET /tools` and standard/full stdio still list properties.
 
 ### Added
 

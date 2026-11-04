@@ -426,9 +426,6 @@ impl Chunk {
             ("language", opt_string(&self.language)),
             ("summary", opt_string(&self.summary)),
             ("notes", opt_string(&self.notes)),
-            ("version", Value::Int(self.version as i64)),
-            ("staleness", Value::Float(self.staleness)),
-            ("stale_since", opt_int(self.stale_since)),
         ])
     }
     fn from_json(value: &Value) -> Chunk {
@@ -445,7 +442,10 @@ impl Chunk {
             language: opt_string_field(value, "language"),
             summary: opt_string_field(value, "summary"),
             notes: opt_string_field(value, "notes"),
-            version: int_field(value, "version") as u64,
+            version: match int_field(value, "version") {
+                0 => 1,
+                number => number as u64,
+            },
             staleness: float_field(value, "staleness"),
             stale_since: opt_int_field(value, "stale_since"),
         }
@@ -657,13 +657,6 @@ impl Dynamic {
             line: int_field(value, "line") as u32,
             chunk_id: string_field(value, "chunk_id"),
         }
-    }
-}
-
-fn opt_int(value: Option<i64>) -> Value {
-    match value {
-        Some(number) => Value::Int(number),
-        None => Value::Null,
     }
 }
 

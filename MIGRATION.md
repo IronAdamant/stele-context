@@ -9,7 +9,7 @@ Closed in 2.0.1 (same, unless noted):
 - `migrate` reads `document_path` and the other 1.5 tables (`chunks`, `symbols`, `symbol_edges`, `annotations`, `sessions`, `chunk_history`, `document_conflicts`). A storage directory that has `stele_context.db` and no native documents is copied on open. The original database is not written. `doctor` says the copy happened.
 - `chunk_size`, `skip_dirs` (added to the defaults, not a replacement), and `respect_gitignore` are applied.
 - CLI flags `--compact`, `--path-prefix`, `--regex`, `--working-tree`, `--confirm`, `--limit`, `--document`, `--session`, `--depth`, `--significance-threshold`, `--mode`, `--group-by`, `--summary-mode`, `--top-n`, and `--min-tokens` are accepted. `--regex` is required before a pattern is a regex. `--confirm` is required before `clear` deletes the store.
-- Stdio `inputSchema` and HTTP `parameters` list the properties the dispatcher reads. `paths`, `summaries`, `document_paths`, and `working_tree` are honoured.
+- HTTP `GET /tools` and stdio `tools/list` in `standard` and `full` list the properties the dispatcher reads. Lite stdio `tools/list` stays `{"type":"object"}` so that reply stays the same size as 2.0.0. `paths`, `summaries`, `document_paths`, and `working_tree` are honoured.
 - PDF page text from uncompressed and Flate streams ends with a newline, so the one-page fixture matches PyMuPDF `get_text()` (`[Page 1]\nHello PDF symbols\n`).
 
 Still not the same, and why:
@@ -41,7 +41,7 @@ The parity audit's six extractor and token gaps were Rust defects. They were fix
 - Default search mode is `keyword` (BM25). `hybrid` is opt-in. That default dates from 1.3.0.
 - `.gitignore` is on by default for directory walks. A file you name on the command line is indexed even when gitignore matches it.
 - Default skip directory names match 1.5.2: `.git`, `.hg`, `.svn`, `__pycache__`, `node_modules`, `.venv`, `venv`, `.tox`, `.eggs`, `dist`, `build`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`. 2.0 also skips every name that starts with `.` during a directory walk.
-- Default chunk size 256, max chunk size 4096, merge threshold 0.7, search alpha 0.42. These are compile-time constants in 2.0. The toml keys of the same names are not applied (see [Configuration keys](#configuration-keys)).
+- Default chunk size 256, max chunk size 4096, merge threshold 0.7, search alpha 0.42, history cap 1000. The toml keys of those names are applied. See [Configuration keys](#configuration-keys).
 - `detect` / `detect_changes` scan for new files by default. `--no-scan-new` turns that off.
 - MCP mode: `STELE_MCP_MODE` defaults to `lite`. `standard` and `full` add the same tool names as 1.5.2 (25 lite, 43 standard, 61 full).
 - HTTP `POST /call` returns `{"success": true, "result": ...}` or `{"error": ...}`. Stdio MCP returns the tool result, not that HTTP envelope. Port 9876. Routes: `GET /health`, `GET /tools`, `POST /call`.
@@ -60,7 +60,7 @@ The parity audit's six extractor and token gaps were Rust defects. They were fix
 | Platforms | intentional change | Release assets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`. Each triple also has `stele-context-mcp-<triple>`. `install.sh` / `install.ps1` install `stele-context` only. `serve-mcp` works on that binary. |
 | `install.sh` platforms | not supported | Anything other than Linux x86_64, Linux aarch64, Darwin arm64, and Darwin x86_64 exits with `unsupported platform`. Windows uses `install.ps1`. |
 | Extras | not supported | No `mcp`, `tree-sitter`, `image`, `pdf`, `audio`, `video`, `performance`, or `all` extras. `[dependencies]` is empty. No tree-sitter, numpy, Pillow, PyMuPDF, librosa, or OpenCV. |
-| Python requirement | not supported | 2.0 does not need Python 3.10+. `migrate` shells out to `python3` for sqlite (see below) and still fails on a 1.5 database. |
+| Python requirement | not supported | 2.0 does not need Python 3.10+. `migrate` reads the SQLite file itself. |
 | npm launcher | not supported as the install | `npm/stele-context` is a launcher. The tag workflows do not publish it. |
 
 ## Index files and old databases
@@ -148,13 +148,13 @@ Exit codes in 2.0: 0 success, 1 operation error, 2 usage. A closed stdout pipe e
 | --- | --- | --- |
 | `doctor`, `index`, `remove`, `detect`, `stats`, `map`, `project-brief`, `search`, `search-text`, `agent-grep`, `query`, `find-definition`, `find-references`, `impact-radius`, `coupling`, `enrichment-plan`, `history`, `init`, `serve`, `serve-mcp`, `clear` | same names | Present. `clear`, `get-context`, `annotations`, and `document-lock` run, and they are not listed in `--help`. |
 | `index` with no path | intentional change | Indexes `.`. 1.5 requires at least one path. |
-| `index` of a directory | intentional change | Drops stored documents under that directory that the walk no longer sees. `index one-file` does not drop other documents. The result is counts: `indexed`, `skipped`, `removed`, `documents`, `chunks`, `symbols`. |
+| `index` of a directory | same result keys | Drops stored documents under that directory that the walk no longer sees. `index one-file` does not drop other documents. The result matches 1.5.2: `indexed` (path, chunk_count, total_tokens, modality), `skipped` (path, reason, chunk_count), `errors`, `conflicts`, `total_chunks`, `total_tokens`. |
 | `index --force` and `--force-reindex` | same effect | Both reindex. There is no summaries or `expected_versions` flag. |
-| `detect` | intentional change | Compares size and mtime. Result keys: `unchanged` (count), `changed`, `added`, `deleted` (path arrays). New files are indexed when scan-new is on (the default). Changed files are listed and not rewritten. Pass `index` for those. Extra positional paths are ignored. There is no `--session` and no per-category limit (1.5 MCP `detect_changes` defaults `limit` to 200). |
-| `search` | intentional change | `--search-mode keyword\|hybrid` and `--top-k` (default 10). Result is `{"results": [...]}` inside the envelope. No `--compact`, `--max-result-tokens`, `--meta`, or `--path-prefix` (unknown flag, exit 2). |
-| `search-text` and `agent-grep` | intentional change | A pattern with no `\ . [ ] ( ) { } * + ? ^ $ \|` is a substring. Any of those characters is a regex, with no `--regex` flag. 1.5 stays a substring unless `--regex` is set, so `file.py` is literal there and "file" + any character + "py" here. Lookaround and backreferences return `regex_lookaround` or `regex_backreference` and match nothing. Cap is 100 matches. No `--document`, `--limit` (1.5 default 50), `--group-by`, `--max-tokens`, `--no-classify`, `--no-scope`, `--no-dedup`, or `--context-lines`. `agent-grep` is that match list. `--session-id` records the pattern. It does not auto-index files that matched. |
+| `detect` | same keys | Compares size and mtime. Result keys: `unchanged` (paths), `modified`, `new`, `removed`, `conflicts`, `kv_restored`, `kv_reprocessed`. New files are listed and not indexed. Changed files are reindexed. `limit` defaults to 200 and adds `totals` when a list is cut. |
+| `search` | same list | `--search-mode keyword\|hybrid` and `--top-k` (default 10). The engine result is the 1.5 list (chunk_id, content, document_path, relevance_score, token_count, start_pos, end_pos, source, tier2_present, and `proximity_boosted` when the proximity nudge runs). The CLI wraps that list in the envelope. `--path-prefix` filters. `--compact` on MCP replaces `content` with `content_preview`. |
+| `search-text` and `agent-grep` | same shape | A pattern is a substring unless `--regex` is set. Lookaround and backreferences are rejected. `search-text` returns `pattern`, `regex`, `match_count`, `chunk_count`, `results`, `files_checked`, `files_with_matches`. `agent-grep` returns `summary`, `groups`, `total_matches`, `shown_matches`, `truncated`, `total_tokens`, `files_checked`, `files_with_matches`. `--session-id` records the search and indexes files that matched. |
 | `query` | intentional change | One positional string. Result keys: `search` (keyword, top 8), `definitions`, `grep`. Not one merged list, and no `applied_defaults` or `suggested_next`. No `--path-prefix`, `--working-tree`, `--compact`, or `--max-result-tokens`. `session_id` on the MCP call is not applied to this tool. |
-| `find-definition` | intentional change | Rows include `definition_index`, `shadowed`, and `shadow_count` when several definitions share the name. Shape is otherwise the 2.0 symbol object, not the 1.5 payload. |
+| `find-definition` | same | Payload is `symbol`, `definitions`, `count`, `symbol_index`, `guidance`. Shadow fields are set only when one file has more than one definition, and `definition_index` starts at 1. `find-references` adds `verdict`, `references`, and `total`. |
 | `impact-radius` | intentional change | `--symbol NAME`, or the first positional as the symbol. Depth is 2. Result: `symbol`, `affected_files`, `affected_chunks`, `affected` (paths). `--summary-mode` is accepted and ignored. `--depth`, `--document-path`, `--chunk-id`, `--significance-threshold`, and `--direction` are unknown flags (exit 2). PR #5 compared file sets, not this JSON: `Console` at depth 2 was 162 files on both sides, and `coupling` of `rich/console.py` was 144 files on both sides. |
 | `coupling` | intentional change | One path. Result includes `coupled_files`. No `--mode` (`edges` vs `co_consumers`) and no `--significance-threshold`. |
 | `map` | intentional change | `documents` count and `files` rows (`path`, `chunks`, `symbols`, `bytes`), sorted by path. No `--compact`, `--max-documents`, or `--path-prefix`. |
@@ -164,7 +164,7 @@ Exit codes in 2.0: 0 success, 1 operation error, 2 usage. A closed stdout pipe e
 | `init` | intentional change | Writes `.stele-context.toml` containing the line `# stele-context 2.0` if the file is absent, and returns `path`. It does not index and it does not print an MCP snippet. 1.5 `init` indexes, prints the lite client config, and prints doctor `next_steps`. |
 | `clear` | intentional change | Deletes the in-memory state and saves. No `--confirm` and no prompt. |
 | `doctor` | intentional change | JSON under `result`: `version`, `implementation` (`rust`), `project_root`, `storage_dir`, `config_loaded`, `native_store_present`, `legacy_sqlite_present`, counts, `index_health`, `db_health`, `search_quality`, `environment.issues` (always empty), `map_preview`, `recommended_mcp_mode` (`lite`), `token_savings`, `next_steps` (strings). Not the 1.5 doctor object (`python` is null). |
-| `get-context PATH` | intentional change | Not a 1.5 CLI command (it was MCP). One path. `trust.cache_aligned_with_disk`, `staleness_hint`, and `chunks` (`chunk_id`, `start`, `end`, `content`, `summary`, `notes`). No `diff_since_cache`, no `document_paths` array, no `recently_searched`. `--session-id` records the read. |
+| `get-context PATH` | same shape | `{unchanged, changed, new}`. An unchanged file has `chunks` (`chunk_id`, `content`, `start_pos`, `end_pos`, `token_count`, `content_truncated`, `staleness_score`), `total_tokens`, and `trust`. A changed file has `old_hash`, `new_hash`, and `diff_since_cache` (unified diff, `diff_exact`, added and removed line counts, `diff_tokens`, `diff_truncated`, `recommendation`). `--session-id` records the read. |
 | `annotations` and `document-lock` | intentional change | `--action` and a positional. See MCP section for the actions that run. |
 | `annotate`, `get-annotations`, `delete-annotation`, `update-annotation` | not supported | Use `annotations`. |
 | `release` | not supported | The 1.5 PyPI helper is not in this binary. |
@@ -231,7 +231,7 @@ Full-mode names run in 2.0.1 by calling the tool in the replacement column (**sa
 | `store_embedding` | `bulk_store_embeddings` |
 | `store_chunk_agent_notes` | `bulk_store_chunk_agent_notes` |
 
-`stats` and `project_brief` run as CLI commands and as full-mode MCP tools. `stats` calls `doctor`'s count object. |
+`stats` and `project_brief` run as CLI commands and as full-mode MCP tools. `stats` calls `doctor`'s count object.
 
 There is no self-healing `hint` on HTTP tool errors beyond the `error` string. 1.5 attaches hints for some failures. Mark: **not supported**.
 
@@ -243,7 +243,7 @@ There is no self-healing `hint` on HTTP tool errors beyond the `error` string. 1
 | Force steal | same outcome | A conflict row is written (`path`, `holder`, `requester`, `at`). The coordination file then shows the new holder. |
 | Where it is stored | intentional change | `<git-common-dir>/stele-context/coordination.json` when `.git` resolves. The snapshot also keeps a copy. No git directory: snapshot only. `coordination.db` is not opened. |
 | Optimistic `expected_versions` on index | not supported | Ignored. |
-| Agent registry and notifications | not supported | `list_agents` and `get_notifications` are the stub above. |
+| Agent registry and notifications | same | `list_agents` lists lock holders. `get_notifications` returns the coordination rows written when a file is indexed, then the count. |
 
 ## HTTP serve
 

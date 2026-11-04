@@ -27,7 +27,11 @@ impl Engine {
             }
         }
         let pruned = (before - self.store.state.change_log.len()) as i64;
-        self.store.save("prune_history", &Value::Int(pruned))?;
+        // A no-op prune must not rewrite the snapshot. Index calls this after
+        // its own save, and a second fsync showed up as a cold-index regression.
+        if pruned > 0 {
+            self.store.save("prune_history", &Value::Int(pruned))?;
+        }
         Ok(Value::object(vec![
             ("pruned", Value::Int(pruned)),
             ("operation_log_pruned", Value::Int(0)),
@@ -700,32 +704,7 @@ impl Engine {
         paths: &[String],
         session: Option<&str>,
     ) -> Result<Value, String> {
-        let mut unchanged = Vec::new();
-        let mut changed = Vec::new();
-        let mut new_rows = Vec::new();
-        for path in paths {
-            let one = self.get_context(path, session)?;
-            let chunks = match object_get(&one, "chunks") {
-                Some(Value::Array(rows)) => rows.len(),
-                _ => 0,
-            };
-            let aligned = match object_get(&one, "trust") {
-                Some(value) => flag_get(value, "cache_aligned_with_disk"),
-                None => false,
-            };
-            if chunks == 0 {
-                new_rows.push(Value::object(vec![("path", Value::string(path))]));
-            } else if aligned {
-                unchanged.push(one);
-            } else {
-                changed.push(one);
-            }
-        }
-        Ok(Value::object(vec![
-            ("unchanged", Value::Array(unchanged)),
-            ("changed", Value::Array(changed)),
-            ("new", Value::Array(new_rows)),
-        ]))
+        self.context_paths(paths, session)
     }
 
     pub fn index_working_tree(&mut self) -> Vec<String> {
@@ -1021,14 +1000,6 @@ fn text_ops(value: &Value, key: &str) -> Option<String> {
         Some(Value::String(text)) if !text.is_empty() => Some(text.clone()),
         _ => None,
     }
-}
-
-fn object_get<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    field(value, key)
-}
-
-fn flag_get(value: &Value, key: &str) -> bool {
-    matches!(field(value, key), Some(Value::Bool(true)))
 }
 
 fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
