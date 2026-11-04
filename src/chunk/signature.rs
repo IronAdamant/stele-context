@@ -172,23 +172,27 @@ fn split_lines(text: &str) -> Vec<&str> {
 }
 
 fn top_trigrams(chars: &[char], n: usize) -> Vec<u32> {
-    let mut counts: Vec<([char; 3], u32)> = Vec::new();
+    // First-seen order is the tie break. A map keeps that order without
+    // scanning every earlier trigram on each window.
+    let mut at = std::collections::HashMap::<[char; 3], usize>::new();
+    let mut counts: Vec<u32> = Vec::new();
     if chars.len() >= 3 {
         for window in chars.windows(3) {
             let key = [window[0], window[1], window[2]];
-            if let Some((_, count)) = counts.iter_mut().find(|(gram, _)| *gram == key) {
-                *count += 1;
+            if let Some(&index) = at.get(&key) {
+                counts[index] += 1;
             } else {
-                counts.push((key, 1));
+                at.insert(key, counts.len());
+                counts.push(1);
             }
         }
     }
     let mut order: Vec<usize> = (0..counts.len()).collect();
-    order.sort_by(|&left, &right| counts[right].1.cmp(&counts[left].1).then(left.cmp(&right)));
+    order.sort_by(|&left, &right| counts[right].cmp(&counts[left]).then(left.cmp(&right)));
     order
         .into_iter()
         .take(n)
-        .map(|index| counts[index].1)
+        .map(|index| counts[index])
         .collect()
 }
 
@@ -234,26 +238,35 @@ fn unicode_words(chars: &[char]) -> Vec<String> {
 }
 
 fn word_bigrams(words: &[&str]) -> Vec<(String, u32)> {
-    let mut counts = Vec::new();
+    let mut counts = Counter::default();
     for pair in words.windows(2) {
-        bump(&mut counts, format!("{}_{}", pair[0], pair[1]));
+        counts.bump(format!("{}_{}", pair[0], pair[1]));
     }
-    counts
+    counts.order
 }
 
 fn owned_counts<'a>(words: impl Iterator<Item = &'a str>) -> Vec<(String, u32)> {
-    let mut counts = Vec::new();
+    let mut counts = Counter::default();
     for word in words {
-        bump(&mut counts, word.to_string());
+        counts.bump(word.to_string());
     }
-    counts
+    counts.order
 }
 
-fn bump(counts: &mut Vec<(String, u32)>, key: String) {
-    if let Some((_, count)) = counts.iter_mut().find(|(name, _)| name == &key) {
-        *count += 1;
-    } else {
-        counts.push((key, 1));
+#[derive(Default)]
+struct Counter {
+    order: Vec<(String, u32)>,
+    at: std::collections::HashMap<String, usize>,
+}
+
+impl Counter {
+    fn bump(&mut self, key: String) {
+        if let Some(&index) = self.at.get(&key) {
+            self.order[index].1 += 1;
+        } else {
+            self.at.insert(key.clone(), self.order.len());
+            self.order.push((key, 1));
+        }
     }
 }
 

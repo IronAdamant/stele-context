@@ -277,7 +277,8 @@ impl Store {
             let mut file = File::create(&tmp).map_err(|err| format!("write snapshot: {err}"))?;
             file.write_all(&body)
                 .map_err(|err| format!("write snapshot: {err}"))?;
-            file.sync_all().ok();
+            // rename replaces the previous snapshot. The index is rebuilt
+            // from the source files, so this write is not fsynced.
         }
         fs::rename(&tmp, &final_path).map_err(|err| format!("rename snapshot: {err}"))?;
         let mut line = json::to_string(&Value::object(vec![

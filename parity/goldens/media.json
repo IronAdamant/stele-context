@@ -14,6 +14,6 @@
     "big2.pdf": {"python_1_5_2_chunks": 2, "rust_chunks": 2, "symbols": 0}
   },
   "python_1_5_2": "Indexed with Pillow 13.0.0, PyMuPDF, librosa 1.0.0, and OpenCV 5.0.0: 7 documents, 7 chunks, 0 symbols. Image, audio, and video chunk bodies are bytes (SQLite content is null). note.pdf chunk text is \"[Page 1]\\nHello PDF symbols\\n\".",
-  "rust": "9 documents, 11 chunks, 0 symbols. Bodies are metadata lines (image gif 8x8 bytes 75, audio wav 8000Hz 1s bytes 16044, video mp4 bytes 1695 header mp4). note.pdf is one page. small3.pdf merges two short pages and keeps the third. big2.pdf stays two large pages. Page text ends with a newline.",
+  "rust": "9 documents, 11 chunks, 0 symbols. Bodies are metadata lines (image gif 8x8 bytes 75, audio wav 8000Hz 1s bytes 16044, video mp4 bytes 1695 header mp4). note.pdf is one page. small3.pdf merges two short pages and keeps the third. big2.pdf is two pages, each longer than half of max_chunk_size, so they stay separate. Page text ends with a newline.",
   "python_1_5_1_pdf": "v1.5.1 read_and_hash decodes PDF as UTF-8 text, then PDFChunker calls fitz.open on that string. Reproduced on note.pdf: FileNotFoundError: no such file: '%PDF-1.7' followed by the rest of the decoded file. 1.5.2 reads PDF as bytes and indexes the page. Valid PNG, JPEG, GIF, WAV, MP3, and MP4 are bytes in 1.5.1 as well; the earlier failures were the stub files, not 1.5.1 audio or image code."
 }
