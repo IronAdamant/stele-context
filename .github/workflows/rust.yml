@@ -57,7 +57,8 @@ jobs:
         if: matrix.test
         shell: bash
         run: |
-          python3 -m pip install 'pymupdf>=1.23' || python -m pip install 'pymupdf>=1.23'
+          python3 -m pip install 'pymupdf>=1.23' || true
+          python -m pip install 'pymupdf>=1.23' || true
           python3 -c 'import pymupdf' || python -c 'import pymupdf'
 
       - name: Fetch parity corpora

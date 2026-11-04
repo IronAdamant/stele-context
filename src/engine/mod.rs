@@ -208,35 +208,25 @@ impl Engine {
         let mut removed = Vec::new();
         let kv_restored = 0i64;
         let mut kv_reprocessed = 0i64;
+        let docs: std::collections::HashMap<String, (u64, i64)> = self
+            .store
+            .state
+            .documents
+            .iter()
+            .map(|doc| (doc.path.clone(), (doc.size, doc.mtime_ns)))
+            .collect();
         let indexed: Vec<String> = if let Some(only) = only {
             if only.is_empty() {
-                self.store
-                    .state
-                    .documents
-                    .iter()
-                    .map(|doc| doc.path.clone())
-                    .collect()
+                docs.keys().cloned().collect()
             } else {
                 only.to_vec()
             }
         } else {
-            self.store
-                .state
-                .documents
-                .iter()
-                .map(|doc| doc.path.clone())
-                .collect()
+            docs.keys().cloned().collect()
         };
-        let known: Vec<String> = files.iter().map(|(rel, _)| rel.clone()).collect();
         if scan_new {
-            for rel in &known {
-                if !self
-                    .store
-                    .state
-                    .documents
-                    .iter()
-                    .any(|doc| &doc.path == rel)
-                {
+            for (rel, _) in &files {
+                if !docs.contains_key(rel) {
                     new_rows.push(Value::object(vec![
                         ("path", Value::string(rel)),
                         ("reason", Value::string("New file (scan)")),
@@ -252,9 +242,9 @@ impl Engine {
                 continue;
             }
             let meta = fs::metadata(&abs).map_err(|err| format!("{rel}: {err}"))?;
-            let unchanged_fast = self.store.state.documents.iter().any(|doc| {
-                &doc.path == rel && doc.size == meta.len() && doc.mtime_ns == mtime_ns(&meta)
-            });
+            let unchanged_fast = docs
+                .get(rel.as_str())
+                .is_some_and(|(size, mtime)| *size == meta.len() && *mtime == mtime_ns(&meta));
             if unchanged_fast {
                 unchanged.push(rel.clone());
                 continue;

@@ -5,8 +5,11 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 
 fn python_src() -> PathBuf {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|err| err.into_inner());
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let dest = repo.join("target").join("python-legacy-src");
     if dest.join("stele_context").join("engine.py").is_file() {
@@ -41,7 +44,14 @@ fn python_src() -> PathBuf {
 }
 
 fn python_bin() -> &'static str {
-    if Command::new("python3").arg("--version").output().is_ok() {
+    fn imports(bin: &str) -> bool {
+        Command::new(bin)
+            .args(["-c", "import pymupdf"])
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false)
+    }
+    if imports("python3") {
         "python3"
     } else {
         "python"
@@ -198,7 +208,7 @@ payload = {
     "notes": engine.get_notifications()["count"],
     "embed0": round(embed(text)[0], 6),
 }
-cid = next(c["chunk_id"] for c in engine.storage.search_chunks() if c["document_path"] == "src/sample.py")
+cid = next(c["chunk_id"] for c in engine.storage.search_chunks() if Path(c["document_path"]).as_posix() == "src/sample.py")
 vec = [0.1] * 128
 ann = engine.annotate("src/sample.py", "document", "note", None)
 payload["tools"] = {
@@ -785,7 +795,10 @@ fn canonical(value: &crate::json::Value, root: &str, key: &str) -> crate::json::
             Array(rows)
         }
         String(text) => {
-            let text = text.replace(root, "").replace("\r\n", "\n");
+            let text = text
+                .replace(root, "")
+                .replace("\r\n", "\n")
+                .replace('\\', "/");
             String(text)
         }
         Float(number) => Float((number * 1_000_000.0).round() / 1_000_000.0),
