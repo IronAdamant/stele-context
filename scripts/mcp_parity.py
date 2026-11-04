@@ -606,8 +606,8 @@ def main() -> int:
         if rc_b != 0:
             print(f"parity diff cli annotate: {rc_b} {out_b[:300]!r}", flush=True)
             diffs += 1
-        rc_r, out_r = cli(rs_store, ["get-annotations", "--target", "src/calc.py", "--json"])
-        rc_p, out_p = py_cli(py_store, ["get-annotations", "--target", "src/calc.py", "--json"])
+        rc_r, out_r = cli(rs_store, ["get-annotations", "--target", "src/calc.py", "--type", "document", "--json"])
+        rc_p, out_p = py_cli(py_store, ["get-annotations", "--target", "src/calc.py", "--type", "document", "--json"])
         left_n = walk(unwrap(out_r), root_s, str(rs_store))
         right_n = walk(unwrap(out_p), root_s, str(py_store))
         if isinstance(left_n, dict) and "annotations" in left_n:

@@ -513,14 +513,14 @@ fn tool_suite(engine: &mut Engine) -> crate::json::Value {
         _ => "1".to_string(),
     };
     let get_ann = engine
-        .annotations("get", "src/sample.py", "")
+        .annotations_tagged("get", "src/sample.py", "", &[], "document")
         .unwrap_or(Value::Null);
     let get_list = match object_get(&get_ann, "annotations") {
         Some(rows) => rows.clone(),
         None => Value::Array(Vec::new()),
     };
     let annotations_get = engine
-        .annotations("get", "src/sample.py", "")
+        .annotations_tagged("get", "src/sample.py", "", &[], "document")
         .unwrap_or(Value::Null);
     let deleted = engine
         .annotations("delete", &ann_id, "")

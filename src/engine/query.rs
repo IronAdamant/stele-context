@@ -968,7 +968,12 @@ impl Engine {
         // Document targets are stored the way Python Path renders them:
         // backslashes on Windows, slashes elsewhere. A search query is text.
         let stored;
-        let path = if matches!(action, "create" | "get" | "bulk_create") {
+        // 1.5.2 normalizes a document path only. A get without a type
+        // compares the target string as given.
+        let normalize = matches!(action, "create" | "bulk_create")
+            && (target_type.is_empty() || target_type == "document")
+            || (action == "get" && target_type == "document");
+        let path = if normalize {
             stored = crate::walk::native_sep(path);
             stored.as_str()
         } else {
