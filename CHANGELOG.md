@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Added
+
+- [MIGRATION.md](MIGRATION.md): 1.5.x Python (PyPI, `python-legacy`) to 2.0 Rust. README links it.
+
 ### Changed
 
 - `main` is the Rust 2.0 crate only. The Python 1.x package, its tests, and `publish.yml` are on the `python-legacy` branch. PyPI 1.5.x is unchanged. v2 tags still publish Rust binaries and do not upload a wheel.

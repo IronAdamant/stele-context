@@ -9,6 +9,7 @@ The product is the std-only Rust binary. The old Python 1.x version lives on the
 | Path | Purpose |
 |------|---------|
 | `README.md` | Install, MCP, and the benchmark table |
+| `MIGRATION.md` | 1.5.x Python to 2.0 Rust: flags, store, MCP, media |
 | `AGENTS.md` | How agents should use the tools |
 | `CLAUDE.md` | Crate map and invariants |
 | `CONTRIBUTING.md` | Rust setup and tests |

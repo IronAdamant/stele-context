@@ -94,10 +94,10 @@ A `.stele-context.toml` in the project root is also the project-root marker. Ste
 
 ```toml
 [stele-context]
-chunk_size = 512
-skip_dirs = [".git", "node_modules", "dist", "vendor"]
-respect_gitignore = true
+storage_dir = "/var/tmp/stele-index"
 ```
+
+`storage_dir` is applied. `chunk_size`, `skip_dirs`, and `respect_gitignore` are read and not applied: chunks stay at 256, and the walk uses the fixed skip list plus gitignore. The full key list is in [MIGRATION.md](MIGRATION.md#configuration-keys).
 
 You can also set `STELE_CONTEXT_STORAGE_DIR` or pass `--storage-dir`. Flag, then config, then the environment variable, then the default.
 
@@ -113,7 +113,7 @@ Media, with no extra packages: PNG, JPEG, GIF, WAV, MP3, MP4, and PDF. Image and
 
 **A lock is stuck.** Use the `document_lock` tool to reap expired locks.
 
-**Cached text looks stale.** `doctor` and `get_context` report trust. Re-index with `stele-context index <file>` or `stele-context detect`.
+**Cached text looks stale.** `doctor` and `get_context` report trust. Re-index with `stele-context index <file>`. `detect` lists changed files and indexes new ones.
 
 ## FAQ
 
@@ -125,7 +125,19 @@ Media, with no extra packages: PNG, JPEG, GIF, WAV, MP3, MP4, and PDF. Image and
 
 **Is the code local?** Yes. The index stays on the machine. There is no dependency crate and no pickle.
 
-**Can several agents share an index?** Yes. Document locks, versions, and a conflict log cover one index, including across git worktrees.
+**Can several agents share an index?** Yes. Document locks and a conflict log cover one index, including across git worktrees. The shared file is `<git-common-dir>/stele-context/coordination.json`.
+
+## Migrating from the Python version
+
+stele-context 1.5.x on PyPI is the Python package. 2.0.0 is this Rust binary. The Python source stays on the `python-legacy` branch. `pip install stele-context` does not install 2.0.
+
+Install 2.0 from the [v2.0.0 GitHub Release](https://github.com/IronAdamant/stele-context/releases/tag/v2.0.0): `scripts/install.sh`, `scripts/install.ps1`, or the release assets. Those assets cover Linux x86_64 (musl) and aarch64, macOS Apple silicon and Intel, and Windows x86_64 and Arm. `install.sh` and `install.ps1` install `stele-context`. `stele-context serve-mcp` is the MCP server. `stele-context-mcp-<target>` is the same server under the other file name.
+
+A 1.5 `stele_context.db` is not opened by index or search. Re-index the tree. `migrate` is in the CLI and does not import a 1.5 database: the reader selects `documents.path`, and the 1.5 column is `document_path`.
+
+Chunk and symbol rows on `parity/goldens/fixtures.json` match 1.5.2 with tree-sitter off and numpy not loaded. Media chunk bodies are metadata, not the optional Pillow, librosa, OpenCV, or PyMuPDF bytes. The one Python defect 2.0 does not copy is the 1.5.1 PDF open: that release decoded the file as text and PyMuPDF raised `FileNotFoundError` for a path starting `%PDF-1.7`. 1.5.2 and 2.0 read the bytes. Page text is still not the PyMuPDF string.
+
+Flags, JSON envelopes, MCP schemas, locks, HTTP, and removals are listed in [MIGRATION.md](MIGRATION.md). Each item is marked same, intentional change, bug fixed from Python, or not supported.
 
 ## Benchmarks
 
