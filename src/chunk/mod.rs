@@ -4,10 +4,14 @@
 mod code;
 mod merge;
 mod patterns;
+mod python_alnum;
+mod python_alnum_bmp;
 mod signature;
 mod text;
 mod tokens;
 
+pub use code::extension_of;
+pub(crate) use python_alnum::is_python_word;
 pub use signature::{chunk_id, content_sha256, signature, signature_f32_hex};
 pub use tokens::estimate_tokens;
 
@@ -31,6 +35,13 @@ pub fn read_python_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes)
         .replace("\r\n", "\n")
         .replace('\r', "\n")
+}
+
+pub fn chunk_bytes(path: &str, bytes: &[u8]) -> Vec<Produced> {
+    if crate::media::is_media(code::extension_of(path)) {
+        return crate::media::chunk(path, bytes);
+    }
+    chunk_document(path, &read_python_text(bytes))
 }
 
 pub fn chunk_document(path: &str, content: &str) -> Vec<Produced> {

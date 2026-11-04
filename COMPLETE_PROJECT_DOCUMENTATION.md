@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-11-03 · **Release:** Python 1.5.2 in tree; Rust 2.0.0 ready to tag, not tagged
 
-Rust 2.0 sources: `src/` (chunk, pyre, search, store, engine, symbols, mcp, lang/scan), `Cargo.toml` with an empty `[dependencies]`. Release notes: `docs/release-2.0.md`. The 1.5.3 PyPI notice is prepared in `release/pypi-1.5.3/NOTICE.md` and is not applied. `llms.txt` and `server.json` describe the 2.0 binary. `npm/stele-context` is a launcher. `.github/workflows/release-rust.yml` publishes `v2.*` binaries. `.github/workflows/publish.yml` publishes only `v1.*` to PyPI.
+Rust 2.0 sources: `src/` (chunk, pyre, search, store, engine, symbols, mcp, lang/scan, media, http_serve, locks), `Cargo.toml` with an empty `[dependencies]`. Media indexing, `serve`, and the cross-worktree lock file are std-only. Release notes: `docs/release-2.0.md`. The 1.5.3 PyPI notice is prepared in `release/pypi-1.5.3/NOTICE.md` and is not applied. `llms.txt` and `server.json` describe the 2.0 binary. `npm/stele-context` is a launcher. `.github/workflows/release-rust.yml` publishes `v2.*` binaries. `.github/workflows/publish.yml` publishes only `v1.*` to PyPI.
 
 ## Documentation (root)
 

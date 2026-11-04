@@ -15,6 +15,7 @@ pub struct Document {
     pub mtime_ns: i64,
     pub size: u64,
     pub sha256: String,
+    pub doc_version: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -61,6 +62,14 @@ pub struct Lock {
 }
 
 #[derive(Clone, Debug)]
+pub struct Conflict {
+    pub path: String,
+    pub holder: String,
+    pub requester: String,
+    pub at: i64,
+}
+
+#[derive(Clone, Debug)]
 pub struct Session {
     pub id: String,
     pub searches: Vec<String>,
@@ -82,6 +91,7 @@ pub struct State {
     pub symbols: Vec<Symbol>,
     pub annotations: Vec<Annotation>,
     pub locks: Vec<Lock>,
+    pub conflicts: Vec<Conflict>,
     pub sessions: Vec<Session>,
     pub dynamic: Vec<Dynamic>,
     pub seq: u64,
@@ -204,6 +214,10 @@ impl State {
                 Value::Array(self.locks.iter().map(Lock::to_json).collect()),
             ),
             (
+                "conflicts",
+                Value::Array(self.conflicts.iter().map(Conflict::to_json).collect()),
+            ),
+            (
                 "sessions",
                 Value::Array(self.sessions.iter().map(Session::to_json).collect()),
             ),
@@ -300,6 +314,7 @@ impl State {
                 .map(Annotation::from_json)
                 .collect(),
             locks: array(value, "locks").map(Lock::from_json).collect(),
+            conflicts: array(value, "conflicts").map(Conflict::from_json).collect(),
             sessions: array(value, "sessions").map(Session::from_json).collect(),
             dynamic: array(value, "dynamic").map(Dynamic::from_json).collect(),
             sigs: Vec::new(),
@@ -314,6 +329,7 @@ impl Document {
             ("mtime_ns", Value::Int(self.mtime_ns)),
             ("size", Value::Int(self.size as i64)),
             ("sha256", Value::string(&self.sha256)),
+            ("doc_version", Value::Int(self.doc_version as i64)),
         ])
     }
     fn from_json(value: &Value) -> Document {
@@ -322,6 +338,7 @@ impl Document {
             mtime_ns: int_field(value, "mtime_ns"),
             size: int_field(value, "size") as u64,
             sha256: string_field(value, "sha256"),
+            doc_version: int_field(value, "doc_version") as u64,
         }
     }
 }
@@ -410,6 +427,25 @@ impl Annotation {
                     _ => None,
                 })
                 .collect(),
+        }
+    }
+}
+
+impl Conflict {
+    fn to_json(&self) -> Value {
+        Value::object(vec![
+            ("path", Value::string(&self.path)),
+            ("holder", Value::string(&self.holder)),
+            ("requester", Value::string(&self.requester)),
+            ("at", Value::Int(self.at)),
+        ])
+    }
+    fn from_json(value: &Value) -> Conflict {
+        Conflict {
+            path: string_field(value, "path"),
+            holder: string_field(value, "holder"),
+            requester: string_field(value, "requester"),
+            at: int_field(value, "at"),
         }
     }
 }

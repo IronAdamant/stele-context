@@ -330,6 +330,33 @@ CLAUDE.md gives your agent instructions. Stele Context gives it a searchable ind
 - [CHANGELOG](CHANGELOG.md) — What changed in each version
 - [Technical architecture](docs/architecture.md) — Deep dive into internals
 
+## Benchmarks
+
+Measured with `bench/bench.py` on Linux 6.12.94+ x86_64, 4 vCPU, rustc 1.99.1, release build, 5 runs, rich 13.9.4 (496 documents after image indexing). The Python column is the recorded 1.5.1 floor from an 8 vCPU host (`bench/baseline/summary.json`). Every Rust median is strictly below that floor.
+
+| Command | Rust median | Rust min–max | Peak RSS | Python 1.5.1 median |
+|---|---:|---:|---:|---:|
+| `cli --version (startup)` | 1.8 ms | 1.6–2.3 | 10.4 MB | 79.4 ms |
+| `cli --help` | 1.7 ms | 1.5–1.7 | 10.4 MB | 75.7 ms |
+| `cli index . (cold, empty store)` | 8926.5 ms | 8914.2–8941.9 | 78.0 MB | 10656.1 ms |
+| `cli index . (warm, nothing changed)` | 68.5 ms | 67.1–72.5 | 65.2 MB | 197.8 ms |
+| `cli detect (nothing changed)` | 61.7 ms | 61.6–62.1 | 65.2 MB | 167.9 ms |
+| `cli stats` | 57.8 ms | 57.5–58.0 | 65.2 MB | 162.5 ms |
+| `cli doctor` | 1.6 ms | 1.6–1.7 | 10.4 MB | 189.7 ms |
+| `cli map --json` | 91.4 ms | 91.2–91.8 | 65.3 MB | 163.3 ms |
+| `cli project-brief --json` | 57.3 ms | 57.1–57.8 | 65.2 MB | 165.5 ms |
+| `cli search hybrid --json` | 67.1 ms | 66.9–67.1 | 65.3 MB | 169.0 ms |
+| `cli search keyword --json` | 66.9 ms | 66.5–67.2 | 65.3 MB | 161.2 ms |
+| `cli search-text --json` | 57.9 ms | 57.8–58.0 | 65.1 MB | 141.9 ms |
+| `cli agent-grep --json` | 59.2 ms | 59.2–59.3 | 65.1 MB | 228.3 ms |
+| `cli query --json` | 68.0 ms | 67.7–68.2 | 65.1 MB | 193.5 ms |
+| `cli find-definition --json` | 57.2 ms | 56.8–59.3 | 65.1 MB | 141.4 ms |
+| `cli find-references --json` | 60.2 ms | 59.6–60.4 | 65.1 MB | 166.2 ms |
+| `cli impact-radius --json` | 57.5 ms | 57.2–58.1 | 65.2 MB | 179.6 ms |
+| `cli coupling --json` | 82.0 ms | 81.2–82.4 | 65.1 MB | 185.3 ms |
+| `cli enrichment-plan --json` | 57.9 ms | 57.9–58.5 | 65.3 MB | 137.7 ms |
+| `cli history --json` | 57.1 ms | 56.8–58.4 | 65.3 MB | 135.1 ms |
+
 ## Development
 
 ```bash

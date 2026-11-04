@@ -43,6 +43,8 @@ struct Parsed {
     top_k: usize,
     force: bool,
     scan_new: bool,
+    port: u16,
+    host: String,
 }
 
 impl Parsed {
@@ -75,6 +77,19 @@ impl Parsed {
                 );
             }
         };
+        if command == "serve" {
+            return match crate::http_serve::listen(engine, &self.host, self.port) {
+                Ok(()) => Response::success(
+                    "serve",
+                    Value::object(vec![("listening", Value::Bool(true))]),
+                ),
+                Err(message) => Response::failure(
+                    "serve",
+                    EXIT_ERROR,
+                    ErrorBody::new("command_failed", message, "pass --port"),
+                ),
+            };
+        }
         let result = self.execute(&mut engine);
         match result {
             Ok(value) => {
@@ -124,6 +139,7 @@ impl Parsed {
                 self.action.as_deref().unwrap_or("status"),
                 positional,
                 self.session.as_deref().unwrap_or("default"),
+                self.force,
             ),
             other => Err(format!("unknown command '{other}'")),
         }
@@ -156,6 +172,8 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         top_k: 10,
         force: false,
         scan_new: true,
+        port: 9876,
+        host: "127.0.0.1".to_string(),
     };
     let mut index = 0usize;
     let mut command_seen = false;
@@ -215,6 +233,12 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                         .parse()
                         .map_err(|_| "--top-k needs an integer".to_string())?;
                 }
+                "--port" => {
+                    parsed.port = take_value(args, &mut index)?
+                        .parse()
+                        .map_err(|_| "--port needs an integer".to_string())?;
+                }
+                "--host" => parsed.host = take_value(args, &mut index)?,
                 other => return Err(format!("unknown flag '{other}'")),
             }
             index += 1;
@@ -266,6 +290,7 @@ Commands:
   history             Journal of store mutations
   migrate             Copy a 1.5 SQLite store. The original is not modified
   init                Write .stele-context.toml
+  serve               GET /tools, GET /health, POST /call on --port (9876)
   serve-mcp           Speak MCP on stdin
 
 JSON is the default on commands. --human prints text.

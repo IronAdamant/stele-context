@@ -169,6 +169,40 @@ impl Engine {
         ])
     }
 
+    /// Storage block of Python `get_stats()["storage"]`, for `GET /health`.
+    pub fn storage_report(&self) -> Value {
+        let tokens: i64 = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .map(|chunk| chunk.tokens as i64)
+            .sum();
+        Value::object(vec![
+            (
+                "document_count",
+                Value::Int(self.store.state.documents.len() as i64),
+            ),
+            (
+                "chunk_count",
+                Value::Int(self.store.state.chunks.len() as i64),
+            ),
+            (
+                "symbol_count",
+                Value::Int(self.store.state.symbols.len() as i64),
+            ),
+            (
+                "annotation_count",
+                Value::Int(self.store.state.annotations.len() as i64),
+            ),
+            (
+                "session_count",
+                Value::Int(self.store.state.sessions.len() as i64),
+            ),
+            ("total_tokens", Value::Int(tokens)),
+        ])
+    }
+
     pub fn map(&self) -> Value {
         let mut files: Vec<Value> = self
             .store
@@ -271,10 +305,23 @@ impl Engine {
 
     fn reindex_file(&mut self, rel: &str, abs: &Path, meta: &fs::Metadata) -> Result<(), String> {
         let bytes = fs::read(abs).map_err(|err| format!("{rel}: {err}"))?;
-        let text = chunk::read_python_text(&bytes);
-        let sha = hex(&sha256(text.as_bytes()));
+        let media = crate::media::is_media(crate::chunk::extension_of(rel));
+        let sha = if media {
+            hex(&sha256(&bytes))
+        } else {
+            hex(&sha256(chunk::read_python_text(&bytes).as_bytes()))
+        };
+        let version = self
+            .store
+            .state
+            .documents
+            .iter()
+            .find(|doc| doc.path == rel)
+            .map(|doc| doc.doc_version)
+            .unwrap_or(0)
+            + 1;
         self.drop_path(rel);
-        let produced = chunk::chunk_document(rel, &text);
+        let produced = chunk::chunk_bytes(rel, &bytes);
         for piece in &produced {
             self.commit_piece(rel, piece);
         }
@@ -283,6 +330,7 @@ impl Engine {
             mtime_ns: mtime_ns(meta),
             size: meta.len(),
             sha256: sha,
+            doc_version: version,
         });
         Ok(())
     }
@@ -327,6 +375,8 @@ impl Engine {
     }
 
     fn rebuild_bm25(&mut self) {
+        let fingerprint = bm25_fingerprint(&self.store.state.chunks);
+        let path = self.storage.join("store").join("bm25.bin");
         let Engine {
             store,
             bm25,
@@ -335,16 +385,43 @@ impl Engine {
         } = self;
         *bm25 = Bm25::new();
         for chunk in &store.state.chunks {
+            // Python indexes BM25 only when chunk content is text. Image,
+            // audio, and video chunks store bytes there, so they stay out
+            // of the keyword index. PDF page text is a string and is indexed.
+            if matches!(chunk.modality.as_str(), "image" | "audio" | "video") {
+                continue;
+            }
             bm25.add(&chunk.id, &chunk.content);
         }
         *bm25_ready = true;
+        let _ = crate::search::save_bm25(bm25, &path, fingerprint);
     }
 
     fn ensure_bm25(&mut self) {
-        if !self.bm25_ready {
-            self.rebuild_bm25();
+        if self.bm25_ready {
+            return;
         }
+        let fingerprint = bm25_fingerprint(&self.store.state.chunks);
+        let path = self.storage.join("store").join("bm25.bin");
+        if let Some(index) = crate::search::load_bm25(&path, fingerprint) {
+            self.bm25 = index;
+            self.bm25_ready = true;
+            return;
+        }
+        self.rebuild_bm25();
     }
+}
+
+fn bm25_fingerprint(chunks: &[Chunk]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for chunk in chunks {
+        for byte in chunk.id.bytes().chain(chunk.sha256.bytes()) {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+    }
+    hash ^ chunks.len() as u64
 }
 
 fn collect(cwd: &Path, paths: &[String]) -> Result<Vec<(String, PathBuf)>, String> {

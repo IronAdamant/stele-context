@@ -243,8 +243,13 @@ fn consume_header(source: &str, tokens: &[Token], start: usize) -> (usize, usize
     let mut index = start;
     let mut paren = 0i32;
     let mut past_header = false;
+    let mut seen_indent = false;
     let mut depth = 0i32;
     let mut end_byte = tokens[start].end as usize;
+    // A blank line after the suite is not part of the AST end line. Counting
+    // it inside the def merges it into the trailing whitespace token, so the
+    // running total misses the one token Python charges for the gap.
+    let mut line_has_code = true;
     while index < tokens.len() {
         let token = &tokens[index];
         if token.kind == kind::OP {
@@ -256,10 +261,11 @@ fn consume_header(source: &str, tokens: &[Token], start: usize) -> (usize, usize
         }
         if token.kind == kind::INDENT {
             depth += 1;
+            seen_indent = true;
         }
         if token.kind == kind::DEDENT {
             depth -= 1;
-            if past_header && depth <= 0 {
+            if past_header && seen_indent && depth <= 0 {
                 // Swallow the dedent. The outer scan's depth does not include
                 // this suite, so leaving the token behind would drop depth
                 // below zero and hide every later top-level definition.
@@ -270,18 +276,27 @@ fn consume_header(source: &str, tokens: &[Token], start: usize) -> (usize, usize
             index += 1;
             continue;
         }
-        if token.end as usize > end_byte && !matches!(token.kind, kind::WHITESPACE | kind::COMMENT)
+        if !matches!(token.kind, kind::WHITESPACE | kind::COMMENT | kind::NEWLINE) {
+            line_has_code = true;
+        }
+        if token.end as usize > end_byte
+            && !matches!(token.kind, kind::WHITESPACE | kind::COMMENT | kind::NEWLINE)
         {
             end_byte = token.end as usize;
         }
         if token.kind == kind::NEWLINE && paren == 0 {
-            end_byte = token.end as usize;
+            if line_has_code {
+                end_byte = token.end as usize;
+            }
+            line_has_code = false;
             if !past_header {
                 past_header = true;
-                if !follows_indent(tokens, index + 1) {
+                // A comment or blank line can sit between the header and the
+                // INDENT. That is still the suite, matching CPython end_lineno.
+                if !suite_follows(tokens, index + 1) {
                     return (end_byte, index + 1);
                 }
-            } else if depth == 0 {
+            } else if seen_indent && depth == 0 {
                 return (end_byte, index + 1);
             }
         }
@@ -290,11 +305,15 @@ fn consume_header(source: &str, tokens: &[Token], start: usize) -> (usize, usize
     (end_byte, index)
 }
 
-fn follows_indent(tokens: &[Token], mut index: usize) -> bool {
-    while index < tokens.len() && matches!(tokens[index].kind, kind::WHITESPACE | kind::COMMENT) {
-        index += 1;
+fn suite_follows(tokens: &[Token], mut index: usize) -> bool {
+    while index < tokens.len() {
+        match tokens[index].kind {
+            kind::WHITESPACE | kind::COMMENT | kind::NEWLINE => index += 1,
+            kind::INDENT => return true,
+            _ => return false,
+        }
     }
-    index < tokens.len() && tokens[index].kind == kind::INDENT
+    false
 }
 
 fn brackets_balanced(tokens: &[Token], source: &str) -> bool {

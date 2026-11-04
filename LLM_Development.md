@@ -4,6 +4,12 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-04 - Rust 2.0 parity with Python 1.5.2 on rich
+
+- Python extractor and chunker now match rich 13.9.4 with Pillow installed: 496 documents, 1118 chunks, 32687 symbols. Text and code chunk boundaries match, including Devanagari marks and `JSONHighlighter` splits. Keyword and hybrid top-10 overlap is 10/10 on the 25 audit queries.
+- Std-only image, audio, video, and PDF indexing (Flate and literal/hex text). `serve` speaks GET /health, GET /tools, POST /call. Document locks share a JSON coordination file under the git common dir and log force-steals.
+- BM25 postings are cached in `store/bm25.bin`. The 5-run floor check on this 4 vCPU host passed; keyword median 66.9 ms versus the Python 1.5.1 floor of 161.2 ms.
+
 ## 2026-11-03 - Rust 2.0.0 phases 3 through 9
 
 - Text and code chunkers match the 1.5.2 fixture goldens, including rebuilt paragraph ends and f32 signatures.

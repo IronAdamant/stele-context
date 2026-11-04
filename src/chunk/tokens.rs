@@ -34,8 +34,8 @@ pub fn estimate_tokens(text: &str) -> usize {
         let b_chars: Vec<char> = b.chars().collect();
         if a_chars.len() == 1
             && b_chars.len() == 1
-            && !a_chars[0].is_alphanumeric()
-            && !b_chars[0].is_alphanumeric()
+            && !python_alnum(a_chars[0])
+            && !python_alnum(b_chars[0])
             && !a_chars[0].is_whitespace()
             && !b_chars[0].is_whitespace()
         {
@@ -83,18 +83,27 @@ fn match_word(chars: &[char], start: usize) -> Option<usize> {
         return Some(end);
     }
     if ch.is_ascii_uppercase() {
-        if start + 1 < chars.len() && chars[start + 1].is_ascii_lowercase() {
+        // `[A-Z]?[a-z]+` wins when the second character is lowercase.
+        if chars
+            .get(start + 1)
+            .is_some_and(|next| next.is_ascii_lowercase())
+        {
             let mut end = start + 2;
             while end < chars.len() && chars[end].is_ascii_lowercase() {
                 end += 1;
             }
             return Some(end);
         }
+        // `[A-Z]+(?=[A-Z][a-z]|\b)`. Leave the last capital when it starts
+        // a Capitalized word, so JSONHighlighter is JSON + Highlighter.
         let mut end = start + 1;
         while end < chars.len() && chars[end].is_ascii_uppercase() {
             end += 1;
         }
-        if word_boundary_ahead(chars, end) {
+        if end < chars.len() && chars[end].is_ascii_lowercase() && end - start > 1 {
+            return Some(end - 1);
+        }
+        if end == chars.len() || !is_word(chars[end]) {
             return Some(end);
         }
         return None;
@@ -102,19 +111,26 @@ fn match_word(chars: &[char], start: usize) -> Option<usize> {
     None
 }
 
-fn word_boundary_ahead(chars: &[char], index: usize) -> bool {
-    if index >= chars.len() {
-        return true;
-    }
-    if index + 1 < chars.len()
-        && chars[index].is_ascii_uppercase()
-        && chars[index + 1].is_ascii_lowercase()
-    {
-        return true;
-    }
-    !is_word(chars[index])
+fn is_word(ch: char) -> bool {
+    python_alnum(ch) || ch == '_'
 }
 
-fn is_word(ch: char) -> bool {
-    ch.is_alphanumeric() || ch == '_'
+/// Python `str.isalnum`: categories L and N. Not Rust's Alphabetic property.
+fn python_alnum(ch: char) -> bool {
+    super::python_alnum::is_python_word(ch) && ch != '_'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::estimate_tokens;
+
+    #[test]
+    fn devanagari_marks_and_acronyms_match_python() {
+        assert_eq!(estimate_tokens("किताब"), 1);
+        assert_eq!(estimate_tokens("नमस्ते दुनिया"), 3);
+        assert_eq!(estimate_tokens("JSONHighlighter"), 2);
+        assert_eq!(estimate_tokens("hello world"), 2);
+        assert_eq!(estimate_tokens("Aक"), 1);
+        assert_eq!(estimate_tokens("नहीं"), 1);
+    }
 }

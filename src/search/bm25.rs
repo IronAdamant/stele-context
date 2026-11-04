@@ -5,13 +5,13 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub struct Bm25 {
-    k1: f64,
-    b: f64,
-    doc_freqs: HashMap<String, u32>,
-    doc_lengths: HashMap<String, usize>,
-    term_freqs: HashMap<String, HashMap<String, u32>>,
-    avg_dl: f64,
-    stem_cache: HashMap<String, String>,
+    pub(super) k1: f64,
+    pub(super) b: f64,
+    pub(super) doc_freqs: HashMap<String, u32>,
+    pub(super) doc_lengths: HashMap<String, usize>,
+    pub(super) term_freqs: HashMap<String, HashMap<String, u32>>,
+    pub(super) avg_dl: f64,
+    pub(super) stem_cache: HashMap<String, String>,
 }
 
 impl Bm25 {
@@ -173,14 +173,17 @@ fn ascii_words(text: &str) -> Vec<String> {
     let mut raw = Vec::new();
     let mut index = 0usize;
     while index < chars.len() {
-        let prev = index > 0 && is_ascii_word(chars[index - 1]);
+        // Python `\b` uses Unicode `\w`, so an ASCII word glued to a
+        // Devanagari letter is not a token. The ASCII test stays in this
+        // loop; the mark table is only consulted for non-ASCII neighbours.
+        let prev = index > 0 && boundary_word(chars[index - 1]);
         if !prev && is_ascii_start(chars[index]) {
             let start = index;
             index += 1;
             while index < chars.len() && is_ascii_word(chars[index]) {
                 index += 1;
             }
-            let next = index < chars.len() && is_ascii_word(chars[index]);
+            let next = index < chars.len() && boundary_word(chars[index]);
             if !next {
                 raw.push(chars[start..index].iter().collect::<String>());
             }
@@ -189,6 +192,14 @@ fn ascii_words(text: &str) -> Vec<String> {
         }
     }
     raw
+}
+
+#[inline]
+fn boundary_word(ch: char) -> bool {
+    if ch.is_ascii() {
+        return ch.is_ascii_alphanumeric() || ch == '_';
+    }
+    crate::chunk::is_python_word(ch)
 }
 
 fn is_ascii_word(ch: char) -> bool {

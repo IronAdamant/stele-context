@@ -102,6 +102,7 @@ fn apply(store: &mut Store, value: &Value) -> Result<(), String> {
                     mtime_ns: 0,
                     size: num(row, "file_size") as u64,
                     sha256: text(row, "content_hash").unwrap_or_default(),
+                    doc_version: num(row, "doc_version") as u64,
                 });
             }
         }

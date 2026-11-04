@@ -227,7 +227,11 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
     tool_text(&text)
 }
 
-fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, String> {
+pub(crate) fn lite_tools() -> &'static [&'static str] {
+    LITE
+}
+
+pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, String> {
     let path = arg(args, "path")
         .or_else(|| arg(args, "document_path"))
         .unwrap_or_default();
@@ -278,6 +282,7 @@ fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, Stri
             &arg(args, "action").unwrap_or_else(|| "status".to_string()),
             &path,
             &arg(args, "agent_id").unwrap_or_else(|| "default".to_string()),
+            flag(args, "force"),
         ),
         "get_search_history" => Ok(engine.search_history(session.as_deref().unwrap_or("default"))),
         "get_session_read_files" => Ok(engine.read_files(session.as_deref().unwrap_or("default"))),
@@ -311,10 +316,21 @@ fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, Stri
                     "code",
                     Value::string("py js ts java go rs c cpp rb php swift cs html css"),
                 ),
-                ("image", Value::string("metadata only")),
-                ("audio", Value::string("metadata only")),
-                ("video", Value::string("metadata only")),
-                ("pdf", Value::string("metadata and uncompressed streams")),
+                (
+                    "image",
+                    Value::string("png jpg jpeg gif webp bmp tiff ico header metadata"),
+                ),
+                (
+                    "audio",
+                    Value::string(
+                        "wav duration and 30s segments; other types are one metadata line",
+                    ),
+                ),
+                ("video", Value::string("container brand and byte length")),
+                (
+                    "pdf",
+                    Value::string("uncompressed and FlateDecode page text"),
+                ),
             ]),
         )])),
         "llm_embed" => Ok(Value::object(vec![
@@ -402,6 +418,14 @@ fn string_field(value: &Value, key: &str) -> String {
     match field(value, key) {
         Some(Value::String(text)) => text.clone(),
         _ => String::new(),
+    }
+}
+
+fn flag(value: &Value, key: &str) -> bool {
+    match field(value, key) {
+        Some(Value::Bool(bit)) => *bit,
+        Some(Value::String(text)) => text == "true" || text == "1",
+        _ => false,
     }
 }
 

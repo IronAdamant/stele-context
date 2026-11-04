@@ -1,6 +1,6 @@
 {
-  "chunk_count": 63,
-  "file_count": 63,
+  "chunk_count": 66,
+  "file_count": 64,
   "files": [
     {
       "calls": [],
@@ -2298,6 +2298,753 @@
     {
       "calls": [
         {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_000",
+          "kind": "function",
+          "line": 15,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_001",
+          "kind": "function",
+          "line": 19,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_002",
+          "kind": "function",
+          "line": 23,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_003",
+          "kind": "function",
+          "line": 27,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_004",
+          "kind": "function",
+          "line": 31,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_005",
+          "kind": "function",
+          "line": 35,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_006",
+          "kind": "function",
+          "line": 39,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_007",
+          "kind": "function",
+          "line": 43,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_008",
+          "kind": "function",
+          "line": 47,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "870fd9727bf30e3865677d60fb4b162f",
+          "chunk_index": 2,
+          "container": "test_json",
+          "kind": "function",
+          "line": 3,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        }
+      ],
+      "chunks": [
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "content_sha256": "510ba2a67cf6714b810d66a0ce496abe2f18d827e394bc362faddcc90228d1e6",
+          "end_pos": 1158,
+          "index": 0,
+          "language": "python",
+          "signature_f32_le": "318fe83c2444ac3c2a1b463c24442c3c24442c3c24442c3c24442c3c24442c3c24442c3c23a7233c23a7233c23a7233c23a7233c23a7233c23a7233c23a7233c2cb8ce3b287ebd3b287ebd3b287ebd3b287ebd3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b2444ac3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b210a9b3b481eca3d1e086a3d8fc1543d8fc1543d017b3f3d017b3f3d017b3f3d73342a3c73342a3c73342a3c7334aa3b7334aa3b7334aa3b7334aa3b7334aa3b7334aa3b9521413d9521413d9521413d9521413d9521413d9521413d9521413d13acab3b13acab3b13acab3b13acab3b13acab3b13acab3b13acab3b13acab3b13acab3b443e923e1763153f1f68043e1f68043ecbd9533c24442c3c00000000000000000000000000000000000000008b3dd23df1931b3e2aa64b3dd2f3f43e2d55573d72da723e8da7cc3ea9ccc13de27fa13d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "start_pos": 0,
+          "token_count": 224
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "content_sha256": "2dc21e27622b96d8956371bae1e4bba8bddbc447f25697e3cd04c9d29cb303d3",
+          "end_pos": 2247,
+          "index": 1,
+          "language": "python",
+          "signature_f32_le": "7811ac3c7811ac3c78112c3c78112c3c78112c3c78112c3c78112c3c78112c3c78112c3c78112c3c78112c3c78112c3c78112c3c78112c3c78112c3c78112c3c7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b7811ac3b2703e13d2703613d2703613d2703613d2703613d2703613d2703613d34a5a33b34a5a33b34a5a33b34a5a33b34a5a33b34a5a33b34a5a33b34a5a33b34a5a33b6832633d6832633d6832633d6832633d6832633d6832633dea8a4e3def3ba53bef3ba53bef3ba53bef3ba53bef3ba53bef3ba53bef3ba53bef3ba53bef3ba53bcf546f3e5c2bff3ed201023ed201023e00000000b8e3333c00000000f547fa393af6043f00000000000000007811ac3d3af6843d7cebf23c8bebc83ed615573d7a3deb3d621ec43e5adf883d6150a13d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "start_pos": 1158,
+          "token_count": 212
+        },
+        {
+          "chunk_id": "870fd9727bf30e3865677d60fb4b162f",
+          "content_sha256": "6c54225f5314fd13e95a59b19a69e4c7480452b72a2d035d62720edee896721f",
+          "end_pos": 2385,
+          "index": 2,
+          "language": "python",
+          "signature_f32_le": "924f5e3c924f5e3caebb263caebb263c924fde3b924fde3b924fde3b924fde3b924fde3b924fde3b924fde3b924fde3b924fde3b924fde3b924fde3b924fde3b924fde3b924fde3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b924f5e3b0bce7d3d0bce7d3d0bcefd3c0bcefd3c0bcefd3c0bcefd3c0bcefd3c0bcefd3c0bcefd3c0bcefd3c0bcefd3c0bcefd3c0bcefd3c00000000000000000000000086f7073d86f7073d86f7073d86f7073d86f7073d86f7073d86f7073d86f7073d86f7073d86f7073d86f7073d86f7073d86f7073d86f7073d0000000000000000a46c643cec77ea3ec7a01e3ec7a01e3e00000000924fde3b00000000924f5e3b2bf1ed3e0000000000000000c7a09e3d2bf16d3d0a81d33c2bf1ed3ebcf10a3d0533d03e25b0973e996ad03d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "start_pos": 2247,
+          "token_count": 29
+        }
+      ],
+      "content_sha256": "7160df97b52d79fff5e5c50b4ad08f01e3a02841484340d9a87934b9558fda3c",
+      "extension": "py",
+      "imports": [
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "module",
+          "line": 3,
+          "name": "typing",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "import",
+          "line": 3,
+          "name": "List",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "import",
+          "line": 3,
+          "name": "Optional",
+          "role": "reference"
+        }
+      ],
+      "modality": "code",
+      "path": "python/large_split.py",
+      "scopes": [
+        {
+          "container": "",
+          "definitions": [
+            {
+              "kind": "class",
+              "line": 8,
+              "name": "JSONHighlighter"
+            },
+            {
+              "kind": "function",
+              "line": 13,
+              "name": "pad_000"
+            },
+            {
+              "kind": "function",
+              "line": 17,
+              "name": "pad_001"
+            },
+            {
+              "kind": "function",
+              "line": 21,
+              "name": "pad_002"
+            },
+            {
+              "kind": "function",
+              "line": 25,
+              "name": "pad_003"
+            },
+            {
+              "kind": "function",
+              "line": 29,
+              "name": "pad_004"
+            },
+            {
+              "kind": "function",
+              "line": 33,
+              "name": "pad_005"
+            },
+            {
+              "kind": "function",
+              "line": 37,
+              "name": "pad_006"
+            },
+            {
+              "kind": "function",
+              "line": 41,
+              "name": "pad_007"
+            },
+            {
+              "kind": "function",
+              "line": 45,
+              "name": "pad_008"
+            },
+            {
+              "kind": "function",
+              "line": 1,
+              "name": "pad_009"
+            },
+            {
+              "kind": "function",
+              "line": 5,
+              "name": "pad_010"
+            },
+            {
+              "kind": "function",
+              "line": 9,
+              "name": "pad_011"
+            },
+            {
+              "kind": "function",
+              "line": 13,
+              "name": "pad_012"
+            },
+            {
+              "kind": "function",
+              "line": 17,
+              "name": "pad_013"
+            },
+            {
+              "kind": "function",
+              "line": 21,
+              "name": "pad_014"
+            },
+            {
+              "kind": "function",
+              "line": 25,
+              "name": "pad_015"
+            },
+            {
+              "kind": "function",
+              "line": 29,
+              "name": "pad_016"
+            },
+            {
+              "kind": "function",
+              "line": 33,
+              "name": "pad_017"
+            },
+            {
+              "kind": "function",
+              "line": 37,
+              "name": "pad_018"
+            },
+            {
+              "kind": "function",
+              "line": 41,
+              "name": "pad_019"
+            },
+            {
+              "kind": "function",
+              "line": 1,
+              "name": "test_json"
+            }
+          ]
+        },
+        {
+          "container": "JSONHighlighter",
+          "definitions": [
+            {
+              "kind": "function",
+              "line": 9,
+              "name": "highlight"
+            }
+          ]
+        }
+      ],
+      "symbols": [
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "module",
+          "line": 3,
+          "name": "typing",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "import",
+          "line": 3,
+          "name": "List",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "import",
+          "line": 3,
+          "name": "Optional",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "class",
+          "line": 8,
+          "name": "JSONHighlighter",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "JSONHighlighter",
+          "kind": "function",
+          "line": 9,
+          "name": "highlight",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "JSONHighlighter.highlight",
+          "kind": "name",
+          "line": 9,
+          "name": "str",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "JSONHighlighter.highlight",
+          "kind": "name",
+          "line": 11,
+          "name": "text",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "JSONHighlighter.highlight",
+          "kind": "name",
+          "line": 9,
+          "name": "str",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "function",
+          "line": 13,
+          "name": "pad_000",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_000",
+          "kind": "function",
+          "line": 15,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_000",
+          "kind": "name",
+          "line": 13,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "function",
+          "line": 17,
+          "name": "pad_001",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_001",
+          "kind": "function",
+          "line": 19,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_001",
+          "kind": "name",
+          "line": 17,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "function",
+          "line": 21,
+          "name": "pad_002",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_002",
+          "kind": "function",
+          "line": 23,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_002",
+          "kind": "name",
+          "line": 21,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "function",
+          "line": 25,
+          "name": "pad_003",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_003",
+          "kind": "function",
+          "line": 27,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_003",
+          "kind": "name",
+          "line": 25,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "function",
+          "line": 29,
+          "name": "pad_004",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_004",
+          "kind": "function",
+          "line": 31,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_004",
+          "kind": "name",
+          "line": 29,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "function",
+          "line": 33,
+          "name": "pad_005",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_005",
+          "kind": "function",
+          "line": 35,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_005",
+          "kind": "name",
+          "line": 33,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "function",
+          "line": 37,
+          "name": "pad_006",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_006",
+          "kind": "function",
+          "line": 39,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_006",
+          "kind": "name",
+          "line": 37,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "function",
+          "line": 41,
+          "name": "pad_007",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_007",
+          "kind": "function",
+          "line": 43,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_007",
+          "kind": "name",
+          "line": 41,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": null,
+          "kind": "function",
+          "line": 45,
+          "name": "pad_008",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_008",
+          "kind": "function",
+          "line": 47,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "ae21537a8c223186f58b3c29990f8b78",
+          "chunk_index": 0,
+          "container": "pad_008",
+          "kind": "name",
+          "line": 45,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 1,
+          "name": "pad_009",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 5,
+          "name": "pad_010",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 9,
+          "name": "pad_011",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 13,
+          "name": "pad_012",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 17,
+          "name": "pad_013",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 21,
+          "name": "pad_014",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 25,
+          "name": "pad_015",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 29,
+          "name": "pad_016",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 33,
+          "name": "pad_017",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 37,
+          "name": "pad_018",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "5bbfd84cdaee06eea3c987c1f435359c",
+          "chunk_index": 1,
+          "container": null,
+          "kind": "function",
+          "line": 41,
+          "name": "pad_019",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "870fd9727bf30e3865677d60fb4b162f",
+          "chunk_index": 2,
+          "container": null,
+          "kind": "function",
+          "line": 1,
+          "name": "test_json",
+          "role": "definition"
+        },
+        {
+          "chunk_id": "870fd9727bf30e3865677d60fb4b162f",
+          "chunk_index": 2,
+          "container": "test_json",
+          "kind": "name",
+          "line": 1,
+          "name": "str",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "870fd9727bf30e3865677d60fb4b162f",
+          "chunk_index": 2,
+          "container": "test_json",
+          "kind": "function",
+          "line": 3,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "870fd9727bf30e3865677d60fb4b162f",
+          "chunk_index": 2,
+          "container": "test_json",
+          "kind": "name",
+          "line": 1,
+          "name": "Optional",
+          "role": "reference"
+        },
+        {
+          "chunk_id": "870fd9727bf30e3865677d60fb4b162f",
+          "chunk_index": 2,
+          "container": "test_json",
+          "kind": "name",
+          "line": 1,
+          "name": "JSONHighlighter",
+          "role": "reference"
+        }
+      ]
+    },
+    {
+      "calls": [
+        {
           "chunk_id": "74d9e8f6c11fe45d6a5e3c2b07542cff",
           "chunk_index": 0,
           "container": "classify",
@@ -3895,5 +4642,5 @@
   "reference": "tree-sitter-off",
   "root_name": "fixtures",
   "schema": "stele-parity-golden/1",
-  "symbol_count": 157
+  "symbol_count": 208
 }

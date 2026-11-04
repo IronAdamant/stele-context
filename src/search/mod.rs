@@ -5,10 +5,12 @@
 //! already-exact scores to the candidate width.
 
 mod bm25;
+mod bm25_cache;
 mod stem;
 
 use crate::chunk::signature;
 pub use bm25::Bm25;
+pub(crate) use bm25_cache::{load as load_bm25, save as save_bm25};
 
 const ALPHA: f64 = 0.42;
 const EXACT_LIMIT: usize = 4096;

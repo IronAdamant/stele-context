@@ -4,7 +4,7 @@ use super::{now_secs, Engine};
 use crate::hash::{hex, sha256};
 use crate::json::Value;
 use crate::search::{self, VectorDoc};
-use crate::store::{Annotation, Dynamic, Lock, Session};
+use crate::store::{Annotation, Dynamic, Session};
 
 impl Engine {
     pub fn search(&mut self, query: &str, mode: &str, top_k: usize) -> Value {
@@ -308,62 +308,22 @@ impl Engine {
         action: &str,
         path: &str,
         agent: &str,
+        force: bool,
     ) -> Result<Value, String> {
         let now = now_secs();
-        self.store.state.locks.retain(|lock| lock.until > now);
-        match action {
-            "acquire" | "refresh" => {
-                if let Some(existing) = self.store.state.locks.iter().find(|lock| lock.path == path)
-                {
-                    if existing.agent != agent {
-                        return Err(format!("locked by {}", existing.agent));
-                    }
-                }
-                self.store.state.locks.retain(|lock| lock.path != path);
-                self.store.state.locks.push(Lock {
-                    path: path.to_string(),
-                    agent: agent.to_string(),
-                    until: now + 300,
-                });
-                self.store.save("lock", &Value::string(path))?;
-                Ok(Value::object(vec![
-                    ("locked", Value::Bool(true)),
-                    ("locked_by", Value::string(agent)),
-                ]))
-            }
-            "release" | "release_all" => {
-                self.store.state.locks.retain(|lock| {
-                    if action == "release_all" {
-                        lock.agent != agent
-                    } else {
-                        !(lock.path == path && lock.agent == agent)
-                    }
-                });
-                self.store.save("unlock", &Value::string(path))?;
-                Ok(Value::object(vec![("released", Value::Bool(true))]))
-            }
-            "status" => {
-                let lock = self.store.state.locks.iter().find(|lock| lock.path == path);
-                Ok(Value::object(vec![
-                    ("locked", Value::Bool(lock.is_some())),
-                    (
-                        "locked_by",
-                        lock.map(|item| Value::string(&item.agent))
-                            .unwrap_or(Value::Null),
-                    ),
-                ]))
-            }
-            "conflicts" => Ok(Value::object(vec![("conflicts", Value::Array(Vec::new()))])),
-            "reap" => {
-                let before = self.store.state.locks.len();
-                self.store.state.locks.retain(|lock| lock.until > now);
-                Ok(Value::object(vec![(
-                    "reaped",
-                    Value::Int((before - self.store.state.locks.len()) as i64),
-                )]))
-            }
-            _ => Err(format!("unknown document_lock action '{action}'")),
+        let outcome = crate::locks::apply(
+            &mut self.store.state,
+            &self.cwd,
+            action,
+            path,
+            agent,
+            now,
+            force,
+        );
+        if !matches!(action, "status" | "conflicts") {
+            self.store.save("lock", &Value::string(path))?;
         }
+        outcome
     }
 
     pub fn save_kv(&mut self, session: &str, key: &str, value: &str) -> Result<Value, String> {

@@ -32,8 +32,15 @@ pub const CODE_EXTENSIONS: &[&str] = &[
 
 pub const TEXT_EXTENSIONS: &[&str] = &["txt", "md", "markdown", "rst", "adoc", "log", "csv", "tsv"];
 
+pub const MEDIA_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif", "ico", "mp3", "wav", "ogg", "flac",
+    "m4a", "aac", "wma", "mp4", "mov", "mkv", "webm", "avi", "pdf",
+];
+
 pub fn is_supported_extension(ext: &str) -> bool {
-    CODE_EXTENSIONS.contains(&ext) || TEXT_EXTENSIONS.contains(&ext)
+    CODE_EXTENSIONS.contains(&ext)
+        || TEXT_EXTENSIONS.contains(&ext)
+        || MEDIA_EXTENSIONS.contains(&ext)
 }
 
 pub fn expand(paths: &[PathBuf], respect_gitignore: bool) -> io::Result<Vec<String>> {
