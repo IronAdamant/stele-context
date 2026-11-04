@@ -1,11 +1,20 @@
 name: Publish to PyPI
 
+# This file stays on the python-legacy branch, which is the Python 1.x tree.
+# A future 1.x publish is a pushed v1.* tag whose commit is on that branch.
+# The tag push loads this workflow from the tagged commit, so it still runs
+# after the file is gone from the default branch. Do not add a branches
+# filter: a branches filter skips tag pushes.
+#
+# The release event is kept for a GitHub Release of a v1 tag. Pushing the
+# tag is the trigger that does not depend on the default branch.
+
 on:
-  release:
-    types: [published]
   push:
     tags:
       - 'v1.*'        # 2.x tags publish Rust binaries only. They do not match this workflow.
+  release:
+    types: [published]
   workflow_dispatch:
 
 # PyPI Trusted Publishing: short-lived OIDC token from GitHub — no PYPI_API_TOKEN secret.
@@ -45,6 +54,11 @@ jobs:
       with:
         fetch-depth: 0  # Good for release tagging / changelog tooling in future
 
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
     - name: Verify version matches tag (important for automated releases)
       run: |
         TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -69,12 +83,7 @@ jobs:
           echo "::error::Tag version ($TAG_VERSION) does not match pyproject.toml ($PYPROJECT_VERSION)"
           exit 1
         fi
-        echo "✓ Version verification passed"
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
+        echo "Version verification passed"
 
     - name: Install build dependencies
       run: |
