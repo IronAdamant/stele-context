@@ -648,7 +648,13 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             &arg(args, "target_type").unwrap_or_else(|| "document".to_string()),
         ),
         "get_annotations" => {
-            let wrapped = engine.annotations("get", &arg(args, "target").unwrap_or(path), "")?;
+            let wrapped = engine.annotations_tagged(
+                "get",
+                &arg(args, "target").unwrap_or(path),
+                "",
+                &string_list(args, "tags"),
+                &arg(args, "target_type").unwrap_or_default(),
+            )?;
             Ok(match field(&wrapped, "annotations") {
                 Some(Value::Array(rows)) => Value::Array(rows.clone()),
                 _ => wrapped,

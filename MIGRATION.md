@@ -207,7 +207,7 @@ Calls that send only the 1.5 property names therefore miss:
 | `detect_changes` | same | `document_paths`, `limit`, and `scan_new` are read. New files are reported and not indexed. Changed files are reindexed. |
 | `impact_radius` | same on the parity fixture | The symbol call matches unmodified 1.5.2. |
 | `coupling` | same on the parity fixture | The `document_path` call matches unmodified 1.5.2. |
-| `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `get` filters on `target`, `target_type`, and `tags`. `delete` matches id. Migrated annotation ids keep the 1.5 values, and `created_at` keeps the fractional seconds. |
+| `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `get` filters on `target`, `target_type`, and `tags`. A document path is normalized only when the type is `document`, which is when 1.5.2 normalizes it. `delete` matches id. Migrated annotation ids keep the 1.5 values, and `created_at` keeps the fractional seconds. |
 | `document_lock` | intentional change | Actions `acquire`, `release`, `refresh`, `status`, `release_all`, `reap`, `conflicts`. `ttl` and `limit` are ignored (TTL 300). `force` is read. Storage is the JSON coordination file, not `coordination.db`. |
 | `bulk_store_summaries` | same | `summaries` is a chunk id to text object. One `chunk_id` plus `summary` still works. |
 | `register_dynamic_symbols` | same | `symbols` is a list, stored under `runtime:<agent_id>:<name>`. |
