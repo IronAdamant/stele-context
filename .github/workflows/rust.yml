@@ -1,4 +1,4 @@
-name: Rust rewrite
+name: Rust
 
 on:
   push:
@@ -6,36 +6,6 @@ on:
   pull_request:
 
 jobs:
-  parity:
-    name: parity (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install stele-context 1.5.3 and pytest
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-          pip install pytest
-
-      - name: Verify fixture goldens and CLI smoke
-        run: python -m parity verify --skip-corpora
-
-      - name: Verify rich 13.9.4 and flask 3.1.0 captures
-        run: python -m parity verify
-
-      - name: Gate and harness tests
-        run: python -m pytest tests/test_bench_gate.py tests/test_parity_harness.py -q --tb=short
-
   rust:
     name: rust (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
@@ -69,46 +39,20 @@ jobs:
           targets: ${{ matrix.target }}
           components: rustfmt
 
-      - name: Set up Python
-        if: matrix.test
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Format
         if: matrix.test && matrix.os == 'ubuntu-latest'
         run: cargo fmt --check
 
       - name: Zero dependencies
         if: matrix.test && matrix.os == 'ubuntu-latest'
-        run: python scripts/check_zero_deps.py
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo test --release --target ${{ matrix.target }} --lib cargo_manifest_and_lock_are_std_only -- --exact
 
       - name: Fetch parity corpora
         if: matrix.test
         shell: bash
-        run: |
-          python - << 'PY'
-          import hashlib, json, tarfile, urllib.request
-          from pathlib import Path
-          meta = json.loads(Path("parity/goldens/corpora.json").read_text())
-          cache = Path("parity/.cache")
-          cache.mkdir(parents=True, exist_ok=True)
-          for row in meta["corpora"]:
-              dest = cache / f"{row['id']}.tar.gz"
-              if not dest.is_file():
-                  req = urllib.request.Request(row["url"], headers={"User-Agent": "stele-context-parity/2.0.0"})
-                  dest.write_bytes(urllib.request.urlopen(req, timeout=120).read())
-              blob = dest.read_bytes()
-              digest = hashlib.sha256(blob).hexdigest()
-              if digest != row["tarball_sha256"]:
-                  raise SystemExit(f"{row['id']} sha256 {digest}")
-              root = cache / row["id"]
-              if not root.exists() or not any(root.iterdir()):
-                  root.mkdir(parents=True, exist_ok=True)
-                  with tarfile.open(dest, "r:gz") as archive:
-                      archive.extractall(root, filter="data")
-          print("corpora ready")
-          PY
+        run: bash scripts/fetch_corpora.sh
 
       - name: Test
         if: matrix.test
@@ -134,6 +78,9 @@ jobs:
         run: |
           ext=""
           if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
-          python -c "from bench.bench import main; raise SystemExit(main())" \
+          "target/${{ matrix.target }}/release/stele-bench${ext}" floor \
             --binary "target/${{ matrix.target }}/release/stele-context${ext}" \
             --group b1 --runs 10 --check-floor
+
+  # The cross targets above are cargo check. These three run the tests.
+  # Linux, macOS, and Windows each have one native test job.

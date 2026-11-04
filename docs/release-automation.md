@@ -1,4 +1,10 @@
-# Stele Context — Release Automation Guide (Grok Build Ready)
+# Stele Context release automation
+
+Current releases are Rust. Push a `v2.*` tag. `.github/workflows/release-rust.yml` builds the binaries and opens the GitHub Release. It does not publish to PyPI.
+
+The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x). `publish.yml` and the 1.x release helper live on that branch. Do not run them from `main`.
+
+The rest of this file is the 1.x notes kept for that branch's history.
 
 ## Release Policy
 

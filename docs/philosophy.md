@@ -2,14 +2,16 @@
 
 Stele Context is built for **software agents** that work inside a codebase over **many chat sessions**. The goal is simple to state and hard to do well: **find the right slices of the project when you need them**, without re-reading whole trees every time, and **keep that knowledge retrievable** after the current session ends.
 
+The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
+
 ## Why zero required dependencies
 
-The core library ships with **no non-stdlib dependencies** on purpose:
+The Rust crate ships with **no dependencies** on purpose:
 
 - **Supply chain and deployment**: Agents run in sandboxes, CI, and air-gapped environments. Fewer packages means fewer surprises.
 - **No bundled embedding model**: Downloading and versioning model weights is a different product. Stele stays a **local index and retrieval layer**, not a model host.
 
-Optional extras (`performance`, `tree-sitter`, multimodal chunkers, etc.) stay **offline** and **explicit**.
+Media indexing (images, audio, video, PDF) uses the standard library. There is no optional parser crate.
 
 ## Two tiers of “meaning”
 
@@ -35,7 +37,7 @@ Together, this supports: **Session A** indexes and annotates; **Session B** sear
 
 ## What Stele is not
 
-- It is **not** a hosted vector DB or a framework that pulls in half the PyPI ecosystem.
+- It is **not** a hosted vector DB or a framework that pulls in a crate graph.
 - **Generic “semantic search” over code** without Tier 2 can miss nuance; **symbol tools** (`find_references`, `find_definition`, `agent_grep`, `search_text`) remain the precision layer for renames and verification.
 - It is **not** a full type-aware or polymorphic call-graph engine. The symbol graph is a **static name graph** (with optional agent-registered dynamic symbols). Synthetic call-site edges for hooks-only registration, type-context lattices, and perfect nested-scope multi-def resolution are **out of scope** unless a future major design revisits them (see [STABILITY.md](../STABILITY.md) design ceilings).
 
@@ -47,7 +49,7 @@ This table is meant to stay **stable**: it compares *design choices*, not featur
 
 | Dimension | Stele Context |
 |-----------|----------------|
-| Core runtime dependencies | Zero (stdlib only) |
+| Core runtime dependencies | Zero (Rust standard library only) |
 | Network required | No |
 | Who produces “semantic” vectors for search | Optional: **you** (summaries / vectors) or Tier 1 only |
 | Primary store | SQLite + on-disk indices under project |

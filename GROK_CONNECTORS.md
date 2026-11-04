@@ -13,10 +13,9 @@ When Grok supports adding custom MCP servers:
    stele-context serve-mcp
    # optional: STELE_MCP_MODE=lite|standard|full (default: lite)
    ```
-   HTTP alternative (still supported):
+   HTTP alternative:
    ```bash
-   python -m stele_context.mcp_server --port 9876
-   # or: stele-context serve --port 9876
+   stele-context serve --port 9876
    ```
 
 2. For remote access from Grok, expose the HTTP endpoint over HTTPS using a secure tunnel.
@@ -42,12 +41,9 @@ For questions or to contribute Grok-specific adapters, open an issue.
 
 ## Automated Releases (for Grok Build agents)
 
-As of v1.3.2, the PyPI publish workflow supports two modes:
+Rust 2.x: push an annotated `v2.*` tag. `.github/workflows/release-rust.yml` builds the binaries and creates the GitHub Release. It does not upload to PyPI.
 
-1. **Manual (recommended for review)**: Create a GitHub Release from a `v*` tag.
-2. **Fully automated**: Push an annotated version tag (`git tag -a vX.Y.Z ... && git push origin vX.Y.Z`).
-
-The workflow (`.github/workflows/publish.yml`) now triggers on both `release: published` and `push: tags: ['v*']`.
+Python 1.x: the old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x). A future 1.x publish is a `v1.*` tag pushed from that branch. `publish.yml` lives there.
 
 Future Grok Build agents can perform complete releases (version bump + changelog + tag + PyPI) with minimal human intervention once:
 - A `create_release` action becomes available in the GitHub MCP tools, or

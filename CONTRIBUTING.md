@@ -1,6 +1,8 @@
 # Contributing to Stele Context
 
-Thank you for your interest in contributing to Stele Context! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Stele Context. This document is the contributor guide.
+
+The product is the Rust binary. The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
 
 ## Table of Contents
 
@@ -30,35 +32,24 @@ This project adheres to a Code of Conduct. By participating, you are expected to
 
 ### Prerequisites
 
-- Python 3.10 or higher (`requires-python = ">=3.10"`)
+- Rust stable (1.83 or newer; CI uses stable)
 - Git
 
 ### Installation
 
 ```bash
-# Clone your fork
 git clone https://github.com/YOUR_USERNAME/stele-context.git
 cd stele-context
-
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install in development mode with dev dependencies
-pip install -e ".[dev]"
+cargo build --release
+./target/release/stele-context --version
 ```
 
 ### Verify Installation
 
 ```bash
-# Run tests
-pytest
-
-# Check code style
-mypy stele_context/
-
-# Run CLI
-stele-context --version
+cargo fmt --check
+cargo test
+./target/release/stele-context --version
 ```
 
 ## Making Changes
@@ -97,123 +88,33 @@ We welcome contributions in these areas:
 ### Running Tests
 
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=stele_context --cov-report=html
-
-# Run specific test file
-pytest tests/test_core.py
-
-# Run specific test
-pytest tests/test_core.py::TestStele::test_index_documents
+cargo test
+cargo test --lib round_trip
+bash scripts/fetch_corpora.sh
+cargo test
 ```
+
+The fetch step is optional. Corpus round-trip tests skip when `parity/.cache` is absent, and they run when it is present.
 
 ### Writing Tests
 
-- Place tests in the `tests/` directory
-- Mirror the source structure: `tests/test_core.py` for `stele_context/core.py`
-- Use pytest fixtures for common setup
-- Aim for >90% coverage on new code
-
-Example test:
-
-```python
-import pytest
-from stele_context import Stele
-
-def test_index_documents(tmp_path):
-    """Test document indexing."""
-    # Create test file
-    test_file = tmp_path / "test.txt"
-    test_file.write_text("Hello, world!")
-    
-    # Index document
-    cf = Stele(storage_dir=str(tmp_path / "storage"))
-    result = cf.index_documents([str(test_file)])
-    
-    # Verify
-    assert result["total_chunks"] == 1
-    assert result["total_tokens"] > 0
-```
+- Put unit tests in the module they cover (`#[cfg(test)]`).
+- Fixture bytes stay in `parity/fixtures`. Goldens stay in `parity/goldens`.
+- Do not add a crate to the `[dependencies]` tables.
 
 ## Code Style
 
-### Type Hints
-
-All functions must have type hints:
-
-```python
-def process_chunk(
-    self,
-    chunk_id: str,
-    content: str,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Tuple[bool, str]:
-    """Process a chunk and return success status and message."""
-    ...
-```
-
-### Docstrings
-
-Use Google-style docstrings:
-
-```python
-def index_documents(
-    self,
-    paths: List[str],
-    force_reindex: bool = False,
-) -> Dict[str, Any]:
-    """
-    Index one or more documents.
-
-    Performs dynamic semantic chunking and stores chunk metadata.
-    Skips unchanged documents unless force_reindex is True.
-
-    Args:
-        paths: List of document paths to index
-        force_reindex: Force re-indexing even if document hasn't changed
-
-    Returns:
-        Dictionary with indexing results containing:
-        - indexed: List of successfully indexed documents
-        - skipped: List of skipped unchanged documents
-        - errors: List of errors encountered
-        - total_chunks: Total number of chunks created
-        - total_tokens: Total number of tokens
-
-    Raises:
-        FileNotFoundError: If a document path doesn't exist
-        PermissionError: If a document can't be read
-    """
-    ...
-```
-
-### Code Formatting
-
-We use:
-- **ruff** for code formatting and linting
-- **mypy** for type checking
-
 ```bash
-# Format code
-ruff format stele_context/ tests/
-
-# Check types
-mypy stele_context/
-
-# Lint
-ruff check stele_context/ tests/
+cargo fmt
+cargo fmt --check
 ```
 
 ### Principles
 
-1. **Minimal Dependencies** - Prefer stdlib over external packages
-2. **Offline First** - Never require network access
-3. **Backward Compatible** - Don't break existing APIs
-4. **Well Documented** - Every public function needs a docstring
-5. **Tested** - Every feature needs tests
+1. **No crates.** The standard library is the runtime.
+2. **Offline first.** The cache path does not call the network. Corpus download is a test helper only.
+3. **Compatible CLI.** Do not break `stele-context` commands or MCP tool names inside 2.x.
+4. **Tested.** A behaviour change needs a test, usually against `parity/goldens` when the bytes matter.
 
 ## Submitting Changes
 
@@ -261,13 +162,12 @@ Brief description of changes
 ### Bug Reports
 
 Include:
-- Stele Context version
-- Python version
-- Operating system
+- Stele Context version (`stele-context --version`)
+- Operating system and CPU
 - Steps to reproduce
-- Expected behavior
-- Actual behavior
-- Error messages/stack traces
+- Expected behaviour
+- Actual behaviour
+- Error messages
 
 ### Feature Requests
 
@@ -313,19 +213,14 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-Thank you for contributing to Stele Context! 🚀
+Thank you for contributing to Stele Context.
 
-## Releases & Grok Build Automation
+## Releases
 
-See [docs/release-automation.md](docs/release-automation.md) for the current release process and the capabilities needed for full Grok Build autonomous releases.
+Rust 2.x tags run `.github/workflows/release-rust.yml` and attach binaries to a GitHub Release. They do not publish to PyPI.
 
-The key files are:
-- `scripts/release.py` — one-command release helper
-- `.github/workflows/publish.yml` — dual-trigger (tag push + manual Release) PyPI publisher using Trusted Publishing
-- `stele-context release` CLI command (new in 1.3.2+)
-
-We are actively working with the Grok team to enable zero-touch releases via the `grok_com_github` MCP tools.
+A 1.x tag is cut from `python-legacy`. `publish.yml` on that branch uploads the sdist. See [docs/release-2.0.md](docs/release-2.0.md).
 
 ## Local build artifacts
 
-Do not treat `dist/` wheels as the current package version. `dist/` is gitignored; remove stale local artifacts after version bumps. Publish via the release workflow / `stele-context release`, not by reusing old trees under `dist/`.
+`target/` is gitignored. Do not commit it.

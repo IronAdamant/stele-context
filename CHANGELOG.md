@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Changed
+
+- `main` is the Rust 2.0 crate only. The Python 1.x package, its tests, and `publish.yml` are on the `python-legacy` branch. PyPI 1.5.x is unchanged. v2 tags still publish Rust binaries and do not upload a wheel.
+
 ## [1.5.3] - 2026-11-04
 
 1.5.3 points at the Rust 2.0.0 binaries. No Python feature changes.

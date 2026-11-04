@@ -1,4 +1,10 @@
-# PyPI 1.5.3 notice (prepared, not applied)
+# PyPI 1.5.3 notice
+
+This notice was applied before `main` became Rust-only. Further 1.x tags are cut from `python-legacy`, which still has `pyproject.toml` and `publish.yml`.
+
+The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
+
+# Original note (prepared, not applied)
 
 Apply this on `main` only after `v2.0.0` exists and its GitHub Release has the Rust binaries. Do not apply it on the rewrite branch: parity checks require the Python package to stay `1.5.2` until that commit.
 
