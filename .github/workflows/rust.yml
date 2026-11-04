@@ -70,7 +70,7 @@ jobs:
         if: matrix.test
         env:
           RUSTFLAGS: "-D warnings"
-        run: cargo test --release --target ${{ matrix.target }}
+        run: cargo test --release --target ${{ matrix.target }} -- --nocapture
 
       - name: Check
         if: ${{ !matrix.test }}
