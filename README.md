@@ -32,9 +32,13 @@ Rust 2.0 indexes images, audio, video, and PDF with the standard library alone. 
 
 ### Install
 
+The supported package is the Rust 2.0.0 binary from the [v2.0.0 GitHub Release](https://github.com/IronAdamant/stele-context/releases/tag/v2.0.0).
+
 ```bash
-pip install stele-context
+curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.0.0/scripts/install.sh | sh
 ```
+
+Windows: `scripts/install.ps1`, or download `stele-context-<target>` from the release assets. `pip install stele-context` stays on 1.5.x and does not install 2.0. This 1.5.3 package prints that release URL on startup.
 
 ### First-run setup (recommended)
 

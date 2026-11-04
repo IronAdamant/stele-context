@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [1.5.3] - 2026-11-04
+
+1.5.3 points at the Rust 2.0.0 binaries. No Python feature changes.
+
+`pip install stele-context` stays on this 1.5 line. The supported release is the Rust binary at https://github.com/IronAdamant/stele-context/releases/tag/v2.0.0 (`scripts/install.sh`, `scripts/install.ps1`, or the release assets). The `stele-context` command from this sdist prints that URL on startup.
+
 ## [1.5.2] - 2026-11-03
 
 ### Fixed

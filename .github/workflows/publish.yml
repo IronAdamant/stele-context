@@ -5,16 +5,15 @@ on:
     types: [published]
   push:
     tags:
-      - 'v*'          # Enables fully automated releases from agents (Grok Build, etc.)
+      - 'v1.*'        # 2.x tags publish Rust binaries only. They do not match this workflow.
   workflow_dispatch:
 
 # PyPI Trusted Publishing: short-lived OIDC token from GitHub — no PYPI_API_TOKEN secret.
 # One-time setup: pypi.org → project → Publishing → add trusted publisher (GitHub + this repo + publish.yml).
 #
-# Trigger modes (for Grok Build / agent automation):
-#   - Manual: Create a GitHub Release from a v* tag (current recommended for review)
-#   - Automated: Push a `v*` tag (e.g. `git tag -a v1.3.2 -m "..." && git push origin v1.3.2`)
-#     The workflow will build & publish automatically.
+# Trigger modes:
+#   - Push a v1.* tag. v2.* does not match the tag filter, so it never starts this workflow.
+#   - A published GitHub Release runs the workflow, and the job below skips every tag that is not v1.*.
 permissions:
   contents: read
   id-token: write
@@ -62,6 +61,10 @@ jobs:
         ")
         echo "Tag version:    $TAG_VERSION"
         echo "pyproject.toml: $PYPROJECT_VERSION"
+        if [[ "$PYPROJECT_VERSION" != 1.* ]]; then
+          echo "::error::Refusing to publish $PYPROJECT_VERSION. PyPI accepts only the 1.x line."
+          exit 1
+        fi
         if [[ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]]; then
           echo "::error::Tag version ($TAG_VERSION) does not match pyproject.toml ($PYPROJECT_VERSION)"
           exit 1
