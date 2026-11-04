@@ -38,6 +38,7 @@ pub struct Engine {
     /// Detect can answer from document mtime and size. Chunk bodies stay
     /// unloaded until a file actually differs.
     documents_only: bool,
+    server_agent: String,
 }
 
 impl Engine {
@@ -107,7 +108,20 @@ impl Engine {
             search_alpha: loaded.search_alpha.unwrap_or(0.42),
             max_history_entries: loaded.max_history_entries.unwrap_or(1000),
             documents_only,
+            server_agent: String::new(),
         })
+    }
+
+    /// MCP stdio registers this id, the same way 1.5.2 registers
+    /// `stele-context-mcp-<pid>`, and index takes its document locks.
+    pub(crate) fn server_agent(&self) -> &str {
+        &self.server_agent
+    }
+
+    pub fn set_server_agent(&mut self, id: &str) {
+        self.server_agent = id.to_string();
+        let root = self.cwd.display().to_string();
+        crate::locks::register_agent(&self.cwd, id, &root);
     }
 
     pub fn index(&mut self, paths: &[String], force: bool) -> Result<Value, String> {
@@ -182,7 +196,14 @@ impl Engine {
             {
                 let _ = self.prune_history(None, Some(self.max_history_entries));
             }
-            crate::locks::note_indexed(&self.cwd, &fresh);
+            crate::locks::note_indexed(&self.cwd, &fresh, &self.server_agent);
+            if !self.server_agent.is_empty() {
+                let now = now_secs();
+                let agent = self.server_agent.clone();
+                for path in &fresh {
+                    crate::locks::hold_shared(&self.cwd, path, &agent, now);
+                }
+            }
         }
         Ok(Value::object(vec![
             ("indexed", Value::Array(indexed_rows)),
@@ -211,14 +232,13 @@ impl Engine {
             .iter()
             .any(|session| session.id == "default")
         {
-            let now = now_secs();
             self.store.state.sessions.push(crate::store::Session {
                 id: "default".to_string(),
                 searches: Vec::new(),
                 reads: Vec::new(),
                 kv: Vec::new(),
-                created_at: now,
-                updated_at: now,
+                created_at: now_us(),
+                updated_at: now_us(),
                 turn: 0,
                 tokens: 0,
                 agent: String::new(),
@@ -236,7 +256,7 @@ impl Engine {
         let mut modified = Vec::new();
         let mut new_rows = Vec::new();
         let mut removed = Vec::new();
-        let kv_restored = 0i64;
+        let mut kv_restored = 0i64;
         let mut kv_reprocessed = 0i64;
         if only.is_none() {
             let mut aligned = true;
@@ -371,8 +391,32 @@ impl Engine {
                 "text" | "pdf" => 0.85,
                 _ => self.change_threshold,
             };
-            if threshold >= 0.0 {
+            let new_text = if media {
+                String::new()
+            } else {
+                chunk::read_python_text(&bytes)
+            };
+            let old_chunks: Vec<String> = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .filter(|chunk| chunk.path == *rel)
+                .map(|chunk| chunk.content.clone())
+                .collect();
+            if old_chunks.is_empty() {
                 kv_reprocessed += 1;
+            } else {
+                let new_sig = chunk::signature(&new_text);
+                for old in &old_chunks {
+                    let old_sig = chunk::signature(old);
+                    let sim: f64 = old_sig.iter().zip(new_sig).map(|(a, b)| a * b).sum();
+                    if sim >= threshold {
+                        kv_restored += 1;
+                    } else {
+                        kv_reprocessed += 1;
+                    }
+                }
             }
             self.reindex_file(rel, &abs, &meta)?;
         }
@@ -467,7 +511,7 @@ impl Engine {
             ("chunks", Value::Int(chunks)),
             ("symbol_rows", Value::Int(symbols)),
             ("symbols_ready", Value::Bool(ready)),
-            ("latest_indexed_at", Value::Float(0.0)),
+            ("latest_indexed_at", Value::Float(now_f64())),
             (
                 "storage_dir",
                 Value::string(self.storage.display().to_string()),
@@ -616,7 +660,7 @@ impl Engine {
                     ("path", Value::string(path)),
                     ("chunk_count", Value::Int(count)),
                     ("total_tokens", Value::Int(tokens)),
-                    ("indexed_at", Value::Float(0.0)),
+                    ("indexed_at", Value::Float(now_f64())),
                 ])
             })
             .collect();
@@ -1104,6 +1148,28 @@ pub fn now_secs() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or(0)
+}
+
+pub fn now_f64() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+pub fn now_us() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_micros() as i64)
+        .unwrap_or(0)
+}
+
+pub fn session_time(value: i64) -> f64 {
+    if value > 1_000_000_000_000 {
+        value as f64 / 1_000_000.0
+    } else {
+        value as f64
+    }
 }
 
 // The piece signature must be computed from the chunk text, not from a

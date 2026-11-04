@@ -29,7 +29,7 @@ Everything runs offline. No API keys, no cloud, no telemetry. The crate has an e
 
 ### Install
 
-The product is the Rust 2.0.0 binary from the [v2.0.0 GitHub Release](https://github.com/IronAdamant/stele-context/releases/tag/v2.0.0).
+The product is the Rust 2.0.1 binary. 2.0.0 is the previous GitHub Release.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.0.0/scripts/install.sh | sh

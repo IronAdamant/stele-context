@@ -97,12 +97,25 @@ jobs:
             --group b1 --runs 10 --check-floor
 
       - name: Same corpus versus Python 1.5.2
-        if: matrix.test && matrix.os == 'ubuntu-latest'
+        if: matrix.test
         shell: bash
         run: |
-          python3 scripts/versus_152.py \
-            --binary "target/${{ matrix.target }}/release/stele-context" \
+          ext=""
+          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
+          py=python3
+          if ! command -v python3 >/dev/null 2>&1; then py=python; fi
+          "$py" scripts/versus_152.py \
+            --binary "target/${{ matrix.target }}/release/stele-context${ext}" \
             --runs 3
 
-  # The cross targets above are cargo check. These three run the tests.
-  # Linux, macOS (Intel), and Windows each have one native test job.
+  msrv:
+    name: rust 1.89
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89
+      - name: Check the minimum supported compiler
+        run: cargo check --locked
+
+  # The cross targets above are cargo check. Linux, macOS (Intel), and
+  # Windows each have one native test job. The 1.89 job is the MSRV.

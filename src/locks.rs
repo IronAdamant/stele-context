@@ -52,7 +52,7 @@ fn acquire(
     };
     if let Some((holder, until)) = existing {
         if holder != agent && !force {
-            return Ok(refused(&holder, until));
+            return Ok(refused(shared.as_deref(), &holder, until));
         }
         if holder != agent && force {
             record_conflict(state, &mut shared, path, &holder, agent, now);
@@ -252,12 +252,29 @@ fn reap(state: &mut State, shared: Option<&mut Shared>, now: i64) -> Value {
     ])
 }
 
-fn refused(holder: &str, until: i64) -> Value {
+fn refused(shared: Option<&Shared>, holder: &str, until: i64) -> Value {
+    let worktree = shared
+        .and_then(|shared| {
+            shared.agents.iter().find_map(|row| {
+                if text_field(row, "agent_id") == holder {
+                    let root = text_field(row, "worktree_root");
+                    if root.is_empty() {
+                        None
+                    } else {
+                        Some(Value::string(root))
+                    }
+                } else {
+                    None
+                }
+            })
+        })
+        .unwrap_or(Value::Null);
     Value::object(vec![
         ("acquired", Value::Bool(false)),
         ("locked_by", Value::string(holder)),
-        ("locked_at", Value::Int(until - TTL)),
-        ("expires_at", Value::Int(until)),
+        ("locked_at", Value::Float((until - TTL) as f64)),
+        ("expires_at", Value::Float(until as f64)),
+        ("worktree", worktree),
     ])
 }
 
@@ -365,6 +382,7 @@ struct Shared {
     locks: Vec<crate::store::Lock>,
     conflicts: Vec<Conflict>,
     notifications: Vec<Value>,
+    agents: Vec<Value>,
 }
 
 impl Shared {
@@ -401,11 +419,16 @@ impl Shared {
             Some(Value::Array(rows)) => rows.clone(),
             _ => Vec::new(),
         };
+        let agents = match field(&value, "agents") {
+            Some(Value::Array(rows)) => rows.clone(),
+            _ => Vec::new(),
+        };
         Some(Shared {
             path,
             locks,
             conflicts,
             notifications,
+            agents,
         })
     }
 
@@ -451,6 +474,7 @@ impl Shared {
                 ),
             ),
             ("notifications", Value::Array(self.notifications.clone())),
+            ("agents", Value::Array(self.agents.clone())),
         ]));
         let _ = fs::write(&self.path, body);
     }
@@ -488,7 +512,65 @@ fn int_field(value: &Value, key: &str) -> i64 {
     }
 }
 
-pub fn note_indexed(start: &Path, paths: &[String]) {
+pub fn hold_shared(start: &Path, path: &str, agent: &str, now: i64) {
+    let Some(dir) = coordination_dir(start) else {
+        return;
+    };
+    let Some(mut shared) = Shared::load(&dir) else {
+        return;
+    };
+    shared.locks.retain(|lock| lock.path != path);
+    shared.locks.push(crate::store::Lock {
+        path: path.to_string(),
+        agent: agent.to_string(),
+        until: now + TTL,
+    });
+    shared.save();
+}
+
+pub fn register_agent(start: &Path, agent: &str, worktree: &str) {
+    let Some(dir) = coordination_dir(start) else {
+        return;
+    };
+    let Some(mut shared) = Shared::load(&dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    if let Some(row) = shared
+        .agents
+        .iter_mut()
+        .find(|row| text_field(row, "agent_id") == agent)
+    {
+        if let Value::Object(pairs) = row {
+            for (key, value) in [
+                ("status", Value::string("active")),
+                ("worktree_root", Value::string(worktree)),
+                ("last_heartbeat", Value::Float(now)),
+            ] {
+                if let Some((_, item)) = pairs.iter_mut().find(|(name, _)| name == key) {
+                    *item = value;
+                } else {
+                    pairs.push((key.to_string(), value));
+                }
+            }
+        }
+    } else {
+        shared.agents.push(Value::object(vec![
+            ("agent_id", Value::string(agent)),
+            ("worktree_root", Value::string(worktree)),
+            ("status", Value::string("active")),
+            ("last_heartbeat", Value::Float(now)),
+            ("started_at", Value::Float(now)),
+            ("pid", Value::Int(std::process::id() as i64)),
+        ]));
+    }
+    shared.save();
+}
+
+pub fn note_indexed(start: &Path, paths: &[String], agent: &str) {
     if paths.is_empty() {
         return;
     }
@@ -504,20 +586,28 @@ pub fn note_indexed(start: &Path, paths: &[String]) {
     };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    let worktree = start.display().to_string();
     let mut notes = match pairs.iter().find(|(key, _)| key == "notifications") {
         Some((_, Value::Array(rows))) => rows.clone(),
         _ => Vec::new(),
     };
-    for doc in paths {
+    for (offset, doc) in paths.iter().enumerate() {
         notes.push(Value::object(vec![
             ("id", Value::Int((notes.len() + 1) as i64)),
             ("document_path", Value::string(doc)),
             ("change_type", Value::string("indexed")),
-            ("agent_id", Value::string("")),
-            ("worktree_root", Value::Null),
-            ("created_at", Value::Int(now)),
+            ("agent_id", Value::string(agent)),
+            (
+                "worktree_root",
+                if agent.is_empty() {
+                    Value::Null
+                } else {
+                    Value::string(&worktree)
+                },
+            ),
+            ("created_at", Value::Float(now + offset as f64 * 0.000001)),
         ]));
     }
     if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "notifications") {

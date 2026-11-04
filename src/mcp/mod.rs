@@ -80,9 +80,17 @@ const REMOVED: &[(&str, &str)] = &[
 ];
 
 pub fn serve() -> Response {
+    serve_with(None)
+}
+
+pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    let mut engine = Engine::open(None).ok();
+    let mut engine = Engine::open(storage).ok();
+    if let Some(engine) = engine.as_mut() {
+        let id = format!("stele-context-mcp-{}", std::process::id());
+        engine.set_server_agent(&id);
+    }
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
@@ -321,7 +329,10 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
         "impact_radius" => Ok(engine.impact(&symbol)),
         "coupling" => Ok(engine.coupling(&path)),
         "get_context" => {
-            let many = string_list(args, "document_paths");
+            let mut many = string_list(args, "document_paths");
+            if many.is_empty() {
+                many = string_list(args, "paths");
+            }
             if many.is_empty() {
                 engine.get_context(&path, session.as_deref())
             } else {
@@ -539,12 +550,13 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             int_arg(args, "limit").unwrap_or(50),
         )),
         "batch" => engine.batch_ops(args),
-        "annotate" => engine.annotations(
+        "annotate" => engine.annotations_tagged(
             "create",
             &arg(args, "target").unwrap_or(path),
             &arg(args, "content")
                 .or_else(|| arg(args, "body"))
                 .unwrap_or_default(),
+            &string_list(args, "tags"),
         ),
         "get_annotations" => {
             let wrapped = engine.annotations("get", &arg(args, "target").unwrap_or(path), "")?;
@@ -573,12 +585,9 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             &path,
             &arg(args, "content").unwrap_or_default(),
         ),
-        "acquire_document_lock" => engine.document_lock(
-            "acquire",
-            &path,
-            &arg(args, "agent_id").unwrap_or_else(|| "default".to_string()),
-            flag(args, "force"),
-        ),
+        "acquire_document_lock" => {
+            engine.document_lock("acquire", &path, &caller(engine, args), flag(args, "force"))
+        }
         "refresh_document_lock" => engine.document_lock(
             "refresh",
             &path,
@@ -607,6 +616,14 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
         }
         "reap_expired_locks" => engine.document_lock("reap", "", "default", false),
         _ => Err(format!("unknown tool '{name}'")),
+    }
+}
+
+fn caller(engine: &Engine, args: &Value) -> String {
+    match arg(args, "agent_id") {
+        Some(id) if !id.is_empty() => id,
+        _ if !engine.server_agent().is_empty() => engine.server_agent().to_string(),
+        _ => "default".to_string(),
     }
 }
 

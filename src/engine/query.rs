@@ -570,6 +570,16 @@ impl Engine {
     }
 
     pub fn annotations(&mut self, action: &str, path: &str, body: &str) -> Result<Value, String> {
+        self.annotations_tagged(action, path, body, &[])
+    }
+
+    pub fn annotations_tagged(
+        &mut self,
+        action: &str,
+        path: &str,
+        body: &str,
+        tags: &[String],
+    ) -> Result<Value, String> {
         match action {
             "bulk_create" => {
                 let created = self.annotations("create", path, body)?;
@@ -582,12 +592,12 @@ impl Engine {
                 self.store.state.next_annotation += 1;
                 let id_num = self.store.state.next_annotation;
                 let id = id_num.to_string();
-                let now = super::now_secs();
+                let now = super::now_us();
                 self.store.state.annotations.push(Annotation {
                     id: id.clone(),
                     path: path.to_string(),
                     body: body.to_string(),
-                    tags: Vec::new(),
+                    tags: tags.to_vec(),
                     target_type: "document".to_string(),
                     created_at: now,
                     updated_at: now,
@@ -612,9 +622,20 @@ impl Engine {
                             ("target", Value::string(&note.path)),
                             ("target_type", Value::string(&note.target_type)),
                             ("content", Value::string(&note.body)),
-                            ("tags", Value::Array(Vec::new())),
-                            ("created_at", Value::Int(note.created_at)),
-                            ("updated_at", Value::Int(note.updated_at)),
+                            (
+                                "tags",
+                                Value::Array(
+                                    note.tags.iter().cloned().map(Value::String).collect(),
+                                ),
+                            ),
+                            (
+                                "created_at",
+                                Value::Float(super::session_time(note.created_at)),
+                            ),
+                            (
+                                "updated_at",
+                                Value::Float(super::session_time(note.updated_at)),
+                            ),
                         ])
                     })
                     .collect();
@@ -944,8 +965,8 @@ impl Engine {
                 searches: Vec::new(),
                 reads: Vec::new(),
                 kv: Vec::new(),
-                created_at: super::now_secs(),
-                updated_at: super::now_secs(),
+                created_at: super::now_us(),
+                updated_at: super::now_us(),
                 turn: 0,
                 tokens: 0,
                 agent: String::new(),

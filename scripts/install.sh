@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install a stele-context 2.x binary from a GitHub Release.
 # Usage: curl -fsSL .../install.sh | sh
-# Override with STELE_VERSION (default 2.0.0) and STELE_PREFIX (default ~/.local).
+# Override with STELE_VERSION (default 2.0.1) and STELE_PREFIX (default ~/.local).
 set -eu
 version="${STELE_VERSION:-2.0.1}"
 prefix="${STELE_PREFIX:-$HOME/.local}"

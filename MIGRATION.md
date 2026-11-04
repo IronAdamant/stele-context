@@ -10,7 +10,7 @@ Closed in 2.0.1 (same, unless noted):
 - `chunk_size`, `skip_dirs` (added to the defaults, not a replacement), and `respect_gitignore` are applied.
 - CLI flags `--compact`, `--path-prefix`, `--regex`, `--working-tree`, `--confirm`, `--limit`, `--document`, `--session`, `--depth`, `--significance-threshold`, `--mode`, `--group-by`, `--summary-mode`, `--top-n`, and `--min-tokens` are accepted. `--regex` is required before a pattern is a regex. `--confirm` is required before `clear` deletes the store.
 - HTTP `GET /tools` and stdio `tools/list` in `standard` and `full` list the properties the dispatcher reads. Lite stdio `tools/list` stays `{"type":"object"}` so that reply stays the same size as 2.0.0. `paths`, `summaries`, `document_paths`, and `working_tree` are honoured.
-- PDF page text from uncompressed and Flate streams ends with a newline, so the one-page fixture matches PyMuPDF `get_text()` (`[Page 1]\nHello PDF symbols\n`).
+- PDF page text is one chunk per page. Several content streams on the same page stay in that one chunk. The text ends with a newline, so the one-page fixture matches PyMuPDF `get_text()` (`[Page 1]\nHello PDF symbols\n`).
 
 Still not the same, and why:
 
@@ -53,7 +53,7 @@ The parity audit's six extractor and token gaps were Rust defects. They were fix
 
 | Item | Mark | What 2.0 does |
 | --- | --- | --- |
-| Install | intentional change | GitHub Release binaries. `scripts/install.sh` (Linux and macOS) and `scripts/install.ps1` (Windows) download `stele-context` for `STELE_VERSION` (default `2.0.0`) from `IronAdamant/stele-context`. Or download the asset. Or `cargo build --release` from this repo. |
+| Install | intentional change | GitHub Release binaries. `scripts/install.sh` (Linux and macOS) and `scripts/install.ps1` (Windows) download `stele-context` for `STELE_VERSION` (default `2.0.1`) from `IronAdamant/stele-context`. Or download the asset. Or `cargo build --release` from this repo. |
 | PyPI | same for 1.5 | `pip install stele-context` stays on 1.5.x. There is no 2.x wheel. A `v2.*` tag runs `.github/workflows/release-rust.yml` and does not upload to PyPI. A `v1.*` tag is cut from `python-legacy`, where `publish.yml` still lives. |
 | 1.5.3 process | same on the Python side | The 1.5.3 `stele-context` command prints, on stderr, that 2.0.0 is the Rust release and the v2.0.0 URL, then runs the Python commands. It is not the Rust binary. |
 | Python source | same location | The Python package, tests, and `publish.yml` are on `python-legacy`. |
@@ -162,11 +162,11 @@ Exit codes in 2.0: 0 success, 1 operation error, 2 usage. A closed stdout pipe e
 | `history` | intentional change | The journal: `entries` and `history`. No `--limit` or `--document`. |
 | `enrichment-plan` | intentional change | `chunks_missing_summary` and up to 50 `next` rows (`chunk_id`, `path`). No `--top-n` or `--min-tokens`. |
 | `init` | intentional change | Writes `.stele-context.toml` containing the line `# stele-context 2.0` if the file is absent, and returns `path`. It does not index and it does not print an MCP snippet. 1.5 `init` indexes, prints the lite client config, and prints doctor `next_steps`. |
-| `clear` | intentional change | Deletes the in-memory state and saves. No `--confirm` and no prompt. |
+| `clear` | same | Deletes the store only when `--confirm` is set. Without it the command returns `cancelled: true` and does not write. |
 | `doctor` | intentional change | JSON under `result`: `version`, `implementation` (`rust`), `project_root`, `storage_dir`, `config_loaded`, `native_store_present`, `legacy_sqlite_present`, counts, `index_health`, `db_health`, `search_quality`, `environment.issues` (always empty), `map_preview`, `recommended_mcp_mode` (`lite`), `token_savings`, `next_steps` (strings). Not the 1.5 doctor object (`python` is null). |
 | `get-context PATH` | same shape | `{unchanged, changed, new}`. An unchanged file has `chunks` (`chunk_id`, `content`, `start_pos`, `end_pos`, `token_count`, `content_truncated`, `staleness_score`), `total_tokens`, and `trust`. A changed file has `old_hash`, `new_hash`, and `diff_since_cache` (unified diff, `diff_exact`, added and removed line counts, `diff_tokens`, `diff_truncated`, `recommendation`). `--session-id` records the read. |
-| `annotations` and `document-lock` | intentional change | `--action` and a positional. See MCP section for the actions that run. |
-| `annotate`, `get-annotations`, `delete-annotation`, `update-annotation` | not supported | Use `annotations`. |
+| `annotations` | same actions | `stele-context annotations --action create PATH`. Listed in `--help`. Tags passed as repeated `--tags` are stored. The old singleton names are MCP full-mode aliases, not separate CLI commands. |
+| `document-lock` | intentional change | `--action` and a positional. See the MCP section for the actions that run. |
 | `release` | not supported | The 1.5 PyPI helper is not in this binary. |
 | `serve` | intentional change | Blocks in the accept loop. Default `--host` is `127.0.0.1` (1.5 default is `localhost`). `--port` default 9876. No `--blocking`. 1.5 starts a background thread unless `--blocking`, then the CLI still waits. |
 | `--summary-mode` | not supported | Parsed and ignored on every command. |
@@ -207,7 +207,7 @@ Calls that send only the 1.5 property names therefore miss:
 | `detect_changes` | same | `document_paths`, `limit`, and `scan_new` are read. New files are reported and not indexed. Changed files are reindexed. |
 | `impact_radius` | intentional change | Symbol only, depth 2. `chunk_id`, `document_path`, `summary_mode`, `significance_threshold`, `direction`, and `depth` are ignored. |
 | `coupling` | intentional change | `document_path` only. `mode` and `significance_threshold` are ignored. |
-| `annotations` | intentional change | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `bulk_create` stores one note. The dispatcher reads `path`, not `target`, and `body`, not `content`. Tags and `annotation_id` are ignored. `delete` matches id or path. |
+| `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `target` and `content` are read, and so is `tags`. `delete` matches id or path. |
 | `document_lock` | intentional change | Actions `acquire`, `release`, `refresh`, `status`, `release_all`, `reap`, `conflicts`. `ttl` and `limit` are ignored (TTL 300). `force` is read. Storage is the JSON coordination file, not `coordination.db`. |
 | `bulk_store_summaries` | same | `summaries` is a chunk id to text object. One `chunk_id` plus `summary` still works. |
 | `register_dynamic_symbols` | same | `symbols` is a list, stored under `runtime:<agent_id>:<name>`. |
@@ -218,9 +218,9 @@ Calls that send only the 1.5 property names therefore miss:
 | `history` | intentional change | Standard mode. The journal, not `change_history`. |
 | `doctor`, `map`, `enrichment_plan`, `detect_modality`, `get_supported_formats` | intentional change | They run. Shapes are the 2.0 objects, not the schema's 1.5 description. `get_supported_formats` reports metadata for images, one metadata line for non-WAV audio, WAV duration (30s segments when longer), container brand for video, and uncompressed or Flate PDF text. |
 
-Those 15 standard names run in 2.0.1 (**same**).
+Those 15 standard names run in 2.0.1. `batch` dispatches every tool name the MCP server runs, not a short allow-list.
 
-Full-mode names run in 2.0.1 by calling the tool in the replacement column (**same**):
+Full-mode names run in 2.0.1 by calling the tool in the replacement column. Their JSON matches the 1.5.2 singleton, including annotation tags and a refused lock (`locked_by`, `locked_at`, `expires_at`, `worktree`):
 
 | Removed name | Replacement named in the error |
 | --- | --- |
@@ -243,7 +243,7 @@ There is no self-healing `hint` on HTTP tool errors beyond the `error` string. 1
 | Force steal | same outcome | A conflict row is written (`path`, `holder`, `requester`, `at`). The coordination file then shows the new holder. |
 | Where it is stored | intentional change | `<git-common-dir>/stele-context/coordination.json` when `.git` resolves. The snapshot also keeps a copy. No git directory: snapshot only. `coordination.db` is not opened. |
 | Optimistic `expected_versions` on index | not supported | Ignored. |
-| Agent registry and notifications | same | `list_agents` lists lock holders. `get_notifications` returns the coordination rows written when a file is indexed, then the count. |
+| Agent registry and notifications | same | `serve-mcp` registers `stele-context-mcp-<pid>`. `list_agents` lists that registry. `get_notifications` returns rows newest first. `list_sessions` timestamps are fractional seconds. |
 
 ## HTTP serve
 
@@ -266,7 +266,7 @@ There is no self-healing `hint` on HTTP tool errors beyond the `error` string. 1
 | WAV | intentional change | `audio wav <rate>Hz <seconds>s bytes <len>`. Longer than 30 seconds: one chunk per 30s span, `audio wav <rate>Hz <start>-<end>s`. A non-RIFF wav falls back to `audio wav bytes <len>`. |
 | Other audio | intentional change | One line, `audio <ext> bytes <len>`. No MFCC. |
 | Video | intentional change | One line, `video <ext> bytes <len> header <brand>` (`mp4`, `webm`, `avi`, or `unknown`). No frames. |
-| PDF text vs PyMuPDF | intentional change | 2.0 chunk text is `[Page N]` plus literal and hex strings from uncompressed and FlateDecode streams (`Tj`, `TJ`, `'`). Not layout order, fonts, or a reading-order pass. On `note.pdf`, 1.5.2 with PyMuPDF stores `[Page 1]\nHello PDF symbols\n` and 2.0 stores `[Page 1]\nHello PDF symbols` (no trailing newline). One chunk either way. |
+| PDF text vs PyMuPDF | same page count | One chunk per page. Content streams that share a page are concatenated. Text is `[Page N]` plus literal and hex strings, with a trailing newline. Layout, fonts, and reading order can still differ from PyMuPDF. |
 | PDF that does not start with `%PDF` | intentional change | One chunk, `pdf bytes <len>`. |
 | PDF with no text streams | intentional change | One chunk, `pdf pages 0 bytes <len>`. |
 | Tree-sitter chunking | not supported | Boundaries are the 1.5.2 regex path (tree-sitter absent), and the Python definition spans for `.py`, `.pyw`, and `.pyx`. A 1.5 install that had the `tree-sitter` extra can split JS, TS, Java, C, C++, Go, Rust, Ruby, PHP, and Swift differently. |

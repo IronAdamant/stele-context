@@ -76,6 +76,7 @@ struct Parsed {
     max_tokens: Option<i64>,
     group_by: Option<String>,
     no_index: bool,
+    tags: Vec<String>,
     cwd: Option<PathBuf>,
 }
 
@@ -97,7 +98,7 @@ impl Parsed {
             return doctor::report(self.storage.as_deref(), self.human);
         }
         if command == "serve-mcp" {
-            return crate::mcp::serve();
+            return crate::mcp::serve_with(self.storage.as_deref());
         }
         let cwd = match self.cwd.clone() {
             Some(path) => path,
@@ -279,10 +280,11 @@ impl Parsed {
             "coupling" => Ok(engine.coupling(positional)),
             "get-context" => engine.get_context(positional, self.session.as_deref()),
             "init" => init_marker(&engine.cwd),
-            "annotations" => engine.annotations(
+            "annotations" => engine.annotations_tagged(
                 self.action.as_deref().unwrap_or("get"),
                 positional,
                 self.positionals.get(1).map(String::as_str).unwrap_or(""),
+                &self.tags,
             ),
             "document-lock" => engine.document_lock(
                 self.action.as_deref().unwrap_or("status"),
@@ -340,6 +342,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         max_tokens: None,
         group_by: None,
         no_index: false,
+        tags: Vec::new(),
         cwd: None,
     };
     let mut index = 0usize;
@@ -479,6 +482,8 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                     let value = take_value(args, &mut index)?;
                     if arg == "--session" {
                         parsed.session = Some(value);
+                    } else if arg == "--tags" {
+                        parsed.tags.push(value);
                     }
                 }
                 other => return Err(format!("unknown flag '{other}'")),
@@ -526,6 +531,7 @@ Commands:
   query TEXT          Search, definitions, and text search
   find-definition NAME
   find-references NAME
+  annotations         create, get, delete, update, search, bulk_create
   impact-radius       --symbol NAME
   coupling PATH
   enrichment-plan     Chunks that still need a summary

@@ -291,7 +291,15 @@ fn write_value(out: &mut String, value: &Value) {
             let _ = write!(out, "{integer}");
         }
         Value::Float(float) => {
-            let _ = write!(out, "{float}");
+            if !float.is_finite() {
+                out.push_str("null");
+            } else {
+                let text = format!("{float}");
+                out.push_str(&text);
+                if !text.contains('.') && !text.contains('e') && !text.contains('E') {
+                    out.push_str(".0");
+                }
+            }
         }
         Value::String(text) => write_string(out, text),
         Value::Array(items) => {

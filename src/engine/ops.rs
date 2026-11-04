@@ -74,7 +74,7 @@ impl Engine {
             .count();
         session.attached.retain(|(_, turn, _)| *turn <= target_turn);
         session.turn = target_turn;
-        session.updated_at = now_secs();
+        session.updated_at = super::now_us();
         self.store.save("rollback", &Value::string(session_id))?;
         Ok(Value::object(vec![
             ("session_id", Value::string(session_id)),
@@ -166,8 +166,14 @@ impl Engine {
             }
             rows.push(Value::object(vec![
                 ("session_id", Value::string(&session.id)),
-                ("created_at", Value::Int(session.created_at)),
-                ("last_updated", Value::Int(session.updated_at)),
+                (
+                    "created_at",
+                    Value::Float(super::session_time(session.created_at)),
+                ),
+                (
+                    "last_updated",
+                    Value::Float(super::session_time(session.updated_at)),
+                ),
                 ("turn_count", Value::Int(session.turn)),
                 ("total_tokens", Value::Int(session.tokens)),
                 (
@@ -323,30 +329,29 @@ impl Engine {
         exclude: Option<&str>,
         limit: i64,
     ) -> Value {
-        let now = now_secs();
+        let now = super::now_us() as f64 / 1_000_000.0;
         let mut rows = read_coord_array(&self.cwd, "notifications");
-        rows.retain(|row| int_of(row, "created_at") >= now - 86400);
+        rows.retain(|row| num_of(row, "created_at") >= now - 86400.0);
         if let Some(since) = since {
-            rows.retain(|row| int_of(row, "created_at") > since);
+            rows.retain(|row| num_of(row, "created_at") > since as f64);
         }
         if let Some(exclude) = exclude {
             rows.retain(|row| text_of(row, "agent_id") != exclude);
         }
-        rows.sort_by(|a, b| int_of(b, "created_at").cmp(&int_of(a, "created_at")));
+        rows.sort_by(|a, b| num_of(b, "created_at").total_cmp(&num_of(a, "created_at")));
         let limit = limit.max(0) as usize;
         if rows.len() > limit {
             rows.truncate(limit);
         }
         let latest = rows
             .iter()
-            .map(|row| int_of(row, "created_at"))
-            .max()
-            .unwrap_or(0);
+            .map(|row| num_of(row, "created_at"))
+            .fold(0.0_f64, f64::max);
         let count = rows.len() as i64;
         Value::object(vec![
             ("notifications", Value::Array(rows)),
             ("count", Value::Int(count)),
-            ("latest_timestamp", Value::Int(latest)),
+            ("latest_timestamp", Value::Float(latest)),
         ])
     }
 
@@ -636,38 +641,18 @@ impl Engine {
     }
 
     fn batch_one(&mut self, method: &str, params: &Value) -> Result<Value, String> {
-        let path = text_ops(params, "path").or_else(|| text_ops(params, "document_path"));
-        let session = text_ops(params, "session_id").unwrap_or_else(|| "default".to_string());
-        match method {
-            "index" | "index_documents" => {
-                let paths = match field_ops(params, "paths") {
-                    Some(Value::Array(rows)) => rows
-                        .iter()
-                        .filter_map(|item| match item {
-                            Value::String(text) => Some(text.clone()),
-                            _ => None,
-                        })
-                        .collect(),
-                    _ => vec![path.unwrap_or_else(|| ".".to_string())],
-                };
-                self.index(&paths, false)
-            }
-            "detect_changes" | "detect_changes_and_update" => self.detect(true),
-            "search" => Ok(self.search(
-                &text_ops(params, "query").unwrap_or_default(),
-                "keyword",
-                10,
-            )),
-            "prune_history" => self.prune_history(None, None),
-            "list_sessions" => Ok(self.list_sessions(None)),
-            "rebuild_symbols" | "rebuild_symbol_graph" => self.rebuild_symbols(),
-            "stale_chunks" => Ok(self.stale_chunks(0.3, None)),
-            "environment_check" | "check_environment" => Ok(self.environment_check()),
-            "clean_bytecache" => Ok(self.clean_bytecache()),
-            "get_stats" | "stats" => Ok(self.stats()),
-            "doctor_snapshot" | "doctor" => Ok(self.stats()),
-            "rollback" => self.rollback(&session, 0),
-            _ => Err(format!("batch method '{method}' is not available")),
+        let name = match method {
+            "index_documents" => "index",
+            "detect_changes_and_update" => "detect_changes",
+            "rebuild_symbol_graph" => "rebuild_symbols",
+            "check_environment" => "environment_check",
+            "get_stats" => "stats",
+            "doctor_snapshot" => "doctor",
+            other => other,
+        };
+        match crate::mcp::dispatch(self, name, params) {
+            Err(err) if err.starts_with("unknown tool") => Err(format!("Unknown method: {method}")),
+            other => other,
         }
     }
 
@@ -752,8 +737,8 @@ impl Engine {
                 searches: Vec::new(),
                 reads: Vec::new(),
                 kv: Vec::new(),
-                created_at: now_secs(),
-                updated_at: now_secs(),
+                created_at: super::now_us(),
+                updated_at: super::now_us(),
                 turn: 0,
                 tokens: 0,
                 agent: String::new(),
@@ -967,13 +952,6 @@ fn field_ops<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     field(value, key)
 }
 
-fn text_ops(value: &Value, key: &str) -> Option<String> {
-    match field(value, key) {
-        Some(Value::String(text)) if !text.is_empty() => Some(text.clone()),
-        _ => None,
-    }
-}
-
 fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     let Value::Object(pairs) = value else {
         return None;
@@ -996,5 +974,13 @@ fn int_of(value: &Value, key: &str) -> i64 {
         Some(Value::Int(number)) => *number,
         Some(Value::Float(number)) => *number as i64,
         _ => 0,
+    }
+}
+
+fn num_of(value: &Value, key: &str) -> f64 {
+    match field(value, key) {
+        Some(Value::Float(number)) => *number,
+        Some(Value::Int(number)) => *number as f64,
+        _ => 0.0,
     }
 }
