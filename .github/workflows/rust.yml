@@ -134,6 +134,6 @@ jobs:
         run: |
           ext=""
           if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
-          python -m bench \
+          python -c "from bench.bench import main; raise SystemExit(main())" \
             --binary "target/${{ matrix.target }}/release/stele-context${ext}" \
             --group b1 --runs 10 --check-floor
