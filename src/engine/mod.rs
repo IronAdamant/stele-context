@@ -208,6 +208,62 @@ impl Engine {
         let mut removed = Vec::new();
         let kv_restored = 0i64;
         let mut kv_reprocessed = 0i64;
+        if only.is_none() {
+            let mut aligned = true;
+            unchanged.reserve(self.store.state.documents.len());
+            for doc in &self.store.state.documents {
+                let abs = self.cwd.join(&doc.path);
+                let Ok(meta) = fs::metadata(&abs) else {
+                    aligned = false;
+                    break;
+                };
+                if doc.size == meta.len() && doc.mtime_ns == mtime_ns(&meta) {
+                    unchanged.push(doc.path.clone());
+                } else {
+                    aligned = false;
+                    break;
+                }
+            }
+            if aligned {
+                if scan_new {
+                    let have: std::collections::HashSet<&str> = self
+                        .store
+                        .state
+                        .documents
+                        .iter()
+                        .map(|doc| doc.path.as_str())
+                        .collect();
+                    for (rel, _) in &files {
+                        if !have.contains(rel.as_str()) {
+                            new_rows.push(Value::object(vec![
+                                ("path", Value::string(rel)),
+                                ("reason", Value::string("New file (scan)")),
+                            ]));
+                        }
+                    }
+                }
+                let mut result = Value::object(vec![
+                    ("unchanged", strings(&unchanged)),
+                    ("modified", Value::Array(Vec::new())),
+                    ("new", Value::Array(new_rows)),
+                    ("removed", Value::Array(Vec::new())),
+                    ("conflicts", Value::Array(Vec::new())),
+                    ("kv_restored", Value::Int(0)),
+                    ("kv_reprocessed", Value::Int(0)),
+                ]);
+                if limit > 0 {
+                    truncate_detect(&mut result, limit);
+                }
+                self.store.state.change_log.push(crate::store::ChangeRow {
+                    at: now_secs(),
+                    session: "default".to_string(),
+                    summary: "detect".to_string(),
+                    reason: String::new(),
+                });
+                return Ok(result);
+            }
+            unchanged.clear();
+        }
         let docs: std::collections::HashMap<String, (u64, i64)> = self
             .store
             .state
