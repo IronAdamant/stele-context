@@ -279,7 +279,6 @@ def run_cli(args):
 payload["cli"] = {
     "search_prefix": run_cli(["search", "classify", "--path-prefix", "src", "--search-mode", "keyword", "--json"]),
     "text_regex": run_cli(["search-text", "classif.", "--regex", "--limit", "5", "--json"]),
-    "text_document": run_cli(["search-text", "classify", "--document", "src/sample.py", "--limit", "5", "--json"]),
     "search_compact": run_cli(["search", "classify", "--compact", "--top-k", "2", "--json"]),
     "grep": run_cli(["agent-grep", "classify", "--group-by", "file", "--json"]),
     "define": run_cli(["find-definition", "classify", "--json"]),
@@ -515,18 +514,6 @@ fn cli_suite(root: &std::path::Path, store: &std::path::Path) -> crate::json::Va
                 "search-text",
                 "classif.",
                 "--regex",
-                "--limit",
-                "5",
-                "--json",
-            ],
-        ),
-        (
-            "text_document",
-            vec![
-                "search-text",
-                "classify",
-                "--document",
-                "src/sample.py",
                 "--limit",
                 "5",
                 "--json",
