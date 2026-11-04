@@ -1142,6 +1142,12 @@ def cmd_clear(args: argparse.Namespace, stele: Stele) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """Main entry point for Stele CLI."""
+    print(
+        f"stele-context {stele_version} is the final Python package. "
+        "2.0.0 is the Rust release: "
+        "https://github.com/IronAdamant/stele-context/releases/tag/v2.0.0",
+        file=sys.stderr,
+    )
     parser = create_parser()
     args = parser.parse_args(argv)
 

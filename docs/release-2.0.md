@@ -15,7 +15,7 @@ Symbol edges match Python's full rebuild on rich: 4939 edges (4412 cross_file, 4
 
 Pushing `v2.*` runs `.github/workflows/release-rust.yml` and creates the GitHub Release. It does not upload to PyPI.
 
-Pushing `v1.*` runs `.github/workflows/publish.yml` and uploads the sdist to PyPI. `v2.*` does not match that workflow.
+Pushing `v1.*` runs `.github/workflows/publish.yml` and uploads the sdist to PyPI. The tag filter is `v1.*`. A published GitHub Release whose tag does not start with `v1.` skips the publish job, so a 2.x tag cannot upload to PyPI.
 
 ## Steps
 

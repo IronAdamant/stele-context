@@ -47,7 +47,7 @@ def run_smoke(fixtures: Path) -> None:
         base = ["--storage-dir", str(store)]
 
         version = _expect(_run(["--version"], root), "--version")
-        if "stele-context 1.5.2" not in version:
+        if "stele-context 1.5.3" not in version:
             raise RuntimeError(f"--version returned {version!r}")
         help_out = _expect(_run(["--help"], root), "--help")
         if "index" not in help_out or "doctor" not in help_out:

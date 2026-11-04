@@ -28,7 +28,9 @@ MAX_CHUNK_SIZE = 4096
 
 
 def _require_reference_runtime() -> None:
-    if __version__ != PYTHON_PACKAGE:
+    # 1.5.3 is the notice release of this same indexer. The capture record
+    # stays PYTHON_PACKAGE so the corpus hashes do not move.
+    if __version__ not in {PYTHON_PACKAGE, "1.5.3"}:
         raise RuntimeError(
             f"parity target is stele-context {PYTHON_PACKAGE}, found {__version__}"
         )

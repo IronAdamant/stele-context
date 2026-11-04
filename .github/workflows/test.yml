@@ -177,6 +177,24 @@ jobs:
       run: |
         mypy stele_context/ --ignore-missing-imports
 
+  package:
+    name: sdist build and twine check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Build the 1.5.3 sdist and check it
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+        python -m build
+        twine check dist/*
+
   lint:
     runs-on: ubuntu-latest
     steps:
