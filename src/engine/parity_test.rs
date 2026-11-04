@@ -803,17 +803,19 @@ fn canonical(value: &crate::json::Value, root: &str, key: &str) -> crate::json::
         }
         String(text) => {
             let mut text = text.replace("\r\n", "\n").replace('\\', "/");
-            let mut roots = vec![root.to_string()];
-            if let Some(rest) = root.strip_prefix("/tmp") {
-                roots.push(format!("/private/tmp{rest}"));
-            }
-            if let Some(rest) = root.strip_prefix("/private/tmp") {
-                roots.push(format!("/tmp{rest}"));
-            }
-            for item in roots {
-                if !item.is_empty() {
-                    text = text.replace(&item, "");
+            let root_norm = root.replace('\\', "/");
+            let name = root_norm.rsplit('/').next().unwrap_or("");
+            if !name.is_empty() {
+                if let Some(idx) = text.find(name) {
+                    let end = idx + name.len();
+                    let boundary = idx == 0 || text.as_bytes().get(idx - 1) == Some(&b'/');
+                    if boundary {
+                        text = text[end..].to_string();
+                    }
                 }
+            }
+            if !root_norm.is_empty() {
+                text = text.replace(&root_norm, "");
             }
             String(text)
         }
