@@ -1,6 +1,8 @@
-# Stele Context — agent guide
+# Stele Context: agent guide
 
 Stele is a **local, persistent index** of your project: chunks, hybrid search (HNSW + BM25), symbol graph, and optional **Tier 2** semantics **you** supply (summaries or vectors). It does **not** bundle an embedding model.
+
+The product on this branch is the Rust 2.0 binary. The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
 
 ## Read first
 
@@ -98,23 +100,25 @@ Cold-start ritual: `doctor` → `query` (with `session_id`) → `agent_grep` / `
 
 HTTP returns `{"success", "result"}` or `{"error"}`. Stdio MCP returns the **bare** tool result. Both are intentional; do not unify silently.
 
-## Rust 2.0
+## Rust crate
 
-The rewrite lives in this repo beside the Python package. `[dependencies]` stays empty. Release steps, tag names, and secrets are in [docs/release-2.0.md](docs/release-2.0.md).
+`[dependencies]` stays empty. Release steps, tag names, and secrets are in [docs/release-2.0.md](docs/release-2.0.md).
 
 ```bash
 cargo test
 cargo build --release
-python -m parity verify --skip-corpora
-python -m bench --binary target/release/stele-context --group b1 --runs 10 --check-floor
-python scripts/check_zero_deps.py
+bash scripts/fetch_corpora.sh
+./target/release/stele-bench floor \
+  --binary target/release/stele-context --group b1 --runs 10 --check-floor
 ```
 
 `stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.0.0`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. The 18 old singleton names return `tool_removed`.
 
+Fixture goldens live in `parity/goldens/`. `cargo test` checks chunks and symbols against `fixtures.json`. `bash scripts/fetch_corpora.sh` fills `parity/.cache` so the rich 13.9.4 and flask 3.1.0 round-trip tests run. Historical timings are `bench/baseline/` and `bench/rust-b1.json`.
+
 ### Adding a language
 
 1. Add the extension to `src/walk.rs` (`CODE_EXTENSIONS` or `TEXT_EXTENSIONS`) and to `src/chunk/patterns.rs` if chunk boundaries are not the JavaScript pattern.
-2. Teach `src/symbols/` to emit the same names, kinds, roles, lines, and containers as `SymbolExtractor` in package 1.5.2. The fixture golden is `parity/goldens/fixtures.json`.
+2. Teach `src/symbols/` to emit the same names, kinds, roles, lines, and containers as the 1.5.2 `SymbolExtractor`. The fixture golden is `parity/goldens/fixtures.json`.
 3. The shared scanner in `src/lang/scan.rs` already round-trips other extensions. A dedicated grammar replaces that scanner only when it still renders the original bytes, including the corpus cache.
-4. Re-run `cargo test` and `python -m parity verify --skip-corpora`.
+4. Re-run `cargo test`.

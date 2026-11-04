@@ -19,18 +19,13 @@ Provide any relevant context for your question:
 
 ## Environment (if relevant)
 
-- **Stele Context Version**: [e.g., 0.1.0]
-- **Python Version**: [e.g., 3.12.0]
+- **Stele Context Version**: [e.g., 2.0.0]
 - **Operating System**: [e.g., Ubuntu 22.04, macOS 14.0, Windows 11]
 
 ## Code Example (if applicable)
 
-```python
-# Paste relevant code here
-from stele_context import Stele
-
-cf = Stele()
-# Your code
+```bash
+stele-context doctor
 ```
 
 ## Error Messages (if applicable)

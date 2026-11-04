@@ -32,17 +32,8 @@ Closes #(issue number)
 ### Test Commands
 
 ```bash
-# Run tests
-pytest
-
-# Run with coverage
-pytest --cov=stele_context --cov-report=term-missing
-
-# Type checking
-mypy stele_context/
-
-# Linting
-ruff check stele_context/
+cargo fmt --check
+cargo test
 ```
 
 ## Documentation

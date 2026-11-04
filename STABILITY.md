@@ -1,6 +1,10 @@
 # API Stability
 
-Stele Context follows [Semantic Versioning](https://semver.org/). This document defines what is considered public API and what stability guarantees apply.
+Stele Context follows [Semantic Versioning](https://semver.org/).
+
+On `main` the public surface is the `stele-context` CLI, the `stele-context-mcp` binary, and the MCP tool names. Commands and tool names do not change incompatibly inside 2.x. New optional flags and new tools may be added.
+
+The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x). The class list below is that 1.x library. It is not importable from this branch.
 
 ## Public API
 

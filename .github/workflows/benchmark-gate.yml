@@ -1,6 +1,9 @@
 # D13: every pull request is compared with its base on one runner.
 # Sixteen interleaved runs (at least fifteen). The check name is the job
 # name, benchmark-gate, so it can be required.
+#
+# The gate builds the Rust binaries of the base and head commits. It does
+# not install a Python package.
 
 name: Benchmark gate
 
@@ -19,9 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Resolve base and head
         id: sha
@@ -41,8 +42,13 @@ jobs:
           echo "base=$base" >> "$GITHUB_OUTPUT"
           echo "head=$head" >> "$GITHUB_OUTPUT"
 
+      - name: Build the gate
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo build --release --bin stele-bench
+
       - name: Interleaved main versus pull request
         env:
           GATE_BASE_SHA: ${{ steps.sha.outputs.base }}
           GATE_HEAD_SHA: ${{ steps.sha.outputs.head }}
-        run: python -m bench.ci_gate --runs 16
+        run: ./target/release/stele-bench gate --runs 16

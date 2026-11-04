@@ -28,12 +28,8 @@ Describe the use case(s) for this feature:
 
 ## Example Usage
 
-```python
-# Show how the feature would be used
-from stele_context import Stele
-
-cf = Stele()
-# Example code using the new feature
+```bash
+stele-context search "example"
 ```
 
 ## Alternatives Considered

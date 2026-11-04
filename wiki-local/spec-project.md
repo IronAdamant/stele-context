@@ -1,5 +1,7 @@
 # Project Specification
 
+The product on `main` is the Rust binary in `src/`. The diagram below is the 1.x layout. The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
+
 ## Overview
 
 Stele Context is a local context cache for LLM agents. It indexes documents through modality-specific chunkers, stores chunk data in SQLite, and provides O(log n) semantic search via an HNSW vector index. Designed for 100% offline use with zero required dependencies. **Default search is keyword/BM25**; hybrid (HNSW+BM25) is opt-in. `map`/`search` accept optional `path_prefix`; `impact_radius` supports `summary_mode`. As of **v1.5.x**: MCP **lite** default, `stele-context init`, `query` composite retrieval + `applied_defaults`, `enrichment_plan`, doctor guidance, working_tree auto-index. v1.4.x also: `diff_since_cache`, `.gitignore`-aware indexing, bounded history, stale egg-info detection (see CHANGELOG).
@@ -57,4 +59,4 @@ MCP: tool_registry, mcp_tools_primary, mcp_tools_symbols
 - `stele-context` CLI command -> `stele_context.cli:main`
 - `stele-context-mcp` command -> `stele_context.mcp_stdio:main`
 - Python API -> `from stele_context.engine import Stele`
-- PyPI package -> `pip install stele-context`
+- Install the Rust binary from the GitHub Release (`scripts/install.sh`). PyPI 1.5.x is the `python-legacy` branch.

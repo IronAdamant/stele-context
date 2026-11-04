@@ -1,6 +1,8 @@
 # Agent workflow
 
-This document is for **LLM agents** (and humans wiring MCP/HTTP) operating **in a repository** across **multiple sessions**. It describes a practical path from “cold repo” to “fast retrieval,” using Stele’s APIs and tools.
+This document is for LLM agents (and humans wiring MCP or HTTP) operating in a repository across multiple sessions. It describes a practical path from a cold repo to fast retrieval, using the Rust CLI and MCP tools.
+
+The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
 
 ## Mental model
 
@@ -28,14 +30,6 @@ Indexes the tree (gitignore-aware), prints **MCP lite** config + **recommended r
 - **MCP / HTTP**: `index` with paths (project root or globs as supported), or CLI: `stele-context index <paths>`.
 - **Orient cheaply** (token-bounded): MCP/CLI **`doctor`** — health, freshness, `next_steps`, Tier-2 coverage, token-savings estimate. CLI: `stele-context doctor`.
 - Optionally run **`map`** (`compact=true` for large repos) or **`stats`** (`compact=true`) to confirm **index_health**.
-
-**Python** (`Stele` engine):
-
-```python
-engine.index_documents(["src/", "README.md"])
-snap = engine.doctor_snapshot()  # next_steps, enrichment_preview, token_savings
-plan = engine.enrichment_plan(top_n=10)
-```
 
 ### Canonical ritual
 
@@ -114,14 +108,7 @@ Tier 1 works out of the box. Tier 2 is how **you** (the agent) vectorize nuance 
 
 Pass a map of **normalized file paths → short summary** when indexing:
 
-```python
-engine.index_documents(
-    ["src/app.py"],
-    summaries={"src/app.py": "FastAPI app: routes for /api/v1/users and auth middleware."},
-)
-```
-
-All chunks from those files receive that summary pipeline (see engine behavior and `summaries_applied` in the result).
+Pass summaries through the MCP `index` tool or `bulk_store_summaries` after you have chunk ids. All chunks from a file that was indexed with a document summary pick up that summary.
 
 ### Per-chunk summaries after chunk IDs exist
 
@@ -138,7 +125,7 @@ If you already have a vector (e.g. from your own embedding step):
 
 ### Helpers
 
-- **`stele_context.llm_embedding`**: optional utilities for **structured fingerprints** → 128-dim vectors **you** produce; the library does not call remote APIs.
+- **`llm_embed`**: structured fingerprints become 128-dim vectors **you** produce. The binary does not call a remote API.
 
 ## Multiple sessions
 

@@ -1,6 +1,8 @@
 # Technical Architecture
 
-This document covers Stele Context's internals for contributors and users who want to understand how things work under the hood. For getting started, see the [README](../README.md).
+The product on `main` is the Rust 2.0 binary in `src/`. The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
+
+This document records the behaviour the Rust port keeps (search, symbols, storage, MCP). Paths such as `stele_context/` and `engine.py` are the 1.x modules. On `main` the matching code is under `src/`. For getting started, see the [README](../README.md).
 
 ## System Overview
 
@@ -176,13 +178,15 @@ The HTTP REST server and MCP stdio server share a unified registry (`tool_regist
 
 ## Performance Benchmarks
 
-Run with:
+Startup is re-checked in CI:
+
 ```bash
-python benchmarks/run_all.py          # Full suite
-python benchmarks/run_all.py --quick  # CI mode
+cargo build --release
+./target/release/stele-bench floor \
+  --binary ./target/release/stele-context --group b1 --runs 10 --check-floor
 ```
 
-Representative results (quick mode, single machine):
+The recorded Python 1.5.1 floor is `bench/baseline/summary.json`. Representative 1.x microbenchmarks (historical, single machine):
 
 | Operation | Scale | Time | Throughput |
 |-----------|-------|------|------------|

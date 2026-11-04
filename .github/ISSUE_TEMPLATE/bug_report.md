@@ -33,10 +33,9 @@ Paste any error messages or stack traces here
 
 ## Environment
 
-- **Stele Context Version**: [e.g., 0.1.0]
-- **Python Version**: [e.g., 3.12.0]
+- **Stele Context Version**: [e.g., 2.0.0]
 - **Operating System**: [e.g., Ubuntu 22.04, macOS 14.0, Windows 11]
-- **Installation Method**: [e.g., pip install -e ., pip install stele-context]
+- **Installation Method**: [e.g., GitHub Release, scripts/install.sh, cargo build --release]
 
 ## Additional Context
 

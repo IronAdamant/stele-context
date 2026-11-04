@@ -1,151 +1,49 @@
 # Stele Context - Complete Project Documentation
 
-**Last updated:** 2026-11-04 · **Release:** Python package 1.5.3 (notice only, not tagged); Rust crate 2.0.0
+**Last updated:** 2026-11-04. **Release:** Rust crate 2.0.0.
 
-Rust 2.0 sources: `src/` (chunk, pyre, search, store, engine, symbols, mcp, lang/scan, media, http_serve, locks), `Cargo.toml` with an empty `[dependencies]`. Media indexing, `serve`, and the cross-worktree lock file are std-only. Release notes: `docs/release-2.0.md`. The 1.5.3 PyPI notice from `release/pypi-1.5.3/NOTICE.md` is applied: `pip install stele-context` stays on 1.5.x and the CLI points at the Rust 2.0.0 release. `llms.txt` and `server.json` describe the 2.0 binary. `npm/stele-context` is a launcher. `.github/workflows/release-rust.yml` publishes `v2.*` binaries. `.github/workflows/publish.yml` triggers on `v1.*` tags only, and skips a published release whose tag is not `v1.*`.
+The product is the std-only Rust binary. The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
 
-## Documentation (root)
+## Documentation
 
 | Path | Purpose |
 |------|---------|
-| `AGENTS.md` | Short agent entry: orientation tools, session vs index, trust, Tier 2 vs chunk notes |
-| `docs/philosophy.md` | Design philosophy: zero deps, Tier 1 vs Tier 2, LLM-as-embedder, cross-session retrieval, comparison by design |
-| `docs/architecture.md` | Technical architecture + Design Decisions Log (historical bullets moved from CLAUDE.md) |
-| `docs/agent-workflow.md` | Agent-oriented workflow: index → enrich → retrieve, tool choice, Tier 2 APIs, sessions |
+| `README.md` | Install, MCP, and the benchmark table |
+| `AGENTS.md` | How agents should use the tools |
+| `CLAUDE.md` | Crate map and invariants |
+| `CONTRIBUTING.md` | Rust setup and tests |
+| `llms.txt` | Short product card |
+| `CHANGELOG.md` | Release history, including 1.x |
+| `STABILITY.md` | CLI and MCP stability. The class list is the 1.x API |
+| `docs/philosophy.md` | Why there are no crates, Tier 1 vs Tier 2 |
+| `docs/architecture.md` | Behaviour the port keeps. 1.x module names are historical |
+| `docs/agent-workflow.md` | Index, enrich, retrieve |
+| `docs/release-2.0.md` | v2 tags and v1 tags from `python-legacy` |
+| `docs/release-automation.md` | 1.x release notes, with a pointer to the Rust workflow |
 
-## File Table
+## Tree
 
-| Path | Purpose | Internal Deps | Tests |
-|------|---------|---------------|-------|
-| `stele_context/__init__.py` | Package root, exports `__version__`, `Stele`, `Chunk` | None | test_core.py |
-| `stele_context/core.py` | Backward-compat re-exports (`Stele`, `Chunk`) | engine, chunkers.base | test_core.py |
-| `stele_context/engine.py` | Main orchestrator — `Stele` facade inherits from 5 mixins; retains __init__, plumbing, cross-domain ops (query, batch), session lifecycle | all engine_*_mixin modules, config, rwlock, session, storage, symbol_graph | test_engine.py |
-| `stele_context/engine_index_mixin.py` | Mixin: index_documents, detect_changes, remove_document, annotations CRUD, Tier-2 writes, prune_history | indexing, change_detection, search_engine, engine_utils | (via test_engine.py, test_batch_summaries.py) |
-| `stele_context/engine_info_mixin.py` | Mixin: get_map, get_stats, get_history, doctor_snapshot, project_brief, list_sessions, environment checks | search_engine, engine_utils | (via test_engine.py, test_mcp_server.py) |
-| `stele_context/engine_search_mixin.py` | Mixin: search, agent_grep, search_text, get_context, session history helpers, working-tree indexing | search_engine, agent_grep, engine_utils | (via test_engine.py, test_search_engine.py) |
-| `stele_context/engine_symbol_mixin.py` | Mixin: find_references, find_definition, impact_radius, coupling, dynamic symbols | (self-contained; uses symbol_manager via self) | (via test_symbols.py) |
-| `stele_context/engine_lock_mixin.py` | Mixin: document_lock (unified) + per-op lock methods, agent registry, notifications | (self-contained; uses _coordination/storage via self) | (via test_conflicts.py, test_worktree_safety.py) |
-| `stele_context/engine_utils.py` | Path normalization, lock routing, read_and_hash, env checks. `detect_project_root` stops at the nearest `.git` or `.stele-context.toml` | coordination, env_checks | (via test_engine.py, test_worktree_safety.py, test_project_root_marker.py) |
-| `stele_context/indexing.py` | Document indexing: chunk, store, merge, expand | chunkers.base, chunkers.numpy_compat | test_engine.py |
-| `stele_context/search_engine.py` | Hybrid search (HNSW+BM25, weak-cosine BM25 fallback, path_prefix), get_context, map/stats, project_brief, search bounds | bm25, index, index_store, agent_response, chunkers | test_engine.py, test_search_engine.py |
-| `stele_context/index_health.py` | `compute_index_health_snapshot()` — alerts, staleness for map/stats | None | test_index_health.py |
-| `stele_context/change_detection.py` | Detect file changes, re-index modified chunks | chunkers.base, chunkers.numpy_compat | test_engine.py |
-| `stele_context/context_diff.py` | Diff-since-cache: token-bounded unified diff between cached chunks and disk for changed files | chunkers.base (estimate_tokens only) | test_context_diff.py |
-| `stele_context/gitignore.py` | Pure-stdlib .gitignore matcher used by expand_paths during indexing | None | test_gitignore.py |
-| `stele_context/config.py` | `.stele-context.toml` loader with minimal TOML parser | None | test_config.py |
-| `stele_context/storage.py` | `StorageBackend` - SQLite + filesystem persistence | storage_schema, storage_delegates, storage_writer, all sub-storages | test_engine.py, test_storage_migration.py |
-| `stele_context/storage_schema.py` | Database init and migration SQL | connection_pool | test_storage_migration.py |
-| `stele_context/storage_writer.py` | `WriterQueue` - single daemon thread serializing SQLite writes for zero-dep concurrency | connection_pool | test_sqlite_resilience.py |
-| `stele_context/connection_pool.py` | Thread-local SQLite connection reuse | None | (via test_engine.py) |
-| `stele_context/storage_delegates.py` | `StorageDelegatesMixin` - forwarding methods | None (mixin) | (via test_engine.py) |
-| `stele_context/session_storage.py` | Session table, KV-cache, search history, file-read provenance | None | test_session.py |
-| `stele_context/metadata_storage.py` | Annotations and change history tables | None | test_metadata.py |
-| `stele_context/symbol_storage.py` | Symbols and symbol edges tables | None | test_symbol_storage.py |
-| `stele_context/lock_ops.py` | Shared lock primitives (refresh, conflict, reap) | None | test_conflicts.py, test_worktree_safety.py |
-| `stele_context/document_lock_storage.py` | Per-worktree document locks and conflicts | lock_ops | test_conflicts.py |
-| `stele_context/session.py` | `SessionManager` - session lifecycle | storage | test_session.py |
-| `stele_context/index.py` | `HNSWIndex` - pure-Python HNSW vector index | chunkers.numpy_compat | test_index.py |
-| `stele_context/index_store.py` | HNSW/BM25 persistence (JSON+zlib) | None | test_index_store.py |
-| `stele_context/bm25.py` | `BM25Index` - keyword scoring | None | test_bm25.py |
-| `stele_context/rwlock.py` | Read-write lock for thread safety | None | test_concurrency.py |
-| `stele_context/symbols.py` | `SymbolExtractor` - dispatcher + Python AST | symbol_patterns | test_symbols.py |
-| `stele_context/symbol_patterns.py` | `Symbol` dataclass + language regex extractors (C/C++ no longer claims C#), const alias tracking, destructured module.exports parsing | None | test_symbols.py |
-| `stele_context/symbol_csharp.py` | C# regex extractor: declarations are definitions, calls such as `return Compute(a)` are references | symbol_patterns | test_csharp_symbols.py |
-| `stele_context/symbol_swift.py` | Swift regex extractor: class/struct/enum/protocol/extension/actor/func declarations are definitions; calls are references | symbol_patterns | test_swift_symbols.py |
-| `stele_context/symbol_graph.py` | `SymbolGraphManager` - edges, staleness, queries, `impact_radius` summary_mode | symbols, storage | test_symbols.py |
-| `stele_context/coordination.py` | `CoordinationBackend` - cross-worktree shared DB | agent_registry, change_notifications, lock_ops | test_worktree_safety.py |
-| `stele_context/change_notifications.py` | Change notification storage for coordination DB | None | test_worktree_safety.py |
-| `stele_context/agent_registry.py` | Agent registration, heartbeat, reaping | None | test_worktree_safety.py |
-| `stele_context/env_checks.py` | Stale bytecache, editable install, stale egg-info, and stale editable-metadata detection (pyproject-anchored) | None | test_env_checks.py |
-| `stele_context/protocols.py` | Typing protocols for delegation boundaries | None | (static analysis only) |
-| `stele_context/stemmer.py` | Pure-Python Porter stemmer, identifier splitting | None | test_stemmer.py |
-| `stele_context/agent_response.py` | Token-bounded search/map/stats helpers, `project_brief` builder, chunk content trim | chunkers.base | test_agent_response.py |
-| `stele_context/agent_grep.py` | LLM-optimized search: scope annotation, classification, dedup, token budget | chunkers.base (estimate_tokens only) | test_agent_grep.py |
-| `stele_context/agent_guidance.py` | Agent ritual strings, MCP config snippet, doctor next_steps / enrichment / token-savings helpers (stdlib-only) | None | test_next_stage_guidance.py |
-| `stele_context/llm_embedding.py` | Semantic fingerprint computation + 32-dim to 128-dim vector mapping for Tier 2 embeddings | chunkers.numpy_compat | test_agent_embeddings.py |
-| `stele_context/chunkers/__init__.py` | Chunker registry, auto-detection | all chunkers | test_chunkers.py |
-| `stele_context/chunkers/base.py` | `Chunk` dataclass, `BaseChunker` ABC, `estimate_tokens()` | None | test_base_chunker.py |
-| `stele_context/chunkers/numpy_compat.py` | Pure-Python `sig_to_bytes`, `cosine_similarity` | None | test_numpy_compat.py |
-| `stele_context/chunkers/text.py` | `TextChunker` - sentence/paragraph splitting | chunkers.base | test_chunkers.py |
-| `stele_context/chunkers/code.py` | `CodeChunker` - AST/tree-sitter/regex chunking | chunkers.base, chunkers.code_patterns | test_chunkers.py, test_tree_sitter.py |
-| `stele_context/chunkers/code_patterns.py` | Tree-sitter node types, regex patterns per language | None | (via test_chunkers.py) |
-| `stele_context/chunkers/image.py` | `ImageChunker` - Pillow-based (optional) | chunkers.base | (requires Pillow) |
-| `stele_context/chunkers/pdf.py` | `PDFChunker` - pymupdf-based (optional) | chunkers.base | (requires pymupdf) |
-| `stele_context/chunkers/audio.py` | `AudioChunker` - librosa-based (optional) | chunkers.base | (requires librosa) |
-| `stele_context/chunkers/video.py` | `VideoChunker` - OpenCV-based (optional) | chunkers.base | (requires opencv) |
-| `stele_context/cli.py` | CLI entry point (`stele-context` command) | engine | (manual testing) |
-| `stele_context/cli_metadata.py` | CLI metadata/annotation subcommands | engine | (manual testing) |
-| `stele_context/cli_release.py` | `stele-context release` command, delegates to scripts/release.py | None (subprocess) | (manual testing) |
-| `scripts/mcp_stdio_smoke.py` | Stdio probe: build/install the wheel, then `initialize`, `tools/list`, and `tools/call` against `stele-context-mcp` | None | CI `mcp-stdio-smoke` |
-| `stele_context/mcp_server.py` | HTTP REST server (unified tool registry, threaded) + tool dispatch | tool_registry | test_mcp_server.py |
-| `stele_context/mcp_handlers.py` | Backward-compat shim (re-exports from mcp_server) | mcp_server, tool_registry | test_mcp_server.py |
-| `stele_context/tool_registry.py` | Unified tool dispatch, WRITE_TOOLS, HTTP schemas, modality flags; modes **lite** (default high-leverage) / **standard** (broader) / **full** (adds deprecated singleton tool names). Do not hard-code a single “N tools” count — list tools via registry/`doctor` | mcp_tools_primary | (via test_mcp_server.py, test_mcp_stdio.py, test_next_stage_guidance.py) |
-| `stele_context/mcp_stdio.py` | MCP stdio server (JSON-RPC for Claude Desktop) | mcp_tools_primary, tool_registry | test_mcp_stdio.py |
-| `stele_context/mcp_tools_primary.py` | MCP tool schemas — primary tools (search, index, context, sessions, locks, Tier-2, env) | mcp_tools_symbols | (via test_mcp_stdio.py, test_batch_summaries.py) |
-| `stele_context/mcp_tools_symbols.py` | MCP tool schemas — symbol-graph tools (find_references, impact_radius, coupling, dynamic symbols) | None (standalone) | (via test_mcp_stdio.py) |
+| Path | Purpose |
+|------|---------|
+| `Cargo.toml`, `Cargo.lock` | Crate `stele-context` 2.0.0. No dependencies |
+| `src/` | Library, `stele-context`, `stele-context-mcp` |
+| `src/bin/stele-bench/` | B1 floor and D13 gate. Not shipped in the GitHub Release |
+| `src/engine/` | Index, detect, search, query, locks |
+| `src/chunk/`, `src/search/`, `src/store/` | Chunks, BM25, on-disk state |
+| `src/symbols/`, `src/lang/`, `src/syntax/` | Extractors and lossless scanners |
+| `src/media/`, `src/mcp/`, `src/http_serve.rs` | Media, stdio MCP, local HTTP |
+| `parity/fixtures/` | Small files in many languages, including media. Rust tests read them |
+| `parity/goldens/` | `fixtures.json`, `media.json`, `corpora.json`, `extensions.json` |
+| `parity/.cache/` | Gitignored rich and flask trees from `scripts/fetch_corpora.sh` |
+| `bench/baseline/` | Python 1.5.1 floor (`summary.json`, `raw.jsonl`) |
+| `bench/rust-b1.json`, `bench/rust-rich.json` | Recorded Rust timings |
+| `scripts/install.sh`, `scripts/install.ps1` | Install a release binary |
+| `scripts/fetch_corpora.sh` | Download pinned corpora for tests |
+| `npm/stele-context/` | Optional Node launcher. Not published by the tag workflows |
+| `server.json`, `.mcp.json` | MCP registry and a local client example |
+| `.github/workflows/rust.yml` | Format, zero-deps, tests, B1 floor. Linux, macOS, Windows |
+| `.github/workflows/benchmark-gate.yml` | D13 via `stele-bench gate` |
+| `.github/workflows/release-rust.yml` | `v2.*` GitHub Release binaries |
+| `release/pypi-1.5.3/NOTICE.md` | Record of the 1.5.3 pointer release |
 
-## Test Files
-
-| Path | Covers | Count |
-|------|--------|-------|
-| `tests/conftest.py` | Shared fixtures: `stele_engine`, `stele_engine_with_file`, `stele_engine_with_data` | — |
-| `tests/test_core.py` | core.py re-exports | ~5 |
-| `tests/test_engine.py` | Engine integration | ~80 |
-| `tests/test_base_chunker.py` | Chunk dataclass, BaseChunker, estimate_tokens | ~64 |
-| `tests/test_numpy_compat.py` | sig_to_bytes, cosine_similarity round-trips | ~29 |
-| `tests/test_chunkers.py` | Text and code chunking | ~30 |
-| `tests/test_tree_sitter.py` | Tree-sitter code chunking (optional) | ~10 |
-| `tests/test_bm25.py` | BM25 indexing and scoring | ~15 |
-| `tests/test_index.py` | HNSW insert, search, delete | ~20 |
-| `tests/test_index_store.py` | Index persistence | ~10 |
-| `tests/test_session.py` | Session lifecycle, rollback | ~15 |
-| `tests/test_metadata.py` | Annotations, change history | ~20 |
-| `tests/test_symbols.py` | Symbol extraction, graph, staleness | ~30 |
-| `tests/test_symbol_storage.py` | Symbol and edge CRUD | ~32 |
-| `tests/test_config.py` | TOML parsing, config merging | ~15 |
-| `tests/test_conflicts.py` | Document locking, conflicts | ~20 |
-| `tests/test_concurrency.py` | RWLock, thread safety | ~15 |
-| `tests/test_worktree_safety.py` | Path normalization, coordination, agents | ~60 |
-| `tests/test_mcp_server.py` | HTTP server tools | ~19 |
-| `tests/test_mcp_stdio.py` | MCP stdio tools | ~18 |
-| `tests/test_storage_migration.py` | Schema migrations | ~8 |
-| `tests/test_agent_embeddings.py` | Agent-supplied embeddings | ~15 |
-| `tests/test_chunk_history.py` | Chunk version history | ~10 |
-| `tests/test_env_checks.py` | Pycache scanning, editable installs, egg-info/editable-metadata staleness | ~52 |
-
-| `tests/test_stemmer.py` | Porter stemmer: stem(), split_identifier() | ~25 |
-| `tests/test_cli.py` | CLI commands, argument parsing, JSON output | ~30 |
-| `tests/test_search_engine.py` | Search alpha tuning, identifier extraction, signatures | ~30 |
-| `tests/test_index_health.py` | Index health snapshot, alerts | ~4 |
-| `tests/test_search_regression.py` | Keyword/hybrid regression (`@search_regression`) | ~4 |
-| `tests/test_agent_response.py` | Token bounds, compact map, project_brief helper | ~4 |
-| `tests/test_connection_pool.py` | Thread-local pool, connect() context manager, search_text edges | ~40 |
-| `tests/test_media_chunkers.py` | Media chunker extensions, HAS_* flags, modality detection | ~30 |
-| `tests/test_batch_summaries.py` | Inline summaries during indexing, bulk_store_summaries, has_agent_signatures | ~19 |
-| `tests/test_fastpath.py` | mtime+size fast-path for index/detect/get_context | ~17 |
-| `tests/test_sqlite_resilience.py` | `WriterQueue` single-writer, sqlite_retry decorator | ~2 |
-| `tests/test_auto_prune.py` | Bounded history auto-pruning, prune operation log, doctor growth alerts | ~9 |
-| `tests/test_agent_grep.py` | agent_grep scope/classify/budget/session history | (see file) |
-| `tests/test_context_diff.py` | Diff-since-cache for get_context | (see file) |
-| `tests/test_gitignore.py` | Pure-stdlib gitignore matcher | (see file) |
-| `tests/test_js_ts_symbol_golden.py` | JS/TS alias and export golden fixtures | (see file) |
-| `tests/test_next_stage_guidance.py` | doctor ritual, enrichment_plan, lite MCP tools | (see file) |
-| `tests/test_eval_search_quality.py` | Search quality eval harness wiring | (see file) |
-| `tests/test_p0_audit_fixes.py` | MCP schema/engine alignment (session_id, query history, save_kv_state) | (see file) |
-| `tests/test_bench_gate.py` | D13 median CI and Mann-Whitney gate | (see file) |
-| `tests/test_parity_harness.py` | Phase 0 fixture goldens, extension coverage, CLI smoke | (see file) |
-| `bench/gate.py` | D13 statistics: median interval, Mann-Whitney, optional Rust floor | none |
-| `bench/ci_gate.py` | Interleaved main-versus-PR benchmark runner | bench/gate.py |
-| `parity/` | Python 1.5.2 parity harness: fixtures, goldens, corpus hashes, CLI smoke | stele_context |
-| `.github/workflows/benchmark-gate.yml` | Required-style `benchmark-gate` check on every pull request and on main | bench/ci_gate.py |
-| `.github/workflows/rust.yml` | Parity harness on 3 OSes; Rust test/check on 6 targets; B1 floor | parity, bench, Cargo.toml |
-| `Cargo.toml`, `src/` | Rust 2.0.0 std-only crate. Phases 1–2: doctor, JSON, config, root, walk, hashes, parsing core (Python and JSON) | none |
-| `scripts/check_zero_deps.py` | Fails if Cargo.toml or Cargo.lock names any crate but stele-context | none |
-
-**Total:** run `pytest` for the current count (grows with the suite). Historical snapshot: 891 pass, 1 skipped without MCP SDK (as of 2026-04-17) — do not treat that number as live truth.
-
-## Accepted residual maintainability (D5)
-
-These modules remain large relative to a soft ~500-line guideline and are **accepted residual** after the llm-maintainable mixin split (see `plan/llm-maintainable-refactor-plan_closed.md`). Further splits are optional follow-on work (`plan/large-module-split-follow-on.md`), not open product bugs:
-
-- `stele_context/storage.py`, `symbol_graph.py`, `search_engine.py`, `cli.py`
+`publish.yml` is not on this branch. It is on `python-legacy`.

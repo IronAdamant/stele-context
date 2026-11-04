@@ -4,8 +4,9 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.x     | Yes                |
-| 0.10.x  | Security fixes only (upgrade to 1.x recommended) |
+| 2.0.x   | Yes. Rust binary from the GitHub Release. |
+| 1.5.x   | Yes. Python package on PyPI. Source is the `python-legacy` branch. |
+| 0.10.x  | Security fixes only (upgrade recommended) |
 | < 0.10  | No                 |
 
 ## Reporting a Vulnerability

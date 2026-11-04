@@ -1,5 +1,9 @@
 # Request: Grok Build Release Automation Capabilities
 
+Rust 2.x releases are `.github/workflows/release-rust.yml` on `main`. The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x). The notes below describe the 1.x PyPI helper, which is on `python-legacy`.
+
+
+
 **Date:** 2026-05-15  
 **Project:** stele-context  
 **Status:** Ready for implementation

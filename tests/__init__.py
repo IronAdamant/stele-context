@@ -1,1 +1,0 @@
-"""Stele test suite."""

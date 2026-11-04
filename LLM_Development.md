@@ -4,6 +4,13 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-04 - main is the Rust crate
+
+- Removed the Python package, Python tests, parity and bench runners, and the PyPI workflow from `main`.
+- `python-legacy` keeps that tree. `publish.yml` there still releases a pushed `v1.*` tag.
+- Rust tests still read `parity/fixtures` and `parity/goldens`. The D13 gate and the B1 floor run as `stele-bench`.
+- The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
+
 ## 2026-11-04 - Real media fixture and symbol edges
 
 - `parity/generate_media.py` writes a PNG, JPEG, GIF, WAV, MP3, MP4, and PDF that the decoders accept. Python 1.5.2 with the extras and Rust both index that directory as 7/7/0. Python 1.5.1 raises `FileNotFoundError` on the PDF because it decodes the file as text.

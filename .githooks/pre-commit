@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
-# Pre-commit hook: runs ruff lint, ruff format check, and mypy.
+# Pre-commit hook: cargo fmt.
 # Install: git config core.hooksPath .githooks
 set -e
 
-echo "pre-commit: ruff check..."
-ruff check stele_context/ tests/
-
-echo "pre-commit: ruff format..."
-ruff format --check stele_context/ tests/
-
-echo "pre-commit: mypy..."
-mypy stele_context/ --ignore-missing-imports
+echo "pre-commit: cargo fmt --check..."
+cargo fmt --check
 
 echo "pre-commit: all checks passed."
