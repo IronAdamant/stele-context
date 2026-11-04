@@ -42,11 +42,18 @@ pub fn chunk_bytes(
     bytes: &[u8],
     chunk_size: usize,
     max_chunk_size: usize,
+    merge_fallback: f64,
 ) -> Vec<Produced> {
     if crate::media::is_media(code::extension_of(path)) {
         return crate::media::chunk(path, bytes);
     }
-    chunk_document(path, &read_python_text(bytes), chunk_size, max_chunk_size)
+    chunk_document(
+        path,
+        &read_python_text(bytes),
+        chunk_size,
+        max_chunk_size,
+        merge_fallback,
+    )
 }
 
 pub fn chunk_document(
@@ -54,6 +61,7 @@ pub fn chunk_document(
     content: &str,
     chunk_size: usize,
     max_chunk_size: usize,
+    merge_fallback: f64,
 ) -> Vec<Produced> {
     let extension = code::extension_of(path);
     let (pieces, modality, language) = if TEXT_EXT.contains(&extension) {
@@ -79,7 +87,7 @@ pub fn chunk_document(
             language: language.clone(),
         })
         .collect();
-    merge::merge_similar(produced, max_chunk_size)
+    merge::merge_similar(produced, max_chunk_size, merge_fallback)
 }
 
 #[cfg(test)]
@@ -150,7 +158,7 @@ mod tests {
             let rel = string_field(file, "path");
             let bytes = std::fs::read(Path::new("parity/fixtures").join(&rel)).unwrap();
             let source = read_python_text(&bytes);
-            let produced = chunk_document(&rel, &source, CHUNK_SIZE, MAX_CHUNK_SIZE);
+            let produced = chunk_document(&rel, &source, CHUNK_SIZE, MAX_CHUNK_SIZE, 0.7);
             let chunks = match file {
                 Value::Object(pairs) => pairs.iter().find(|(key, _)| key == "chunks"),
                 _ => None,

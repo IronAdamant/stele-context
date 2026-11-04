@@ -359,6 +359,9 @@ impl Engine {
                 ),
             ]));
         }
+        if let Some(egg) = egg_info_issue(&root) {
+            issues.push(egg);
+        }
         Value::object(vec![
             ("issues", Value::Array(issues.clone())),
             ("total_issues", Value::Int(issues.len() as i64)),
@@ -526,6 +529,15 @@ impl Engine {
         });
     }
 
+    pub fn store_paths(&self) -> Vec<String> {
+        self.store
+            .state
+            .documents
+            .iter()
+            .map(|doc| doc.path.clone())
+            .collect()
+    }
+
     pub fn llm_embed(
         &mut self,
         text: &str,
@@ -550,7 +562,7 @@ impl Engine {
                     ),
                 ]));
             }
-            None => hash_embed(text),
+            None => super::fingerprint::embed_text(text),
         };
         if !self
             .store
@@ -807,6 +819,119 @@ fn nibble(byte: u8) -> u8 {
     }
 }
 
+fn egg_info_issue(root: &Path) -> Option<Value> {
+    let (proj_name, proj_version) = project_name_version(root);
+    let mut issues = Vec::new();
+    let Ok(read) = fs::read_dir(root) else {
+        return None;
+    };
+    for entry in read.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.ends_with(".egg-info") || !path.is_dir() {
+            continue;
+        }
+        let info = path.join("PKG-INFO");
+        let Ok(text) = fs::read_to_string(&info) else {
+            continue;
+        };
+        let mut egg_name = String::new();
+        let mut egg_version = String::new();
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("Name:") {
+                egg_name = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("Version:") {
+                egg_version = rest.trim().to_string();
+            }
+            if !egg_name.is_empty() && !egg_version.is_empty() {
+                break;
+            }
+        }
+        if egg_name.is_empty() || egg_version.is_empty() {
+            continue;
+        }
+        let dir = path.display().to_string();
+        if !proj_name.is_empty() && canonical(&egg_name) != canonical(&proj_name) {
+            issues.push(Value::object(vec![
+                ("egg_info_dir", Value::string(&dir)),
+                ("egg_info_version", Value::string(&egg_version)),
+                ("installed_version", Value::Null),
+                ("reason", Value::string("orphaned_name")),
+                (
+                    "warning",
+                    Value::string(format!(
+                        "'{name}' is for distribution '{egg_name}' but this project is '{proj_name}' — likely left over from a package rename. It provides a phantom distribution to any Python process run from this directory. Delete the directory."
+                    )),
+                ),
+            ]));
+            continue;
+        }
+        if !proj_version.is_empty() && egg_version != proj_version {
+            issues.push(Value::object(vec![
+                ("egg_info_dir", Value::string(&dir)),
+                ("egg_info_version", Value::string(&egg_version)),
+                ("installed_version", Value::Null),
+                ("reason", Value::string("stale_vs_project")),
+                (
+                    "warning",
+                    Value::string(format!(
+                        "'{name}' has version {egg_version} but pyproject.toml declares {proj_version}, and '{egg_name}' is not installed. Python run from this directory reads the stale metadata. Delete the directory or rebuild the package."
+                    )),
+                ),
+            ]));
+        }
+    }
+    if issues.is_empty() {
+        return None;
+    }
+    Some(Value::object(vec![
+        ("type", Value::string("stale_egg_info")),
+        ("egg_info_issues", Value::Array(issues.clone())),
+        ("count", Value::Int(issues.len() as i64)),
+    ]))
+}
+
+fn project_name_version(root: &Path) -> (String, String) {
+    let Ok(text) = fs::read_to_string(root.join("pyproject.toml")) else {
+        return (String::new(), String::new());
+    };
+    let mut name = String::new();
+    let mut version = String::new();
+    let mut in_project = false;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            in_project = line == "[project]";
+            continue;
+        }
+        if !in_project {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("name") {
+            if let Some(value) = toml_string(rest) {
+                name = value;
+            }
+        } else if let Some(rest) = line.strip_prefix("version") {
+            if let Some(value) = toml_string(rest) {
+                version = value;
+            }
+        }
+    }
+    (name, version)
+}
+
+fn toml_string(rest: &str) -> Option<String> {
+    let rest = rest.trim().strip_prefix('=')?.trim();
+    let rest = rest.strip_prefix('"').or_else(|| rest.strip_prefix('\''))?;
+    let end = rest.find(['"', '\'']).unwrap_or(rest.len());
+    Some(rest[..end].to_string())
+}
+
+fn canonical(name: &str) -> String {
+    name.replace(['_', '.'], "-").to_ascii_lowercase()
+}
+
 fn stale_pycache(root: &Path) -> (i64, Vec<String>) {
     let mut count = 0i64;
     let mut dirs = Vec::new();
@@ -885,17 +1010,6 @@ fn expand_fingerprint(values: &[f64]) -> Vec<f64> {
         }
     }
     vec
-}
-
-fn hash_embed(text: &str) -> Vec<f64> {
-    let mut raw = vec![0.0; 32];
-    for (index, byte) in text.bytes().enumerate() {
-        raw[index % 32] += (byte as f64 / 255.0) - 0.5;
-    }
-    for item in &mut raw {
-        *item = item.clamp(-1.0, 1.0);
-    }
-    expand_fingerprint(&raw)
 }
 
 fn field_ops<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {

@@ -30,7 +30,7 @@ impl Engine {
                     tier2: chunk.summary.is_some(),
                 })
                 .collect();
-            search::hybrid(&self.bm25, &docs, query, top_k)
+            search::hybrid_alpha(&self.bm25, &docs, query, top_k, self.search_alpha)
         } else {
             search::keyword(&self.bm25, query, top_k)
         };
@@ -481,15 +481,39 @@ impl Engine {
             self.note_read(session, &path);
             self.store.save("read", &Value::string(&path))?;
         }
-        Ok(Value::object(vec![
-            ("path", Value::string(path)),
+        let mut pairs = vec![
+            ("path".to_string(), Value::string(&path)),
             (
-                "trust",
+                "trust".to_string(),
                 Value::object(vec![("cache_aligned_with_disk", Value::Bool(aligned))]),
             ),
-            ("staleness_hint", Value::Bool(!aligned)),
-            ("chunks", Value::Array(chunks)),
-        ]))
+            ("staleness_hint".to_string(), Value::Bool(!aligned)),
+            ("chunks".to_string(), Value::Array(chunks)),
+        ];
+        if !aligned {
+            if let Ok(disk) = std::fs::read_to_string(&abs) {
+                let cached_chunks: Vec<(usize, usize, String)> = self
+                    .store
+                    .state
+                    .chunks
+                    .iter()
+                    .filter(|chunk| chunk.path == path)
+                    .map(|chunk| (chunk.start, chunk.end, chunk.content.clone()))
+                    .collect();
+                let stored_hash = self
+                    .store
+                    .state
+                    .documents
+                    .iter()
+                    .find(|doc| doc.path == path)
+                    .map(|doc| doc.sha256.clone())
+                    .unwrap_or_default();
+                if let Some(diff) = cache_diff(&cached_chunks, &stored_hash, &disk) {
+                    pairs.push(("diff_since_cache".to_string(), diff));
+                }
+            }
+        }
+        Ok(Value::Object(pairs))
     }
 
     pub fn annotations(&mut self, action: &str, path: &str, body: &str) -> Result<Value, String> {
@@ -912,6 +936,103 @@ fn slice_chars(text: &str, start: usize, end: usize) -> String {
         .skip(start)
         .take(end.saturating_sub(start))
         .collect()
+}
+
+fn cache_diff(chunks: &[(usize, usize, String)], stored_hash: &str, disk: &str) -> Option<Value> {
+    if chunks.is_empty() {
+        return None;
+    }
+    let mut ordered = chunks.to_vec();
+    ordered.sort_by_key(|item| item.0);
+    let mut padded = String::new();
+    let mut cursor = 0usize;
+    for (start, end, content) in &ordered {
+        if *start > cursor {
+            padded.push_str(&"\n".repeat(start - cursor));
+            cursor = *start;
+        }
+        padded.push_str(content);
+        cursor += content.chars().count();
+        if *end > cursor {
+            padded.push_str(&"\n".repeat(end - cursor));
+            cursor = *end;
+        }
+    }
+    let plain: String = ordered.iter().map(|item| item.2.as_str()).collect();
+    let mut candidates = Vec::new();
+    for cand in [padded.clone(), format!("{padded}\n"), plain] {
+        if !candidates.iter().any(|have: &String| have == &cand) {
+            candidates.push(cand);
+        }
+    }
+    let new_lines: Vec<&str> = disk.split('\n').collect();
+    let mut exact = false;
+    let mut diff_lines = None;
+    for cand in &candidates {
+        if hex(&sha256(cand.as_bytes())) == stored_hash {
+            exact = true;
+            diff_lines = Some(unified(cand, &new_lines));
+            break;
+        }
+    }
+    let diff_lines = diff_lines.unwrap_or_else(|| unified(&candidates[0], &new_lines));
+    let added = diff_lines
+        .iter()
+        .filter(|ln| ln.starts_with('+') && !ln.starts_with("+++"))
+        .count();
+    let removed = diff_lines
+        .iter()
+        .filter(|ln| ln.starts_with('-') && !ln.starts_with("---"))
+        .count();
+    let diff_text = diff_lines.join("\n");
+    let diff_tokens = crate::chunk::estimate_tokens(&diff_text);
+    let new_tokens = crate::chunk::estimate_tokens(disk).max(1);
+    let recommendation = if diff_tokens < (new_tokens as f64 * 0.8) as usize {
+        "read_diff"
+    } else {
+        "reread_file"
+    };
+    Some(Value::object(vec![
+        ("diff", Value::string(diff_text)),
+        ("diff_exact", Value::Bool(exact)),
+        ("added_lines", Value::Int(added as i64)),
+        ("removed_lines", Value::Int(removed as i64)),
+        ("diff_tokens", Value::Int(diff_tokens as i64)),
+        ("diff_truncated", Value::Bool(false)),
+        ("recommendation", Value::string(recommendation)),
+    ]))
+}
+
+fn unified(cached: &str, new_lines: &[&str]) -> Vec<String> {
+    let old_lines: Vec<&str> = cached.split('\n').collect();
+    // Drop the empty trailing piece split leaves when the text ends in a newline,
+    // matching str.splitlines.
+    let old_lines = trim_split(&old_lines);
+    let new_lines = trim_split(new_lines);
+    let mut out = vec!["--- cached".to_string(), "+++ disk".to_string()];
+    if old_lines == new_lines {
+        return out;
+    }
+    out.push(format!(
+        "@@ -1,{} +1,{} @@",
+        old_lines.len().max(1),
+        new_lines.len().max(1)
+    ));
+    for line in &old_lines {
+        out.push(format!("-{line}"));
+    }
+    for line in &new_lines {
+        out.push(format!("+{line}"));
+    }
+    out
+}
+
+fn trim_split<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    let mut lines = lines.to_vec();
+    if lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    lines
 }
 
 fn fs_meta(path: &std::path::Path) -> Option<std::fs::Metadata> {

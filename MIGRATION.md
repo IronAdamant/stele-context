@@ -18,7 +18,7 @@ Still not the same, and why:
 - PDF text is literal and hex strings in stream order. PyMuPDF layout, fonts, and reading order are not reproduced. A PDF that is not `%PDF` or has no text streams is one metadata chunk, not an empty PyMuPDF document.
 - User-facing regex rejects lookaround and backreferences.
 - There is no on-disk HNSW graph. Hybrid search uses exact cosine of the 128-d signature, and the HNSW cut only when the corpus is above 4096 chunks.
-- `environment_check` reports stale `__pycache__` only. It does not compare pip editable installs or egg-info, which are Python packaging facts.
+- `environment_check` reports stale `__pycache__` and `*.egg-info` against `pyproject.toml` (orphaned name, version different from the project). It does not walk `importlib.metadata`, so an egg-info that matches `pyproject.toml` but not a separately installed wheel is not flagged. Editable-install checks need that same installed-distribution list.
 - The CLI still prints the `ok` / `schema_version` / `command` / `result` envelope. `--human` prints `result` only.
 
 This is the list of differences between the Python package on PyPI (1.5.x, source on the `python-legacy` branch) and the Rust 2.0.1 binary on `main`. It was checked against that branch, `parity/goldens`, `CHANGELOG.md`, and [PR #5](https://github.com/IronAdamant/stele-context/pull/5) (merged as the Rust rewrite; the parity notes are the PR body plus commit `491bd8a`).
@@ -125,7 +125,10 @@ Non-Python symbols follow the 1.5.2 regex extractors. 2.0 does not add names a f
 | `chunk_size`, `max_chunk_size` | same | Passed to the text and code chunkers. Default 256 and 4096. |
 | `skip_dirs` | same | Added to the default skip set. Names starting with `.` are still skipped, as in 1.5.2. |
 | `respect_gitignore` | same | `false` indexes gitignored files during a directory walk. An explicit file path is still indexed. |
-| `merge_threshold`, `change_threshold`, `search_alpha`, `max_history_entries` | not supported | Parsed. The indexer uses merge threshold 0.7, and hybrid search uses alpha 0.42. The journal is not capped at `max_history_entries`. |
+| `merge_threshold` | same | Fallback when the modality is not in the 1.5.2 table (code 0.85, text 0.70, pdf 0.75). |
+| `change_threshold` | same | Fallback for modalities other than code (0.80), text (0.85), and pdf (0.85) when a file's bytes change. |
+| `search_alpha` | same | Base hybrid weight. Default 0.42. The query still lowers it for code-like text, as in 1.5.2. |
+| `max_history_entries` | same | After an index that writes, the change log is capped at this count. 0 keeps every row. Default 1000. |
 
 ## CLI
 
@@ -200,7 +203,7 @@ Calls that send only the 1.5 property names therefore miss:
 | `search` | same for the knobs that change the set | `top_k`, `search_mode`, `path_prefix`, and `working_tree` are read. `compact` and `max_result_tokens` are accepted and do not trim bodies. |
 | `search_text`, `agent_grep` | same | `regex` defaults off, so `file.py` is a substring. `document_path`, `limit`, `group_by`, `max_tokens`, and `working_tree` are read. `session_id` records the search and indexes files that matched. |
 | `query` | intentional change | See the CLI row. Not a merged list. |
-| `get_context` | same for the path list | `document_paths` returns `unchanged`, `changed`, and `new`. There is no `diff_since_cache` unified diff. |
+| `get_context` | same for the path list | `document_paths` returns `unchanged`, `changed`, and `new`. A file whose size or mtime differs includes `diff_since_cache` (`diff`, `diff_exact`, added and removed line counts, `recommendation`). |
 | `detect_changes` | same | `document_paths`, `limit`, and `scan_new` are read. New files are reported and not indexed. Changed files are reindexed. |
 | `impact_radius` | intentional change | Symbol only, depth 2. `chunk_id`, `document_path`, `summary_mode`, `significance_threshold`, `direction`, and `depth` are ignored. |
 | `coupling` | intentional change | `document_path` only. `mode` and `significance_threshold` are ignored. |
@@ -209,7 +212,7 @@ Calls that send only the 1.5 property names therefore miss:
 | `bulk_store_summaries` | same | `summaries` is a chunk id to text object. One `chunk_id` plus `summary` still works. |
 | `register_dynamic_symbols` | same | `symbols` is a list, stored under `runtime:<agent_id>:<name>`. |
 | `remove_dynamic_symbols` | same | `agent_id` removes that agent's runtime symbols. |
-| `llm_embed` | intentional change | A 32 or 128 `fingerprint_values` list is stored on the chunk (32 values use the 1.5 Gaussian spread). With no fingerprint, 2.0.1 stores a deterministic hash vector, not 1.5 `semantic_fingerprint`. |
+| `llm_embed` | same | With no `fingerprint_values`, the vector is 1.5.2 `semantic_fingerprint` spread by the same Gaussian. A 32-value list uses that spread. A 128-value list is stored as given. |
 | `get_search_history`, `get_session_read_files` | same role, smaller payload | Session id defaults to `default` when omitted. |
 | `save_kv_state`, `get_relevant_kv` | intentional change | Standard mode. KV is a list of `{k, v}` strings on the session. Not the 1.5 relevance lookup. |
 | `history` | intentional change | Standard mode. The journal, not `change_history`. |

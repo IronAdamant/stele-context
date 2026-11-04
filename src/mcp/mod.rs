@@ -164,17 +164,12 @@ fn initialize(params: &Value) -> Value {
 }
 
 fn cached_tools_json() -> &'static str {
-    use std::sync::OnceLock;
-    static LITE: OnceLock<String> = OnceLock::new();
-    static STANDARD: OnceLock<String> = OnceLock::new();
-    static FULL: OnceLock<String> = OnceLock::new();
     let mode = std::env::var("STELE_MCP_MODE").unwrap_or_else(|_| "lite".to_string());
-    let slot = match mode.as_str() {
-        "full" => &FULL,
-        "standard" => &STANDARD,
-        _ => &LITE,
-    };
-    slot.get_or_init(|| json::to_string(&tools_list())).as_str()
+    match mode.as_str() {
+        "full" => include_str!("tools_full.json"),
+        "standard" => include_str!("tools_standard.json"),
+        _ => include_str!("tools_lite.json"),
+    }
 }
 
 fn tools_list() -> Value {
@@ -777,6 +772,30 @@ fn flag(value: &Value, key: &str) -> bool {
         Some(Value::Bool(bit)) => *bit,
         Some(Value::String(text)) => text == "true" || text == "1",
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod schema_dump {
+    use super::*;
+
+    #[test]
+    fn write_static_schemas_when_asked() {
+        if std::env::var("STELE_DUMP_TOOLS").is_err() {
+            return;
+        }
+        for (mode, name) in [
+            ("lite", "tools_lite.json"),
+            ("standard", "tools_standard.json"),
+            ("full", "tools_full.json"),
+        ] {
+            std::env::set_var("STELE_MCP_MODE", mode);
+            let text = json::to_string(&tools_list());
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src/mcp")
+                .join(name);
+            std::fs::write(path, text).unwrap();
+        }
     }
 }
 

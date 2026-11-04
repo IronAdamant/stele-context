@@ -53,6 +53,11 @@ jobs:
         if: matrix.test
         run: git fetch --depth=1 origin python-legacy
 
+      - name: Python PDF extra for parity
+        if: matrix.test
+        shell: bash
+        run: python -m pip install 'pymupdf>=1.23'
+
       - name: Fetch parity corpora
         if: matrix.test
         shell: bash

@@ -93,7 +93,7 @@ mod tests {
                 .unwrap_or_else(|error| panic!("read {rel}: {error}"));
             let source = chunk::read_python_text(&bytes);
             let produced =
-                chunk::chunk_document(&rel, &source, chunk::CHUNK_SIZE, chunk::MAX_CHUNK_SIZE);
+                chunk::chunk_document(&rel, &source, chunk::CHUNK_SIZE, chunk::MAX_CHUNK_SIZE, 0.7);
             let got = flatten(&rel, &produced);
             let expected = golden_rows(file);
             if got != expected {

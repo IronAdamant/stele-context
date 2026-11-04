@@ -25,14 +25,21 @@ const DEF_STARTS: &[&str] = &[
     "test(",
 ];
 
-pub fn merge_similar(chunks: Vec<Produced>, max_chunk_size: usize) -> Vec<Produced> {
+pub fn merge_similar(
+    chunks: Vec<Produced>,
+    max_chunk_size: usize,
+    merge_fallback: f64,
+) -> Vec<Produced> {
     if chunks.len() <= 1 {
         return chunks;
     }
-    let threshold = if chunks[0].modality == "code" {
-        0.85
-    } else {
-        0.70
+    // 1.5.2 modality table wins. `merge_fallback` is the config value used
+    // when the modality is not in that table.
+    let threshold = match chunks[0].modality.as_str() {
+        "code" => 0.85,
+        "text" => 0.70,
+        "pdf" => 0.75,
+        _ => merge_fallback,
     };
     let mut merged = vec![chunks[0].clone()];
     for chunk in chunks.into_iter().skip(1) {

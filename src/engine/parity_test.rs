@@ -131,26 +131,80 @@ fn standard_tools_match_python_on_a_one_file_project() {
     .unwrap();
     fs::write(root.join(".gitignore"), "skip.py\n").unwrap();
     fs::write(root.join("skip.py"), "def skip():\n    return 0\n").unwrap();
+    fs::create_dir_all(root.join("vendor")).unwrap();
+    fs::write(
+        root.join("vendor").join("hidden.py"),
+        "def hidden():\n    return 1\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src").join("app.js"),
+        "function greet(){ return 1 }\n",
+    )
+    .unwrap();
+    fs::write(root.join("notes.md"), "# notes\n\nclassify the input\n").unwrap();
+    fs::write(
+        root.join(".stele-context.toml"),
+        "[stele-context]\nchunk_size = 256\nskip_dirs = [\"vendor\"]\nrespect_gitignore = true\nmerge_threshold = 0.7\nchange_threshold = 0.85\nsearch_alpha = 0.42\nmax_history_entries = 1000\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("pyproject.toml"),
+        "[project]\nname = \"stele-fixture\"\nversion = \"9.9.9\"\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("Other.egg-info")).unwrap();
+    fs::write(
+        root.join("Other.egg-info").join("PKG-INFO"),
+        "Name: other\nVersion: 0.1.0\n",
+    )
+    .unwrap();
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("parity/fixtures/media/note.pdf"),
+        root.join("note.pdf"),
+    )
+    .unwrap();
+    fs::create_dir_all(root.join(".git")).unwrap();
     let script = r#"
 import json, sys
 from pathlib import Path
 from stele_context.engine import Stele
+from stele_context.llm_embedding import embed
 root = Path(sys.argv[1])
 store = Path(sys.argv[2])
 engine = Stele(storage_dir=str(store), project_root=str(root))
 engine.index_documents([str(root)])
+paths = sorted(p for p in (d["document_path"] for d in engine.storage.get_all_documents()) if not p.endswith("PKG-INFO") and Path(p).name not in {"pyproject.toml", ".stele-context.toml", ".gitignore"})
+text = (root / "src" / "sample.py").read_text()
 payload = {
-    "rebuild": engine.rebuild_symbol_graph(),
-    "stale": engine.stale_chunks(),
-    "sessions": engine.list_sessions(),
-    "agents": engine.list_agents(),
-    "notes": engine.get_notifications(),
-    "prune": engine.prune_history(),
-    "env": engine.check_environment(),
-    "dynamic": engine.get_dynamic_symbols(),
-    "history": engine.get_chunk_history(limit=5),
+    "paths": paths,
+    "rebuild_symbols": engine.rebuild_symbol_graph()["symbols"],
+    "stale": engine.stale_chunks()["total_stale"],
+    "sessions": len(engine.list_sessions()),
+    "agents": len(engine.list_agents()),
+    "notes": engine.get_notifications()["count"],
+    "prune": engine.prune_history()["pruned"],
+    "env_issues": engine.check_environment()["total_issues"],
+    "dynamic": len(engine.get_dynamic_symbols()),
+    "history": len(engine.get_chunk_history(limit=5)),
+    "define": engine.find_definition("classify").get("count", len(engine.find_definition("classify").get("definitions", []))),
+    "refs": engine.find_references("classify").get("total", len(engine.find_references("classify").get("references", []))),
+    "grep": engine.agent_grep("classify")["total_matches"],
+    "text": engine.search_text("classify", regex=False)["match_count"],
+    "text_regex": engine.search_text(r"classif.", regex=True)["match_count"],
+    "search": len(engine.search("classify", search_mode="keyword") if isinstance(engine.search("classify", search_mode="keyword"), list) else engine.search("classify", search_mode="keyword").get("results", [])),
+    "embed0": round(embed(text)[0], 6),
+    "detect_unchanged": len(engine.detect_changes_and_update()["unchanged"]),
 }
-print(json.dumps(payload, default=str))
+reg = engine.register_dynamic_symbols([{"name": "on_hook", "document_path": "src/sample.py"}], "agent-a")
+payload["registered"] = reg.get("stored", 0)
+payload["removed_dyn"] = engine.remove_dynamic_symbols("agent-a").get("removed", 0)
+ann = engine.annotate("src/sample.py", "document", "note", None)
+payload["annotated"] = 1 if ann.get("id") else 0
+lock = engine.acquire_document_lock("src/sample.py", "agent-a")
+payload["locked"] = 1 if lock.get("acquired") else 0
+engine.release_document_lock("src/sample.py", "agent-a")
+print(json.dumps(payload))
 "#;
     let py_store = root.join("py-store");
     let ran = Command::new(python_bin())
@@ -170,45 +224,194 @@ print(json.dumps(payload, default=str))
     let py_value = crate::json::parse(py_text.trim()).expect("python json");
     let mut engine = Engine::open_at(root.clone(), root.join("rs-store")).unwrap();
     engine.index(&[".".to_string()], false).unwrap();
+    let mut paths: Vec<String> = engine
+        .store_paths()
+        .into_iter()
+        .filter(|path| {
+            let name = path.rsplit('/').next().unwrap_or(path);
+            !path.ends_with("PKG-INFO")
+                && name != "pyproject.toml"
+                && name != ".stele-context.toml"
+                && name != ".gitignore"
+        })
+        .collect();
+    paths.sort();
     let rebuild = engine.rebuild_symbols().unwrap();
-    let stale = engine.stale_chunks(0.3, None);
-    let sessions = engine.list_sessions(None);
-    let agents = engine.list_agents(true);
-    let notes = engine.notifications(None, None, 100);
-    let prune = engine.prune_history(None, None).unwrap();
-    let env = engine.environment_check();
-    let dynamic = engine.dynamic_symbols(None);
-    let history = engine.chunk_history(None, None, 5);
-    assert_eq!(
-        crate::store::int_field(&stale, "total_stale"),
-        int_path(&py_value, &["stale", "total_stale"])
+    let text = fs::read_to_string(root.join("src/sample.py")).unwrap();
+    let embed = super::fingerprint::embed_text(&text);
+    let reg = engine.register_dynamic("on_hook", "function", "src/sample.py");
+    if let Some(sym) = engine.store_dynamic_last() {
+        sym.agent = "agent-a".to_string();
+        sym.chunk_id = "runtime:agent-a:on_hook".to_string();
+    }
+    let removed_dyn = engine.remove_agent_dynamic("agent-a");
+    let ann = engine
+        .annotations("create", "src/sample.py", "note")
+        .unwrap();
+    let lock = engine
+        .document_lock("acquire", "src/sample.py", "agent-a", false)
+        .unwrap();
+    let _ = engine.document_lock("release", "src/sample.py", "agent-a", false);
+    let detect = engine.detect(true).unwrap();
+    let search = engine.search("classify", "keyword", 10);
+    let search_n = match &search {
+        crate::json::Value::Object(pairs) => pairs
+            .iter()
+            .find(|(k, _)| k == "results")
+            .and_then(|(_, v)| match v {
+                crate::json::Value::Array(rows) => Some(rows.len() as i64),
+                _ => None,
+            })
+            .unwrap_or(0),
+        crate::json::Value::Array(rows) => rows.len() as i64,
+        _ => 0,
+    };
+    let defs = engine.find_definition("classify");
+    let def_n =
+        array_len(object_get(&defs, "definitions").unwrap_or(&crate::json::Value::Null)) as i64;
+    let refs = engine.find_references("classify");
+    let ref_n =
+        array_len(object_get(&refs, "references").unwrap_or(&crate::json::Value::Null)) as i64;
+    let grep = engine
+        .grep_full(
+            "classify", false, None, true, true, "file", 4000, true, 0, None, false,
+        )
+        .unwrap();
+    let text_hit = engine
+        .text_search("classify", false, None, 50, None, false)
+        .unwrap();
+    let text_re = engine
+        .text_search("classif.", true, None, 50, None, false)
+        .unwrap();
+    let mut diffs = 0i64;
+    let mut check = |name: &str, rust: i64, py: i64| {
+        if rust != py {
+            eprintln!("parity diff {name}: rust {rust} python {py}");
+            diffs += 1;
+        }
+    };
+    let py_paths = array_len_path(&py_value, &["paths"]) as i64;
+    check("paths", paths.len() as i64, py_paths);
+    check(
+        "rebuild_symbols",
+        crate::store::int_field(&rebuild, "symbols"),
+        int_path(&py_value, &["rebuild_symbols"]),
     );
-    assert_eq!(
-        array_len(&sessions),
-        array_len_path(&py_value, &["sessions"])
+    check(
+        "stale",
+        crate::store::int_field(&engine.stale_chunks(0.3, None), "total_stale"),
+        int_path(&py_value, &["stale"]),
     );
-    assert_eq!(array_len(&agents), array_len_path(&py_value, &["agents"]));
-    assert_eq!(
-        crate::store::int_field(&notes, "count"),
-        int_path(&py_value, &["notes", "count"])
+    check(
+        "sessions",
+        array_len(&engine.list_sessions(None)) as i64,
+        int_path(&py_value, &["sessions"]),
     );
-    assert_eq!(
-        crate::store::int_field(&prune, "pruned"),
-        int_path(&py_value, &["prune", "pruned"])
+    check(
+        "agents",
+        array_len(&engine.list_agents(true)) as i64,
+        int_path(&py_value, &["agents"]),
     );
-    assert_eq!(
-        crate::store::int_field(&env, "total_issues"),
-        int_path(&py_value, &["env", "total_issues"])
+    check(
+        "notes",
+        crate::store::int_field(&engine.notifications(None, None, 100), "count"),
+        int_path(&py_value, &["notes"]),
     );
-    assert_eq!(array_len(&dynamic), array_len_path(&py_value, &["dynamic"]));
-    assert_eq!(array_len(&history), array_len_path(&py_value, &["history"]));
-    let py_symbols = int_path(&py_value, &["rebuild", "symbols"]);
-    let rs_symbols = crate::store::int_field(&rebuild, "symbols");
-    assert_eq!(
-        rs_symbols, py_symbols,
-        "symbol count rust {rs_symbols} python {py_symbols}"
+    check(
+        "prune",
+        crate::store::int_field(&engine.prune_history(None, None).unwrap(), "pruned"),
+        int_path(&py_value, &["prune"]),
     );
-    eprintln!("parity diffs: 0");
+    check(
+        "env_issues",
+        crate::store::int_field(&engine.environment_check(), "total_issues"),
+        int_path(&py_value, &["env_issues"]),
+    );
+    check(
+        "dynamic",
+        array_len(&engine.dynamic_symbols(None)) as i64,
+        int_path(&py_value, &["dynamic"]),
+    );
+    check(
+        "history",
+        array_len(&engine.chunk_history(None, None, 5)) as i64,
+        int_path(&py_value, &["history"]),
+    );
+    check("define", def_n, int_path(&py_value, &["define"]));
+    check("refs", ref_n, int_path(&py_value, &["refs"]));
+    check(
+        "grep",
+        crate::store::int_field(&grep, "total_matches"),
+        int_path(&py_value, &["grep"]),
+    );
+    check(
+        "text",
+        crate::store::int_field(&text_hit, "match_count"),
+        int_path(&py_value, &["text"]),
+    );
+    check(
+        "text_regex",
+        crate::store::int_field(&text_re, "match_count"),
+        int_path(&py_value, &["text_regex"]),
+    );
+    check("search", search_n, int_path(&py_value, &["search"]));
+    let embed_py = match object_get(&py_value, "embed0") {
+        Some(crate::json::Value::Float(n)) => *n,
+        Some(crate::json::Value::Int(n)) => *n as f64,
+        _ => -1.0,
+    };
+    check(
+        "embed0",
+        if (embed[0] - embed_py).abs() > 1e-5 {
+            1
+        } else {
+            0
+        },
+        0,
+    );
+    check(
+        "detect_unchanged",
+        array_len(object_get(&detect, "unchanged").unwrap_or(&crate::json::Value::Null)) as i64,
+        int_path(&py_value, &["detect_unchanged"]),
+    );
+    check(
+        "registered",
+        if reg.is_ok() { 1 } else { 0 },
+        int_path(&py_value, &["registered"]),
+    );
+    check(
+        "removed_dyn",
+        removed_dyn,
+        int_path(&py_value, &["removed_dyn"]),
+    );
+    check(
+        "annotated",
+        if crate::json::to_string(&ann).contains("id") {
+            1
+        } else {
+            0
+        },
+        int_path(&py_value, &["annotated"]),
+    );
+    check(
+        "locked",
+        if crate::json::to_string(&lock).contains("\"acquired\":true") {
+            1
+        } else {
+            0
+        },
+        int_path(&py_value, &["locked"]),
+    );
+    assert!(
+        !paths.iter().any(|p| p.contains("skip.py")),
+        "gitignored file indexed"
+    );
+    assert!(
+        !paths.iter().any(|p| p.contains("vendor")),
+        "skip_dirs file indexed"
+    );
+    eprintln!("parity diffs: {diffs}");
+    assert_eq!(diffs, 0, "parity diffs: {diffs}");
     let _ = fs::remove_dir_all(&root);
 }
 

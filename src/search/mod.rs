@@ -43,6 +43,16 @@ pub struct VectorDoc<'a> {
 }
 
 pub fn hybrid<'a>(index: &Bm25, docs: &[VectorDoc<'a>], query: &str, top_k: usize) -> Vec<Scored> {
+    hybrid_alpha(index, docs, query, top_k, ALPHA)
+}
+
+pub fn hybrid_alpha<'a>(
+    index: &Bm25,
+    docs: &[VectorDoc<'a>],
+    query: &str,
+    top_k: usize,
+    base_alpha: f64,
+) -> Vec<Scored> {
     if top_k == 0 {
         return Vec::new();
     }
@@ -75,7 +85,7 @@ pub fn hybrid<'a>(index: &Bm25, docs: &[VectorDoc<'a>], query: &str, top_k: usiz
         .map(|id| (id.clone(), index.score(query, id)))
         .collect();
     let max_bm = bm_map.iter().map(|(_, score)| *score).fold(0.0, f64::max);
-    let alpha = search_alpha(query, ALPHA);
+    let alpha = search_alpha(query, base_alpha);
     let disagreement = rank_disagreement(&hnsw, &bm_map, 5);
     let flat = hnsw_span < 0.035 && hnsw.len() >= 4;
     let low = max_raw < 0.70;

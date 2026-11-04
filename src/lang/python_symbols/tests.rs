@@ -196,6 +196,7 @@ fn python_fixture_symbols_match_the_golden() {
             &source,
             crate::chunk::CHUNK_SIZE,
             crate::chunk::MAX_CHUNK_SIZE,
+            0.7,
         )
         .len()
             != 1

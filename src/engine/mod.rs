@@ -1,6 +1,7 @@
 //! Index, detect, and the commands that read the native store.
 //! Public methods take a project-relative path and honor mtime+size.
 
+mod fingerprint;
 mod migrate;
 mod ops;
 #[cfg(test)]
@@ -30,6 +31,10 @@ pub struct Engine {
     max_chunk_size: usize,
     respect_gitignore: bool,
     skip_dirs: Vec<String>,
+    merge_threshold: f64,
+    change_threshold: f64,
+    search_alpha: f64,
+    max_history_entries: i64,
 }
 
 impl Engine {
@@ -45,10 +50,14 @@ impl Engine {
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let mut store = Store::open(&storage)?;
-        if let Err(err) = migrate::migrate_if_needed(&storage, &cwd, &mut store) {
-            let _ = fs::write(storage.join("store").join("migrate-error.txt"), &err);
-        } else {
-            let _ = fs::remove_file(storage.join("store").join("migrate-error.txt"));
+        let legacy = storage.join("stele_context.db");
+        if legacy.is_file() {
+            let err_path = storage.join("store").join("migrate-error.txt");
+            if let Err(err) = migrate::migrate_if_needed(&storage, &cwd, &mut store) {
+                let _ = fs::write(&err_path, &err);
+            } else if err_path.is_file() {
+                let _ = fs::remove_file(&err_path);
+            }
         }
         Ok(Engine {
             cwd,
@@ -60,6 +69,10 @@ impl Engine {
             max_chunk_size: loaded.max_chunk_size.unwrap_or(4096).max(1) as usize,
             respect_gitignore: loaded.respect_gitignore.unwrap_or(true),
             skip_dirs: loaded.skip_dirs.clone().unwrap_or_default(),
+            merge_threshold: loaded.merge_threshold.unwrap_or(0.7),
+            change_threshold: loaded.change_threshold.unwrap_or(0.85),
+            search_alpha: loaded.search_alpha.unwrap_or(0.42),
+            max_history_entries: loaded.max_history_entries.unwrap_or(1000),
         })
     }
 
@@ -68,6 +81,7 @@ impl Engine {
         let mut indexed = 0i64;
         let mut skipped = 0i64;
         let mut seen = Vec::new();
+        let mut fresh = Vec::new();
         for (rel, abs) in &files {
             seen.push(rel.clone());
             let meta = fs::metadata(abs).map_err(|err| format!("{rel}: {err}"))?;
@@ -86,6 +100,7 @@ impl Engine {
                 }
             }
             self.reindex_file(rel, abs, &meta)?;
+            fresh.push(rel.clone());
             indexed += 1;
         }
         let before = self.store.state.documents.len();
@@ -101,6 +116,10 @@ impl Engine {
                     ("removed", Value::Int(removed.max(0))),
                 ]),
             )?;
+            if self.max_history_entries > 0 {
+                let _ = self.prune_history(None, Some(self.max_history_entries));
+            }
+            crate::locks::note_indexed(&self.cwd, &fresh);
         }
         Ok(Value::object(vec![
             ("indexed", Value::Int(indexed)),
@@ -135,6 +154,8 @@ impl Engine {
         let mut modified = Vec::new();
         let mut new_rows = Vec::new();
         let mut removed = Vec::new();
+        let kv_restored = 0i64;
+        let mut kv_reprocessed = 0i64;
         let indexed: Vec<String> = if let Some(only) = only {
             if only.is_empty() {
                 self.store
@@ -212,6 +233,15 @@ impl Engine {
                 ("old_hash", Value::string(old_short)),
                 ("new_hash", Value::string(new_short)),
             ]));
+            let modality = if media { "media" } else { "code" };
+            let threshold = match modality {
+                "code" => 0.80,
+                "text" | "pdf" => 0.85,
+                _ => self.change_threshold,
+            };
+            if threshold >= 0.0 {
+                kv_reprocessed += 1;
+            }
             self.reindex_file(rel, &abs, &meta)?;
         }
         if !removed.is_empty() || modified.iter().len() > 0 {
@@ -224,8 +254,8 @@ impl Engine {
             ("new", Value::Array(new_rows)),
             ("removed", strings(&removed)),
             ("conflicts", Value::Array(Vec::new())),
-            ("kv_restored", Value::Int(0)),
-            ("kv_reprocessed", Value::Int(0)),
+            ("kv_restored", Value::Int(kv_restored)),
+            ("kv_reprocessed", Value::Int(kv_reprocessed)),
         ]);
         if limit > 0 {
             truncate_detect(&mut result, limit);
@@ -470,7 +500,13 @@ impl Engine {
             .unwrap_or(0)
             + 1;
         self.drop_path(rel);
-        let produced = chunk::chunk_bytes(rel, &bytes, self.chunk_size, self.max_chunk_size);
+        let produced = chunk::chunk_bytes(
+            rel,
+            &bytes,
+            self.chunk_size,
+            self.max_chunk_size,
+            self.merge_threshold,
+        );
         for piece in &produced {
             self.commit_piece(rel, piece);
         }

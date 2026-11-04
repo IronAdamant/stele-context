@@ -354,6 +354,7 @@ struct Shared {
     path: PathBuf,
     locks: Vec<crate::store::Lock>,
     conflicts: Vec<Conflict>,
+    notifications: Vec<Value>,
 }
 
 impl Shared {
@@ -386,10 +387,15 @@ impl Shared {
                 .collect(),
             _ => Vec::new(),
         };
+        let notifications = match field(&value, "notifications") {
+            Some(Value::Array(rows)) => rows.clone(),
+            _ => Vec::new(),
+        };
         Some(Shared {
             path,
             locks,
             conflicts,
+            notifications,
         })
     }
 
@@ -434,6 +440,7 @@ impl Shared {
                         .collect(),
                 ),
             ),
+            ("notifications", Value::Array(self.notifications.clone())),
         ]));
         let _ = fs::write(&self.path, body);
     }
@@ -469,6 +476,45 @@ fn int_field(value: &Value, key: &str) -> i64 {
         Some(Value::Int(number)) => *number,
         _ => 0,
     }
+}
+
+pub fn note_indexed(start: &Path, paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    let Some(dir) = coordination_dir(start) else {
+        return;
+    };
+    let _ = fs::create_dir_all(&dir);
+    let path = dir.join("coordination.json");
+    let text = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
+    let mut value = json::parse(&text).unwrap_or(Value::object(vec![]));
+    let Value::Object(pairs) = &mut value else {
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut notes = match pairs.iter().find(|(key, _)| key == "notifications") {
+        Some((_, Value::Array(rows))) => rows.clone(),
+        _ => Vec::new(),
+    };
+    for doc in paths {
+        notes.push(Value::object(vec![
+            ("document_path", Value::string(doc)),
+            ("change_type", Value::string("indexed")),
+            ("agent_id", Value::string("")),
+            ("worktree_root", Value::string(start.display().to_string())),
+            ("created_at", Value::Int(now)),
+        ]));
+    }
+    if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "notifications") {
+        *item = Value::Array(notes);
+    } else {
+        pairs.push(("notifications".to_string(), Value::Array(notes)));
+    }
+    let _ = fs::write(&path, json::to_string(&value));
 }
 
 pub fn coordination_dir(start: &Path) -> Option<PathBuf> {
