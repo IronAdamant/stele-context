@@ -132,6 +132,10 @@ pub struct ChangeRow {
 }
 
 impl ChangeRow {
+    pub(crate) fn to_line(&self) -> String {
+        crate::json::to_string(&self.to_json())
+    }
+
     fn to_json(&self) -> Value {
         Value::object(vec![
             ("at", Value::Int(self.at)),
@@ -139,6 +143,15 @@ impl ChangeRow {
             ("summary", Value::string(&self.summary)),
             ("reason", Value::string(&self.reason)),
         ])
+    }
+
+    pub(crate) fn load_file(storage: &Path) -> Vec<ChangeRow> {
+        let text =
+            fs::read_to_string(storage.join("store").join("changes.jsonl")).unwrap_or_default();
+        text.lines()
+            .filter_map(|line| json::parse(line).ok())
+            .map(|value| ChangeRow::from_json(&value))
+            .collect()
     }
 
     fn from_json(value: &Value) -> ChangeRow {

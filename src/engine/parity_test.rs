@@ -542,7 +542,7 @@ fn tool_suite(engine: &mut Engine) -> crate::json::Value {
         .state
         .chunks
         .iter()
-        .find(|chunk| chunk.path == "src/sample.py")
+        .find(|chunk| crate::walk::native_sep(&chunk.path) == "src/sample.py")
         .map(|chunk| chunk.id.clone())
         .unwrap_or_default();
     let small = vec![0.1; 128];

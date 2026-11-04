@@ -318,17 +318,7 @@ impl Engine {
                 if limit > 0 {
                     truncate_detect(&mut result, limit);
                 }
-                if self.documents_only {
-                    self.store.reload_full()?;
-                    self.documents_only = false;
-                }
-                self.store.state.change_log.push(crate::store::ChangeRow {
-                    at: now_us(),
-                    session: "default".to_string(),
-                    summary: crate::json::to_string(&result),
-                    reason: String::new(),
-                });
-                let _ = self.store.save("detect", &result);
+                self.remember_change(&result);
                 return Ok(result);
             }
             if self.documents_only {
@@ -465,13 +455,7 @@ impl Engine {
         if limit > 0 {
             truncate_detect(&mut result, limit);
         }
-        self.store.state.change_log.push(crate::store::ChangeRow {
-            at: now_us(),
-            session: "default".to_string(),
-            summary: crate::json::to_string(&result),
-            reason: String::new(),
-        });
-        let _ = self.store.save("detect", &result);
+        self.remember_change(&result);
         Ok(result)
     }
 
@@ -876,6 +860,25 @@ impl Engine {
         ])
     }
 
+    fn remember_change(&mut self, result: &crate::json::Value) {
+        let row = crate::store::ChangeRow {
+            at: now_us(),
+            session: "default".to_string(),
+            summary: crate::json::to_string(result),
+            reason: String::new(),
+        };
+        self.store.state.change_log.push(row.clone());
+        let path = self.storage.join("store").join("changes.jsonl");
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            use std::io::Write;
+            let _ = writeln!(file, "{}", crate::store::ChangeRow::to_line(&row));
+        }
+    }
+
     pub fn note_operation(&mut self) {
         self.operations += 1;
     }
@@ -1065,10 +1068,12 @@ impl Engine {
     }
 
     pub fn history(&self) -> Result<Value, String> {
-        let mut rows: Vec<Value> = self
-            .store
-            .state
-            .change_log
+        let logged = if self.store.state.change_log.is_empty() {
+            crate::store::ChangeRow::load_file(&self.storage)
+        } else {
+            self.store.state.change_log.clone()
+        };
+        let mut rows: Vec<Value> = logged
             .iter()
             .enumerate()
             .map(|(index, row)| {

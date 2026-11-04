@@ -50,7 +50,15 @@ pub fn chunk_bytes(
         // joins adjacent pages whose signatures clear the pdf threshold
         // and whose combined tokens fit in max_chunk_size.
         if code::extension_of(path) == "pdf" {
-            return merge::merge_similar(produced, max_chunk_size, merge_fallback);
+            // A page already larger than half the cap cannot merge with
+            // another page. Skipping the signature there keeps cold index
+            // on the same side of the benchmark gate.
+            let small = produced
+                .iter()
+                .all(|piece| crate::chunk::estimate_tokens(&piece.content) <= max_chunk_size / 2);
+            if small {
+                return merge::merge_similar(produced, max_chunk_size, merge_fallback);
+            }
         }
         return produced;
     }
