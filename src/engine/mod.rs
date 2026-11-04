@@ -220,7 +220,7 @@ impl Engine {
     }
 
     pub fn detect(&mut self, scan_new: bool) -> Result<Value, String> {
-        self.detect_with(scan_new, None, 200)
+        self.detect_with(scan_new, None, 200, "")
     }
 
     pub fn detect_with(
@@ -228,14 +228,24 @@ impl Engine {
         scan_new: bool,
         only: Option<&[String]>,
         limit: usize,
+        agent: &str,
     ) -> Result<Value, String> {
-        if !self
+        let agent = if agent.is_empty() {
+            self.server_agent.clone()
+        } else {
+            agent.to_string()
+        };
+        if let Some(session) = self
             .store
             .state
             .sessions
-            .iter()
-            .any(|session| session.id == "default")
+            .iter_mut()
+            .find(|session| session.id == "default")
         {
+            if !agent.is_empty() {
+                session.agent = agent.clone();
+            }
+        } else {
             self.store.state.sessions.push(crate::store::Session {
                 id: "default".to_string(),
                 searches: Vec::new(),
@@ -245,7 +255,7 @@ impl Engine {
                 updated_at: now_us(),
                 turn: 0,
                 tokens: 0,
-                agent: String::new(),
+                agent: agent.clone(),
                 attached: Vec::new(),
                 search_rows: Vec::new(),
             });
@@ -308,12 +318,17 @@ impl Engine {
                 if limit > 0 {
                     truncate_detect(&mut result, limit);
                 }
+                if self.documents_only {
+                    self.store.reload_full()?;
+                    self.documents_only = false;
+                }
                 self.store.state.change_log.push(crate::store::ChangeRow {
                     at: now_us(),
                     session: "default".to_string(),
                     summary: crate::json::to_string(&result),
                     reason: String::new(),
                 });
+                let _ = self.store.save("detect", &result);
                 return Ok(result);
             }
             if self.documents_only {
@@ -424,9 +439,19 @@ impl Engine {
             }
             self.reindex_file(rel, &abs, &meta)?;
         }
-        if !removed.is_empty() || modified.iter().len() > 0 {
+        if !modified.is_empty() {
+            let paths: Vec<String> = modified
+                .iter()
+                .map(|row| crate::store::string_field(row, "path"))
+                .filter(|path| !path.is_empty())
+                .collect();
+            crate::locks::note_change(&self.cwd, &paths, &agent, "modified");
+        }
+        if !removed.is_empty() {
+            crate::locks::note_change(&self.cwd, &removed, &agent, "removed");
+        }
+        if !removed.is_empty() || !modified.is_empty() {
             self.rebuild_bm25();
-            self.store.save("detect", &Value::object(vec![]))?;
         }
         let mut result = Value::object(vec![
             ("unchanged", strings(&unchanged)),
@@ -446,6 +471,7 @@ impl Engine {
             summary: crate::json::to_string(&result),
             reason: String::new(),
         });
+        let _ = self.store.save("detect", &result);
         Ok(result)
     }
 
@@ -473,7 +499,7 @@ impl Engine {
         let chunks_removed = chunk_ids.len() as i64;
         self.drop_path(&rel);
         self.rebuild_bm25();
-        crate::locks::note_change(&self.cwd, &[rel.clone()], "", "removed");
+        crate::locks::note_change(&self.cwd, &[rel.clone()], &self.server_agent, "removed");
         self.store.save(
             "remove",
             &Value::object(vec![("path", Value::string(&rel))]),
@@ -980,14 +1006,14 @@ impl Engine {
                         ]),
                     ),
                     ("growth_alerts", Value::Array(Vec::new())),
-                    ("journal_mode", Value::string("wal")),
-                    ("synchronous", Value::Int(1)),
-                    ("page_count", Value::Int(0)),
-                    ("page_size", Value::Int(4096)),
-                    ("database_size_bytes", Value::Int(0)),
+                    ("journal_mode", Value::Null),
+                    ("synchronous", Value::Null),
+                    ("page_count", Value::Null),
+                    ("page_size", Value::Null),
+                    ("database_size_bytes", Value::Int(store_bytes(&self.storage))),
                     ("wal_size_bytes", Value::Int(0)),
-                    ("wal_autocheckpoint", Value::Int(1000)),
-                    ("busy_timeout_ms", Value::Int(30000)),
+                    ("wal_autocheckpoint", Value::Null),
+                    ("busy_timeout_ms", Value::Null),
                     (
                         "recent_operations_1h",
                         Value::Int(self.operations as i64),
@@ -1039,7 +1065,7 @@ impl Engine {
     }
 
     pub fn history(&self) -> Result<Value, String> {
-        let rows = self
+        let mut rows: Vec<Value> = self
             .store
             .state
             .change_log
@@ -1064,6 +1090,7 @@ impl Engine {
                 ])
             })
             .collect();
+        rows.reverse();
         Ok(Value::Array(rows))
     }
 
@@ -1383,14 +1410,11 @@ fn collect(
 }
 
 fn rel_of(cwd: &Path, path: &Path) -> String {
-    path.strip_prefix(cwd)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    crate::walk::native_sep(&path.strip_prefix(cwd).unwrap_or(path).to_string_lossy())
 }
 
 fn normalize(path: &str) -> String {
-    path.replace('\\', "/")
+    crate::walk::native_sep(path)
 }
 
 fn mtime_ns(meta: &fs::Metadata) -> i64 {
@@ -1399,6 +1423,23 @@ fn mtime_ns(meta: &fs::Metadata) -> i64 {
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_nanos() as i64)
         .unwrap_or(0)
+}
+
+fn store_bytes(storage: &std::path::Path) -> i64 {
+    let store = storage.join("store");
+    [
+        "snapshot.json",
+        "journal.jsonl",
+        "signatures.bin",
+        "bm25.bin",
+    ]
+    .iter()
+    .map(|name| {
+        std::fs::metadata(store.join(name))
+            .map(|meta| meta.len())
+            .unwrap_or(0)
+    })
+    .sum::<u64>() as i64
 }
 
 fn host_python() -> Value {

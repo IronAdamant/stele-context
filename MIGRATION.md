@@ -10,7 +10,7 @@ Closed in 2.0.1 (same, unless noted):
 - `chunk_size`, `skip_dirs` (added to the defaults, not a replacement), and `respect_gitignore` are applied.
 - CLI flags `--compact`, `--path-prefix`, `--regex`, `--working-tree`, `--confirm`, `--limit`, `--document`, `--session`, `--depth`, `--significance-threshold`, `--mode`, `--group-by`, `--summary-mode`, `--top-n`, and `--min-tokens` are accepted. `--regex` is required before a pattern is a regex. `--confirm` is required before `clear` deletes the store.
 - HTTP `GET /tools` and stdio `tools/list` in `standard` and `full` list the properties the dispatcher reads. Lite stdio `tools/list` stays `{"type":"object"}` so that reply stays the same size as 2.0.0. `paths`, `summaries`, `document_paths`, and `working_tree` are honoured.
-- PDF page text is one chunk per page. Several content streams on the same page stay in that one chunk. The text ends with a newline, so the one-page fixture matches PyMuPDF `get_text()` (`[Page 1]\nHello PDF symbols\n`).
+- PDF text is one chunk per page, then adjacent pages merge when their signatures clear the pdf threshold (0.75) and the combined token count fits in `max_chunk_size`. Several content streams on the same page stay in that page. The text ends with a newline. `parity/fixtures/media/small3.pdf` is three short pages and becomes two chunks. `big2.pdf` is two large pages and stays two chunks.
 
 Still not the same, and why:
 
@@ -83,7 +83,7 @@ The parity audit's six extractor and token gaps were Rust defects. They were fix
 | Opening `stele_context.db` for index, search, or detect | not supported | The file is not opened. `doctor` sets `legacy_sqlite_present` when the file is there. |
 | `indices/` and any HNSW file | not supported | Not read. Hybrid search does not load that directory. |
 | `coordination.db` | not supported | Not read. Old holders do not carry over. |
-| Sessions, annotations, embeddings, `agent_signature` blobs, chunk history, operation log, search history | not supported | Not imported. |
+| Embeddings, `agent_signature` blobs, operation log, search history | not supported | Not imported. Sessions, annotations, chunk history, and conflicts are copied (see the migrate row). |
 | Re-index | the path that works | `stele-context index .` builds the native store from the tree. |
 | `stele-context migrate` and open | same | A 1.5 database is read in place, including its `-wal` file. `documents.document_path` is the path column. Chunks, symbols, edges, annotations, sessions, chunk history, and conflicts are copied. The original files are not written. If the native store already has documents, the database is left untouched. |
 | `doctor` when the db was copied | same | `next_steps` says the database was copied into the native store and was not modified. |
@@ -146,7 +146,7 @@ Exit codes in 2.0: 0 success, 1 operation error, 2 usage. A closed stdout pipe e
 
 | Command | Mark | 2.0 |
 | --- | --- | --- |
-| `doctor`, `index`, `remove`, `detect`, `stats`, `map`, `project-brief`, `search`, `search-text`, `agent-grep`, `query`, `find-definition`, `find-references`, `impact-radius`, `coupling`, `enrichment-plan`, `history`, `init`, `serve`, `serve-mcp`, `clear` | same names | Present. `clear`, `get-context`, `annotations`, and `document-lock` run, and they are not listed in `--help`. |
+| `doctor`, `index`, `remove`, `detect`, `stats`, `map`, `project-brief`, `search`, `search-text`, `agent-grep`, `query`, `find-definition`, `find-references`, `impact-radius`, `coupling`, `enrichment-plan`, `history`, `init`, `serve`, `serve-mcp`, `clear`, `annotations`, `get-annotations` | same names | Present. `annotations` and `get-annotations` are listed in `--help`. `get-annotations --target PATH` filters. `search-text --path-prefix` is rejected (exit 2), the same as 1.5.2 argparse. |
 | `index` with no path | intentional change | Indexes `.`. 1.5 requires at least one path. |
 | `index` of a directory | same result keys | Drops stored documents under that directory that the walk no longer sees. `index one-file` does not drop other documents. The result matches 1.5.2: `indexed` (path, chunk_count, total_tokens, modality), `skipped` (path, reason, chunk_count), `errors`, `conflicts`, `total_chunks`, `total_tokens`. |
 | `index --force` and `--force-reindex` | same effect | Both reindex. There is no summaries or `expected_versions` flag. |
@@ -157,13 +157,13 @@ Exit codes in 2.0: 0 success, 1 operation error, 2 usage. A closed stdout pipe e
 | `find-definition` | same | Payload is `symbol`, `definitions`, `count`, `symbol_index`, `guidance`. Shadow fields are set only when one file has more than one definition, and `definition_index` starts at 1. `find-references` adds `verdict`, `references`, and `total`. |
 | `impact-radius` | intentional change | `--symbol NAME`, or the first positional as the symbol. Depth is 2. Result: `symbol`, `affected_files`, `affected_chunks`, `affected` (paths). `--summary-mode` is accepted and ignored. `--depth`, `--document-path`, `--chunk-id`, `--significance-threshold`, and `--direction` are unknown flags (exit 2). PR #5 compared file sets, not this JSON: `Console` at depth 2 was 162 files on both sides, and `coupling` of `rich/console.py` was 144 files on both sides. |
 | `coupling` | intentional change | One path. Result includes `coupled_files`. No `--mode` (`edges` vs `co_consumers`) and no `--significance-threshold`. |
-| `map` | intentional change | `documents` count and `files` rows (`path`, `chunks`, `symbols`, `bytes`), sorted by path. No `--compact`, `--max-documents`, or `--path-prefix`. |
-| `stats` and `project-brief` | intentional change | Both return `documents`, `chunks`, `symbols`, `annotations`. `project-brief` is that object. No `--compact` or `--top-n`. |
-| `history` | intentional change | The journal: `entries` and `history`. No `--limit` or `--document`. |
-| `enrichment-plan` | intentional change | `chunks_missing_summary` and up to 50 `next` rows (`chunk_id`, `path`). No `--top-n` or `--min-tokens`. |
+| `map` | same | Compact map: `documents` rows (`path`, `chunk_count`, `total_tokens`, `indexed_at`, `annotations`), `total_documents`, `total_tokens`, `index_health`, `compact`, `project_root`. |
+| `stats` and `project-brief` | same | `stats` is the 1.5 storage object. `project-brief` is `purpose`, `totals`, `extensions`, `largest_files_by_tokens`, `index_health`, `project_root`. `--top-n` is accepted. |
+| `history` | same | Change-history rows newest first: `id`, `timestamp`, `session_id`, `summary`, `reason`. A `detect` writes one row. |
+| `enrichment-plan` | same | `top_n`, `candidates`, `candidates_total`, `uncovered_tokens`, `tier2_token_coverage_percent`, `total_tokens`, `how_to_enrich`. `--top-n` and `--min-tokens` are accepted. |
 | `init` | intentional change | Writes `.stele-context.toml` containing the line `# stele-context 2.0` if the file is absent, and returns `path`. It does not index and it does not print an MCP snippet. 1.5 `init` indexes, prints the lite client config, and prints doctor `next_steps`. |
 | `clear` | same | Deletes the store only when `--confirm` is set. Without it the command returns `cancelled: true` and does not write. |
-| `doctor` | intentional change | JSON under `result`: `version`, `implementation` (`rust`), `project_root`, `storage_dir`, `config_loaded`, `native_store_present`, `legacy_sqlite_present`, counts, `index_health`, `db_health`, `search_quality`, `environment.issues` (always empty), `map_preview`, `recommended_mcp_mode` (`lite`), `token_savings`, `next_steps` (strings). Not the 1.5 doctor object (`python` is null). |
+| `doctor` | same, except `db_health` | The MCP object matches 1.5.2 (`stele_version`, `python` of the host interpreter, counts, `index_health`, `search_quality`, `environment`, `map_preview`, `recommended_mcp_mode`, `recommended_ritual`, `mcp_config`, `next_steps`, `token_savings`, `enrichment_preview`). `db_health` does not invent SQLite settings. `journal_mode`, `synchronous`, `page_count`, `page_size`, `wal_autocheckpoint`, and `busy_timeout_ms` are null because there is no database file. `wal_size_bytes` is 0 (no WAL). `database_size_bytes` is the size of `snapshot.json`, `journal.jsonl`, `signatures.bin`, and `bm25.bin`. `table_rows` counts the native lists (`change_history`, `chunk_history`, `operation_log` of MCP calls, `sessions`). |
 | `get-context PATH` | same shape | `{unchanged, changed, new}`. An unchanged file has `chunks` (`chunk_id`, `content`, `start_pos`, `end_pos`, `token_count`, `content_truncated`, `staleness_score`), `total_tokens`, and `trust`. A changed file has `old_hash`, `new_hash`, and `diff_since_cache` (unified diff, `diff_exact`, added and removed line counts, `diff_tokens`, `diff_truncated`, `recommendation`). `--session-id` records the read. |
 | `annotations` | same actions | `stele-context annotations --action create PATH`. Listed in `--help`. Tags passed as repeated `--tags` are stored. The old singleton names are MCP full-mode aliases, not separate CLI commands. |
 | `document-lock` | intentional change | `--action` and a positional. See the MCP section for the actions that run. |
@@ -207,20 +207,28 @@ Calls that send only the 1.5 property names therefore miss:
 | `detect_changes` | same | `document_paths`, `limit`, and `scan_new` are read. New files are reported and not indexed. Changed files are reindexed. |
 | `impact_radius` | intentional change | Symbol only, depth 2. `chunk_id`, `document_path`, `summary_mode`, `significance_threshold`, `direction`, and `depth` are ignored. |
 | `coupling` | intentional change | `document_path` only. `mode` and `significance_threshold` are ignored. |
-| `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `target` and `content` are read, and so is `tags`. `delete` matches id or path. |
+| `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `get` filters on `target`, `target_type`, and `tags`. `delete` matches id. Migrated annotation ids keep the 1.5 values, and `created_at` keeps the fractional seconds. |
 | `document_lock` | intentional change | Actions `acquire`, `release`, `refresh`, `status`, `release_all`, `reap`, `conflicts`. `ttl` and `limit` are ignored (TTL 300). `force` is read. Storage is the JSON coordination file, not `coordination.db`. |
 | `bulk_store_summaries` | same | `summaries` is a chunk id to text object. One `chunk_id` plus `summary` still works. |
 | `register_dynamic_symbols` | same | `symbols` is a list, stored under `runtime:<agent_id>:<name>`. |
 | `remove_dynamic_symbols` | same | `agent_id` removes that agent's runtime symbols. |
 | `llm_embed` | same | With no `fingerprint_values`, the vector is 1.5.2 `semantic_fingerprint` spread by the same Gaussian. A 32-value list uses that spread. A 128-value list is stored as given. |
 | `get_search_history`, `get_session_read_files` | same role, smaller payload | Session id defaults to `default` when omitted. |
-| `save_kv_state`, `get_relevant_kv` | intentional change | Standard mode. KV is a list of `{k, v}` strings on the session. Not the 1.5 relevance lookup. |
+| `save_kv_state`, `get_relevant_kv` | same | `kv_data` is a chunk id to value object. Only ids that exist are saved. The return is `session_id`, `turn_number`, `chunks_saved`, `total_tokens`. `get_relevant_kv` ranks those chunks by signature cosine and returns `query`, `chunks`, `total_tokens`. `prune_chunks` drops the lowest scores until the token budget holds. |
 | `history` | intentional change | Standard mode. The journal, not `change_history`. |
-| `doctor`, `map`, `enrichment_plan`, `detect_modality`, `get_supported_formats` | intentional change | They run. Shapes are the 2.0 objects, not the schema's 1.5 description. `get_supported_formats` reports metadata for images, one metadata line for non-WAV audio, WAV duration (30s segments when longer), container brand for video, and uncompressed or Flate PDF text. |
+| `doctor`, `map`, `enrichment_plan`, `detect_modality` | same | See the CLI rows. `detect_modality` is `code`, `text`, `pdf`, `image`, `audio`, `video`, or `unknown`. |
+| `get_supported_formats` | intentional change | Extension lists for `text`, `code`, and `pdf` match the 1.5.2 chunkers. Rust also lists `image`, `audio`, and `video`, because it reads those files without Pillow, librosa, or OpenCV. 1.5.2 omits a modality when that extra is not installed. |
 
 Those 15 standard names run in 2.0.1. `batch` dispatches every tool name the MCP server runs, not a short allow-list.
 
-Full-mode names run in 2.0.1 by calling the tool in the replacement column. Their JSON matches the 1.5.2 singleton, including annotation tags and a refused lock (`locked_by`, `locked_at`, `expires_at`, `worktree`):
+Full-mode names run in 2.0.1 by calling the tool in the replacement column. Annotation tags and a refused lock (`locked_by`, `locked_at`, `expires_at`, `worktree`) match 1.5.2. These aliases accept an extra argument that 1.5.2 rejects, and that is deliberate:
+
+- `store_embedding` accepts `embedding` as well as `vector`. 1.5.2 raises `TypeError` on `embedding`.
+- `bulk_annotate` accepts `items` as well as `annotations`. 1.5.2 raises `TypeError` on `items`.
+- `get_conflicts` returns `id`, `document_path`, `agent_a`, `agent_b`, `conflict_type`, `expected_version`, `actual_version`, `resolution`, `created_at`. A force-steal is `lock_stolen` / `force_overwritten` and is not counted in `stats.total_conflicts` (that counter is the document-conflict table, which a steal does not write).
+- `get_session_read_files` returns the read list. 1.5.2 raises `no such column: d.staleness_score` because the query reads that column from `documents` and the column is on `chunks`.
+
+Their JSON otherwise matches the 1.5.2 singleton:
 
 | Removed name | Replacement named in the error |
 | --- | --- |
@@ -243,7 +251,7 @@ There is no self-healing `hint` on HTTP tool errors beyond the `error` string. 1
 | Force steal | same outcome | A conflict row is written (`path`, `holder`, `requester`, `at`). The coordination file then shows the new holder. |
 | Where it is stored | intentional change | `<git-common-dir>/stele-context/coordination.json` when `.git` resolves. The snapshot also keeps a copy. No git directory: snapshot only. `coordination.db` is not opened. |
 | Optimistic `expected_versions` on index | not supported | Ignored. |
-| Agent registry and notifications | same | `serve-mcp` registers `stele-context-mcp-<pid>`. `list_agents` lists that registry. `get_notifications` returns rows newest first. `list_sessions` timestamps are fractional seconds. |
+| Agent registry and notifications | same | `serve-mcp` registers `stele-context-mcp-<pid>` and injects that id into write tools that take `agent_id`. `list_agents` lists that registry. `list_sessions.agent_id` is that id when `detect_changes` or `save_kv_state` created the session. `get_notifications` is newest first. A reindex from `detect_changes` adds a `modified` row. `remove` and a detect removal add a `removed` row with that `agent_id`. Timestamps are fractional seconds. |
 
 ## HTTP serve
 

@@ -62,8 +62,9 @@ jobs:
           # Stay on the 1.x wheel. PyMuPDF 2.x publishes an sdist whose
           # metadata name is pymupdf-lite, and macOS spends the job building it.
           spec='pymupdf>=1.23,<2'
-          python3 -m pip install --user --break-system-packages "$spec" || python3 -m pip install --user "$spec" || true
-          python -m pip install --user --break-system-packages "$spec" || python -m pip install --user "$spec" || true
+          pkg='stele-context==1.5.2'
+          python3 -m pip install --user --break-system-packages "$spec" "$pkg" || python3 -m pip install --user "$spec" "$pkg" || true
+          python -m pip install --user --break-system-packages "$spec" "$pkg" || python -m pip install --user "$spec" "$pkg" || true
           python3 -c 'import pymupdf' || python -c 'import pymupdf'
 
       - name: Fetch parity corpora

@@ -32,7 +32,7 @@ Everything runs offline. No API keys, no cloud, no telemetry. The crate has an e
 The product is the Rust 2.0.1 binary. 2.0.0 is the previous GitHub Release.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.0.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.0.1/scripts/install.sh | sh
 ```
 
 Windows: `scripts/install.ps1`, or download `stele-context-<target>` from the release assets. Build from this repo with `cargo build --release`. The binaries are `stele-context` and `stele-context-mcp`.

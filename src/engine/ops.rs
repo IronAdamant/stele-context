@@ -729,7 +729,7 @@ impl Engine {
             }
             let abs = root.join(path);
             if abs.is_file() {
-                paths.push(path.replace('\\', "/"));
+                paths.push(crate::walk::native_sep(&path));
             }
         }
         if paths.is_empty() {

@@ -131,6 +131,26 @@ pub struct ChangeRow {
     pub reason: String,
 }
 
+impl ChangeRow {
+    fn to_json(&self) -> Value {
+        Value::object(vec![
+            ("at", Value::Int(self.at)),
+            ("session", Value::string(&self.session)),
+            ("summary", Value::string(&self.summary)),
+            ("reason", Value::string(&self.reason)),
+        ])
+    }
+
+    fn from_json(value: &Value) -> ChangeRow {
+        ChangeRow {
+            at: int_field(value, "at"),
+            session: string_field(value, "session"),
+            summary: string_field(value, "summary"),
+            reason: string_field(value, "reason"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Dynamic {
     pub name: String,
@@ -330,6 +350,11 @@ impl State {
                 "dynamic",
                 Value::Array(self.dynamic.iter().map(Dynamic::to_json).collect()),
             ),
+            (
+                "change_log",
+                Value::Array(self.change_log.iter().map(ChangeRow::to_json).collect()),
+            ),
+            ("next_annotation", Value::Int(self.next_annotation)),
         ])
     }
 }
@@ -474,7 +499,9 @@ impl State {
             sessions: array(value, "sessions").map(Session::from_json).collect(),
             dynamic: array(value, "dynamic").map(Dynamic::from_json).collect(),
             chunk_history: Vec::new(),
-            change_log: Vec::new(),
+            change_log: array(value, "change_log")
+                .map(ChangeRow::from_json)
+                .collect(),
             next_annotation: int_field(value, "next_annotation"),
             sigs: Vec::new(),
         }

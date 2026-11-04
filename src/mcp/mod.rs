@@ -278,6 +278,7 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 scan,
                 if only.is_empty() { None } else { Some(&only) },
                 limit,
+                &caller(engine, args),
             )
         }
         "search" => {
@@ -356,11 +357,24 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
         "history" => engine.history(),
         "stats" => Ok(engine.stats()),
         "project_brief" => Ok(engine.project_brief()),
-        "annotations" => engine.annotations(
-            &arg(args, "action").unwrap_or_else(|| "get".to_string()),
-            &path,
-            &arg(args, "body").unwrap_or_default(),
-        ),
+        "annotations" => {
+            let action = arg(args, "action").unwrap_or_else(|| "get".to_string());
+            let target = arg(args, "target").unwrap_or(path);
+            let body = arg(args, "content")
+                .or_else(|| arg(args, "body"))
+                .or_else(|| arg(args, "query"))
+                .unwrap_or_default();
+            let tags = string_list(args, "tags");
+            let target_type = arg(args, "target_type").unwrap_or_default();
+            let id = arg(args, "annotation_id").unwrap_or_else(|| target.clone());
+            if action == "delete" || action == "update" {
+                engine.annotations_tagged(&action, &id, &body, &tags, &target_type)
+            } else if action == "search" {
+                engine.annotations_tagged("search", &body, "", &tags, &target_type)
+            } else {
+                engine.annotations_tagged(&action, &target, &body, &tags, &target_type)
+            }
+        }
         "document_lock" => engine.document_lock(
             &arg(args, "action").unwrap_or_else(|| "status".to_string()),
             &path,
@@ -369,23 +383,18 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
         ),
         "get_search_history" => Ok(engine.search_history(session.as_deref().unwrap_or("default"))),
         "get_session_read_files" => Ok(engine.read_files(session.as_deref().unwrap_or("default"))),
-        "get_relevant_kv" => Ok(Value::object(vec![
-            (
-                "query",
-                Value::string(arg(args, "query").unwrap_or_default()),
-            ),
-            ("chunks", Value::Array(Vec::new())),
-            ("total_tokens", Value::Int(0)),
-        ])),
+        "get_relevant_kv" => Ok(engine.relevant_kv(
+            session.as_deref().unwrap_or("default"),
+            &arg(args, "query").unwrap_or_default(),
+            int_arg(args, "top_k").unwrap_or(10).max(1) as usize,
+        )),
         "save_kv_state" => {
             let session_id = session.unwrap_or_else(|| "default".to_string());
-            engine.touch_session(&session_id);
-            Ok(Value::object(vec![
-                ("session_id", Value::string(session_id)),
-                ("turn_number", Value::Int(0)),
-                ("chunks_saved", Value::Int(0)),
-                ("total_tokens", Value::Int(0)),
-            ]))
+            let kv = field(args, "kv_data")
+                .cloned()
+                .unwrap_or(Value::object(vec![]));
+            let only = string_list(args, "chunk_ids");
+            engine.save_kv_state(&session_id, &kv, &only, &caller(engine, args))
         }
         "store_semantic_summary" => {
             let id = arg(args, "chunk_id").unwrap_or_default();
@@ -563,6 +572,7 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 .or_else(|| arg(args, "body"))
                 .unwrap_or_default(),
             &string_list(args, "tags"),
+            &arg(args, "target_type").unwrap_or_else(|| "document".to_string()),
         ),
         "get_annotations" => {
             let wrapped = engine.annotations("get", &arg(args, "target").unwrap_or(path), "")?;
@@ -586,6 +596,7 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 &id,
                 &arg(args, "content").unwrap_or_default(),
                 &string_list(args, "tags"),
+                "",
             )
         }
         "search_annotations" => {
@@ -606,7 +617,7 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 let target = string_field(&item, "target");
                 let content = string_field(&item, "content");
                 let tags = string_list(&item, "tags");
-                match engine.annotations_tagged("create", &target, &content, &tags) {
+                match engine.annotations_tagged("create", &target, &content, &tags, "") {
                     Ok(row) => created.push(row),
                     Err(message) => errors.push(Value::string(message)),
                 }

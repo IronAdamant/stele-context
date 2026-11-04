@@ -130,16 +130,23 @@ fn record_conflict(
     agent: &str,
     now: i64,
 ) {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or(now as f64);
     let row = Conflict {
         path: path.to_string(),
         holder: holder.to_string(),
         requester: agent.to_string(),
-        at: now,
+        at: (stamp * 1_000_000.0).round() as i64,
         kind: "lock_stolen".to_string(),
     };
-    state.conflicts.push(row.clone());
+    // 1.5.2 writes a force-steal to the shared conflict log. stats counts
+    // document_conflicts only, which stays empty for that event.
     if let Some(shared) = shared.as_mut() {
         shared.conflicts.push(row);
+    } else {
+        state.conflicts.push(row);
     }
 }
 
@@ -235,13 +242,30 @@ fn conflicts(state: &State, shared: Option<&Shared>, path: &str) -> Value {
     let rendered = rows
         .into_iter()
         .filter(|row| path.is_empty() || row.path == path)
-        .map(|row| {
+        .enumerate()
+        .map(|(index, row)| {
+            let resolution = if row.kind == "lock_stolen" {
+                "force_overwritten"
+            } else {
+                "rejected"
+            };
             Value::object(vec![
-                ("path", Value::string(row.path)),
-                ("holder", Value::string(row.holder)),
-                ("requester", Value::string(row.requester)),
-                ("at", Value::Int(row.at)),
-                ("conflict_type", Value::string("lock_stolen")),
+                ("id", Value::Int(index as i64 + 1)),
+                ("document_path", Value::string(row.path)),
+                ("agent_a", Value::string(row.holder)),
+                ("agent_b", Value::string(row.requester)),
+                ("conflict_type", Value::string(row.kind)),
+                ("expected_version", Value::Null),
+                ("actual_version", Value::Null),
+                ("resolution", Value::string(resolution)),
+                (
+                    "created_at",
+                    Value::Float(if row.at > 1_000_000_000_000 {
+                        row.at as f64 / 1_000_000.0
+                    } else {
+                        row.at as f64
+                    }),
+                ),
             ])
         })
         .collect();

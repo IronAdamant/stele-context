@@ -184,13 +184,6 @@ fn standard_tools_match_python_on_a_one_file_project() {
     let script = r#"
 import json, sys
 from pathlib import Path
-import stele_context.engine as _engine
-import stele_context.engine_utils as _utils
-_orig_norm = _utils.normalize_path
-def _posix_norm(path, project_root):
-    return _orig_norm(path, project_root).replace("\\", "/")
-_utils.normalize_path = _posix_norm
-_engine._norm = _posix_norm
 from stele_context.engine import Stele
 from stele_context.llm_embedding import embed
 root = Path(sys.argv[1])

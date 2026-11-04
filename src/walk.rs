@@ -113,14 +113,20 @@ fn walk_dir(
 }
 
 fn normalize(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    native_sep(&path.to_string_lossy())
 }
 
 fn normalize_under(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    native_sep(&path.strip_prefix(root).unwrap_or(path).to_string_lossy())
+}
+
+/// Match 1.5.2 `Path` text: forward slashes on Unix, backslashes on Windows.
+pub fn native_sep(path: &str) -> String {
+    if cfg!(windows) {
+        path.replace('/', "\\")
+    } else {
+        path.replace('\\', "/")
+    }
 }
 
 #[cfg(test)]

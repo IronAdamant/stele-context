@@ -563,7 +563,7 @@ impl Engine {
             );
             symbol.to_string()
         } else if let Some(path) = document_path.filter(|path| !path.is_empty()) {
-            let path = path.replace('\\', "/");
+            let path = crate::walk::native_sep(path);
             seeds.extend(
                 self.store
                     .state
@@ -668,7 +668,7 @@ impl Engine {
     }
 
     pub fn coupling_mode(&self, path: &str, mode: &str, significance: f64) -> Value {
-        let path = path.replace('\\', "/");
+        let path = crate::walk::native_sep(path);
         if mode == "co_consumers" {
             return self.coupling_co_consumers(&path);
         }
@@ -814,7 +814,7 @@ impl Engine {
         let mut changed = Vec::new();
         let mut new_rows = Vec::new();
         for path in paths {
-            let path = path.replace('\\', "/");
+            let path = crate::walk::native_sep(path);
             let abs = self.cwd.join(&path);
             if !abs.is_file() {
                 continue;
@@ -936,7 +936,7 @@ impl Engine {
     }
 
     pub fn annotations(&mut self, action: &str, path: &str, body: &str) -> Result<Value, String> {
-        self.annotations_tagged(action, path, body, &[])
+        self.annotations_tagged(action, path, body, &[], "")
     }
 
     pub fn annotations_tagged(
@@ -945,6 +945,7 @@ impl Engine {
         path: &str,
         body: &str,
         tags: &[String],
+        target_type: &str,
     ) -> Result<Value, String> {
         match action {
             "bulk_create" => {
@@ -964,7 +965,11 @@ impl Engine {
                     path: path.to_string(),
                     body: body.to_string(),
                     tags: tags.to_vec(),
-                    target_type: "document".to_string(),
+                    target_type: if target_type.is_empty() {
+                        "document".to_string()
+                    } else {
+                        target_type.to_string()
+                    },
                     created_at: now,
                     updated_at: now,
                 });
@@ -981,7 +986,17 @@ impl Engine {
                     .state
                     .annotations
                     .iter()
-                    .filter(|note| path.is_empty() || note.path == path || note.body.contains(path))
+                    .filter(|note| {
+                        if action == "search" {
+                            return path.is_empty() || note.body.contains(path);
+                        }
+                        (path.is_empty() || note.path == path)
+                            && (target_type.is_empty() || note.target_type == target_type)
+                            && (tags.is_empty()
+                                || tags
+                                    .iter()
+                                    .all(|tag| note.tags.iter().any(|have| have == tag)))
+                    })
                     .map(|note| {
                         Value::object(vec![
                             ("id", Value::Int(note.id.parse::<i64>().unwrap_or(0))),
@@ -1072,10 +1087,125 @@ impl Engine {
         outcome
     }
 
-    pub fn touch_session(&mut self, session: &str) {
+    pub fn save_kv_state(
+        &mut self,
+        session: &str,
+        kv: &Value,
+        only: &[String],
+        agent: &str,
+    ) -> Result<Value, String> {
         let slot = self.session_mut(session);
-        slot.turn += 1;
+        if !agent.is_empty() {
+            slot.agent = agent.to_string();
+        }
+        let turn_number = slot.turn;
+        let mut saved = 0i64;
+        let mut added = 0i64;
+        let pairs = match kv {
+            Value::Object(pairs) => pairs.clone(),
+            _ => Vec::new(),
+        };
+        for (chunk_id, data) in pairs {
+            if !only.is_empty() && !only.iter().any(|id| id == &chunk_id) {
+                continue;
+            }
+            let tokens = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .find(|chunk| chunk.id == chunk_id)
+                .map(|chunk| chunk.tokens);
+            let Some(tokens) = tokens else {
+                continue;
+            };
+            added += tokens as i64;
+            saved += 1;
+            let score = 1.0;
+            if let Some(slot) = self
+                .store
+                .state
+                .sessions
+                .iter_mut()
+                .find(|item| item.id == session)
+            {
+                slot.attached.push((chunk_id, turn_number, score));
+            }
+            let _ = data;
+        }
+        let slot = self
+            .store
+            .state
+            .sessions
+            .iter_mut()
+            .find(|item| item.id == session)
+            .unwrap();
+        slot.tokens += added;
+        let total = slot.tokens;
+        slot.turn = turn_number + 1;
         slot.updated_at = super::now_us();
+        self.store.save("kv", &Value::string(session))?;
+        Ok(Value::object(vec![
+            ("session_id", Value::string(session)),
+            ("turn_number", Value::Int(turn_number)),
+            ("chunks_saved", Value::Int(saved)),
+            ("total_tokens", Value::Int(total)),
+        ]))
+    }
+
+    pub fn relevant_kv(&self, session: &str, query: &str, top_k: usize) -> Value {
+        let attached = self
+            .store
+            .state
+            .sessions
+            .iter()
+            .find(|item| item.id == session)
+            .map(|item| item.attached.clone())
+            .unwrap_or_default();
+        if attached.is_empty() {
+            return Value::object(vec![
+                ("query", Value::string(query)),
+                ("chunks", Value::Array(Vec::new())),
+                ("total_tokens", Value::Int(0)),
+            ]);
+        }
+        let query_sig = crate::chunk::signature(query);
+        let mut scored = Vec::new();
+        for (chunk_id, _turn, _stored) in &attached {
+            let Some(chunk) = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .find(|chunk| &chunk.id == chunk_id)
+            else {
+                continue;
+            };
+            let sig = crate::chunk::signature(&chunk.content);
+            let score: f64 = query_sig.iter().zip(sig).map(|(a, b)| a * b).sum();
+            scored.push((score, chunk));
+        }
+        scored.sort_by(|left, right| right.0.total_cmp(&left.0));
+        scored.truncate(top_k);
+        let mut total = 0i64;
+        let chunks: Vec<Value> = scored
+            .into_iter()
+            .map(|(score, chunk)| {
+                total += chunk.tokens as i64;
+                Value::object(vec![
+                    ("chunk_id", Value::string(&chunk.id)),
+                    ("content", Value::string(&chunk.content)),
+                    ("document_path", Value::string(&chunk.path)),
+                    ("relevance_score", Value::Float(score)),
+                    ("token_count", Value::Int(chunk.tokens as i64)),
+                ])
+            })
+            .collect();
+        Value::object(vec![
+            ("query", Value::string(query)),
+            ("chunks", Value::Array(chunks)),
+            ("total_tokens", Value::Int(total)),
+        ])
     }
 
     pub fn save_kv(&mut self, session: &str, key: &str, value: &str) -> Result<Value, String> {

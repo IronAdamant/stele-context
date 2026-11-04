@@ -45,7 +45,14 @@ pub fn chunk_bytes(
     merge_fallback: f64,
 ) -> Vec<Produced> {
     if crate::media::is_media(code::extension_of(path)) {
-        return crate::media::chunk(path, bytes);
+        let produced = crate::media::chunk(path, bytes);
+        // 1.5.2 builds one chunk per PDF page, then merge_similar_chunks
+        // joins adjacent pages whose signatures clear the pdf threshold
+        // and whose combined tokens fit in max_chunk_size.
+        if code::extension_of(path) == "pdf" {
+            return merge::merge_similar(produced, max_chunk_size, merge_fallback);
+        }
+        return produced;
     }
     chunk_document(
         path,

@@ -54,7 +54,7 @@ impl SqliteDb {
         let master = self.walk_table(1)?;
         let mut root = 0usize;
         let mut sql = String::new();
-        for row in master {
+        for (_rowid, row) in master {
             let kind = text_at(&row, 0);
             let table = text_at(&row, 1);
             if kind == "table" && table == name {
@@ -69,7 +69,7 @@ impl SqliteDb {
         let columns = column_names(&sql);
         let cells = self.walk_table(root)?;
         let mut out = Vec::new();
-        for cell in cells {
+        for (rowid, cell) in cells {
             let mut pairs = Vec::new();
             for (index, value) in cell.into_iter().enumerate() {
                 let key = columns
@@ -78,18 +78,24 @@ impl SqliteDb {
                     .unwrap_or_else(|| format!("col{index}"));
                 pairs.push((key, value));
             }
+            // INTEGER PRIMARY KEY is the rowid and is stored as NULL in the record.
+            if let Some((_, value)) = pairs.iter_mut().find(|(key, _)| key == "id") {
+                if matches!(value, SqlValue::Null) {
+                    *value = SqlValue::Int(rowid);
+                }
+            }
             out.push(pairs);
         }
         Ok(out)
     }
 
-    fn walk_table(&self, page: usize) -> Result<Vec<Vec<SqlValue>>, String> {
+    fn walk_table(&self, page: usize) -> Result<Vec<(i64, Vec<SqlValue>)>, String> {
         let mut out = Vec::new();
         self.walk_page(page, &mut out)?;
         Ok(out)
     }
 
-    fn walk_page(&self, page_no: usize, out: &mut Vec<Vec<SqlValue>>) -> Result<(), String> {
+    fn walk_page(&self, page_no: usize, out: &mut Vec<(i64, Vec<SqlValue>)>) -> Result<(), String> {
         let page = self
             .pages
             .get(page_no)
@@ -138,18 +144,18 @@ impl SqliteDb {
             }
         } else {
             for cell in leaves {
-                if let Some(record) = self.leaf_record(page_no, cell) {
-                    out.push(record);
+                if let Some((rowid, record)) = self.leaf_record(page_no, cell) {
+                    out.push((rowid, record));
                 }
             }
         }
         Ok(())
     }
 
-    fn leaf_record(&self, page_no: usize, cell: usize) -> Option<Vec<SqlValue>> {
+    fn leaf_record(&self, page_no: usize, cell: usize) -> Option<(i64, Vec<SqlValue>)> {
         let page = self.pages.get(page_no)?;
         let (payload_len, next) = varint(page, cell)?;
-        let (_rowid, mut cursor) = varint(page, next)?;
+        let (rowid, mut cursor) = varint(page, next)?;
         let local = local_payload(payload_len, self.usable);
         let mut payload = Vec::new();
         let available = page.len().saturating_sub(cursor);
@@ -172,7 +178,7 @@ impl SqliteDb {
                 overflow = next_page;
             }
         }
-        parse_record(&payload)
+        Some((rowid as i64, parse_record(&payload)?))
     }
 }
 

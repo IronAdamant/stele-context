@@ -77,6 +77,7 @@ struct Parsed {
     group_by: Option<String>,
     no_index: bool,
     tags: Vec<String>,
+    ann_type: Option<String>,
     cwd: Option<PathBuf>,
 }
 
@@ -141,6 +142,17 @@ impl Parsed {
                 ),
             };
         }
+        if self.command.as_deref() == Some("search-text") && self.path_prefix.is_some() {
+            return Response::failure(
+                "search-text",
+                EXIT_USAGE,
+                ErrorBody::new(
+                    "usage",
+                    "unrecognized arguments: --path-prefix",
+                    "search-text has no --path-prefix; pass --document",
+                ),
+            );
+        }
         let result = self.execute(&mut engine);
         match result {
             Ok(value) => {
@@ -163,8 +175,91 @@ impl Parsed {
         match self.command.as_deref().unwrap_or("") {
             "index" => engine.index(&self.positionals, self.force),
             "remove" => engine.remove(positional),
-            "detect" => engine.detect_with(self.scan_new, None, self.limit.unwrap_or(200)),
-            "stats" => Ok(engine.stats()),
+            "detect" => engine.detect_with(
+                self.scan_new,
+                None,
+                self.limit.unwrap_or(200),
+                self.session.as_deref().unwrap_or(""),
+            ),
+            "stats" => {
+                let value = engine.stats();
+                if self.compact == Some(true) {
+                    let storage = object_field(&value, "storage");
+                    let index = object_field(&value, "index");
+                    let config = object_field(&value, "config");
+                    return Ok(crate::json::Value::object(vec![
+                        (
+                            "version",
+                            field_clone(&value, "version").unwrap_or(crate::json::Value::Null),
+                        ),
+                        (
+                            "project_root",
+                            field_clone(&value, "project_root").unwrap_or(crate::json::Value::Null),
+                        ),
+                        ("compact", crate::json::Value::Bool(true)),
+                        (
+                            "storage",
+                            crate::json::Value::object(vec![
+                                (
+                                    "storage_dir",
+                                    field_clone(&storage, "storage_dir")
+                                        .unwrap_or(crate::json::Value::Null),
+                                ),
+                                (
+                                    "document_count",
+                                    field_clone(&storage, "document_count")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                                (
+                                    "chunk_count",
+                                    field_clone(&storage, "chunk_count")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                                (
+                                    "total_tokens",
+                                    field_clone(&storage, "total_tokens")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                            ]),
+                        ),
+                        (
+                            "index",
+                            crate::json::Value::object(vec![
+                                (
+                                    "chunk_count",
+                                    field_clone(&index, "chunk_count")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                                (
+                                    "node_count",
+                                    field_clone(&index, "node_count")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                            ]),
+                        ),
+                        (
+                            "config",
+                            crate::json::Value::object(vec![
+                                (
+                                    "chunk_size",
+                                    field_clone(&config, "chunk_size")
+                                        .unwrap_or(crate::json::Value::Null),
+                                ),
+                                (
+                                    "search_alpha",
+                                    field_clone(&config, "search_alpha")
+                                        .unwrap_or(crate::json::Value::Null),
+                                ),
+                            ]),
+                        ),
+                        (
+                            "index_health",
+                            field_clone(&value, "index_health").unwrap_or(crate::json::Value::Null),
+                        ),
+                    ]));
+                }
+                Ok(value)
+            }
             "map" => Ok(engine.map()),
             "project-brief" => Ok(engine.project_brief()),
             "enrichment-plan" => Ok(engine.enrichment_plan()),
@@ -280,12 +375,26 @@ impl Parsed {
             "coupling" => Ok(engine.coupling(positional)),
             "get-context" => engine.get_context(positional, self.session.as_deref()),
             "init" => init_marker(&engine.cwd),
-            "annotations" => engine.annotations_tagged(
-                self.action.as_deref().unwrap_or("get"),
-                positional,
-                self.positionals.get(1).map(String::as_str).unwrap_or(""),
-                &self.tags,
-            ),
+            "annotations" | "get-annotations" => {
+                let target = if self.command.as_deref() == Some("get-annotations") {
+                    self.document
+                        .clone()
+                        .unwrap_or_else(|| positional.to_string())
+                } else {
+                    positional.to_string()
+                };
+                engine.annotations_tagged(
+                    if self.command.as_deref() == Some("get-annotations") {
+                        "get"
+                    } else {
+                        self.action.as_deref().unwrap_or("get")
+                    },
+                    &target,
+                    self.positionals.get(1).map(String::as_str).unwrap_or(""),
+                    &self.tags,
+                    self.ann_type.as_deref().unwrap_or(""),
+                )
+            }
             "document-lock" => engine.document_lock(
                 self.action.as_deref().unwrap_or("status"),
                 positional,
@@ -343,6 +452,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         group_by: None,
         no_index: false,
         tags: Vec::new(),
+        ann_type: None,
         cwd: None,
     };
     let mut index = 0usize;
@@ -423,7 +533,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                 }
                 "--host" => parsed.host = take_value(args, &mut index)?,
                 "--path-prefix" => parsed.path_prefix = Some(take_value(args, &mut index)?),
-                "--document" | "--document-path" => {
+                "--document" | "--document-path" | "--target" => {
                     parsed.document = Some(take_value(args, &mut index)?)
                 }
                 "--limit" => {
@@ -453,6 +563,8 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                         parsed.group_by = Some(value);
                     } else if arg == "--mode" {
                         parsed.mode = Some(value);
+                    } else {
+                        parsed.ann_type = Some(value);
                     }
                 }
                 "--chunk-id" => parsed.chunk_id = Some(take_value(args, &mut index)?),
@@ -500,6 +612,20 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
     Ok(parsed)
 }
 
+fn field_clone(value: &crate::json::Value, key: &str) -> Option<crate::json::Value> {
+    let crate::json::Value::Object(pairs) = value else {
+        return None;
+    };
+    pairs
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, item)| item.clone())
+}
+
+fn object_field(value: &crate::json::Value, key: &str) -> crate::json::Value {
+    field_clone(value, key).unwrap_or(crate::json::Value::object(vec![]))
+}
+
 fn take_value(args: &[String], index: &mut usize) -> Result<String, String> {
     *index += 1;
     args.get(*index)
@@ -532,6 +658,7 @@ Commands:
   find-definition NAME
   find-references NAME
   annotations         create, get, delete, update, search, bulk_create
+  get-annotations     --target PATH [--type document|chunk] [--tags TAG]
   impact-radius       --symbol NAME
   coupling PATH
   enrichment-plan     Chunks that still need a summary

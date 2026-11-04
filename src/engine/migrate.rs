@@ -152,14 +152,15 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
     }
     for row in opened.table("annotations").unwrap_or_default() {
         let id = sql_number(&row, "id") as i64;
+        state.next_annotation = state.next_annotation.max(id);
         state.annotations.push(crate::store::Annotation {
             id: id.to_string(),
             path: sql_text(&row, "target"),
             body: sql_text(&row, "content"),
             tags: split_tags(&sql_text(&row, "tags")),
             target_type: sql_text(&row, "target_type"),
-            created_at: sql_number(&row, "created_at") as i64,
-            updated_at: sql_number(&row, "updated_at") as i64,
+            created_at: unix_us(sql_number(&row, "created_at")),
+            updated_at: unix_us(sql_number(&row, "updated_at")),
         });
     }
     for row in opened.table("sessions").unwrap_or_default() {
@@ -168,8 +169,8 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
             searches: Vec::new(),
             reads: Vec::new(),
             kv: Vec::new(),
-            created_at: sql_number(&row, "created_at") as i64,
-            updated_at: sql_number(&row, "last_updated") as i64,
+            created_at: unix_us(sql_number(&row, "created_at")),
+            updated_at: unix_us(sql_number(&row, "last_updated")),
             turn: sql_number(&row, "turn_count") as i64,
             tokens: sql_number(&row, "total_tokens") as i64,
             agent: sql_text(&row, "agent_id"),
@@ -182,7 +183,7 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
             path: sql_text(&row, "document_path"),
             holder: sql_text(&row, "agent_a"),
             requester: sql_text(&row, "agent_b"),
-            at: sql_number(&row, "created_at") as i64,
+            at: unix_us(sql_number(&row, "created_at")),
             kind: sql_text(&row, "conflict_type"),
         });
     }
@@ -206,6 +207,16 @@ fn live_stat(cwd: &Path, path: &str, recorded: u64) -> (i64, u64) {
         }
     }
     (0, recorded)
+}
+
+/// Keep a 1.5.2 `time.time()` float as microseconds so session_time
+/// can print the fractional seconds again.
+fn unix_us(value: f64) -> i64 {
+    if value.abs() > 1.0e12 {
+        value.round() as i64
+    } else {
+        (value * 1_000_000.0).round() as i64
+    }
 }
 
 fn mtime_ns(meta: &fs::Metadata) -> i64 {
