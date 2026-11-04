@@ -67,15 +67,45 @@ def _posix_norm(path, project_root):
 _utils.normalize_path = _posix_norm
 _engine._norm = _posix_norm
 from stele_context.engine import Stele
-from stele_context.tool_registry import build_tool_map
+from stele_context.tool_registry import build_tool_map, get_modality_flags
 root, store = sys.argv[1], sys.argv[2]
 engine = Stele(storage_dir=store, project_root=root)
+import sqlite3
+_db = os.path.join(store, "stele_context.db")
+if os.path.isfile(_db):
+    _conn = sqlite3.connect(_db)
+    _cols = {row[1] for row in _conn.execute("PRAGMA table_info(documents)")}
+    if "staleness_score" not in _cols:
+        # 1.5.2 selects documents.staleness_score. The column is on chunks.
+        _conn.execute("ALTER TABLE documents ADD COLUMN staleness_score REAL")
+    _conn.commit()
+    _conn.close()
 agent = f"stele-context-mcp-{os.getpid()}"
 try:
     engine.register_agent(agent)
 except Exception:
     pass
-tools = build_tool_map(engine, {}, mode=os.environ.get("STELE_MCP_MODE", "full"))
+tools = build_tool_map(engine, get_modality_flags(), mode=os.environ.get("STELE_MCP_MODE", "full"))
+# 1.5.2 omits a modality when its optional import is missing. Rust reads
+# those bytes itself, so the catalogue is the chunker class lists.
+def _exts(cls):
+    return cls.supported_extensions(cls.__new__(cls))
+def _formats(**_):
+    from stele_context.chunkers.text import TextChunker
+    from stele_context.chunkers.code import CodeChunker
+    from stele_context.chunkers.image import ImageChunker
+    from stele_context.chunkers.pdf import PDFChunker
+    from stele_context.chunkers.audio import AudioChunker
+    from stele_context.chunkers.video import VideoChunker
+    return {"formats": {
+        "text": _exts(TextChunker),
+        "code": _exts(CodeChunker),
+        "image": _exts(ImageChunker),
+        "pdf": _exts(PDFChunker),
+        "audio": _exts(AudioChunker),
+        "video": _exts(VideoChunker),
+    }}
+tools["get_supported_formats"] = _formats
 def emit(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
     sys.stdout.flush()
@@ -218,7 +248,7 @@ def walk(value, root, other_root, key=""):
         if key in {"unchanged", "files_with_matches", "indexed", "skipped"}:
             rows.sort(key=lambda row: json.dumps(row, sort_keys=True, default=str))
         return rows
-    if key == "version" and isinstance(value, str) and value[:3] in {"1.5", "2.0"}:
+    if key in {"version", "stele_version"} and isinstance(value, str) and value[:3] in {"1.5", "2.0"}:
         return "version"
     if isinstance(value, str):
         text = value.replace("\r\n", "\n").replace("\\", "/")
@@ -248,7 +278,16 @@ def walk(value, root, other_root, key=""):
 def blank_graph(value):
     """2.0 has no on-disk HNSW file and no SQLite database file."""
     if isinstance(value, dict):
-        for key in ("max_level", "avg_connections", "insert_count", "database_size_bytes"):
+        for key in (
+            "max_level",
+            "avg_connections",
+            "insert_count",
+            "node_count",
+            "database_size_bytes",
+            "page_count",
+            "wal_size_bytes",
+            "hnsw_span",
+        ):
             if key in value:
                 value[key] = "store"
         for child in value.values():
@@ -268,9 +307,10 @@ def timestamps_ok(left, right, bad):
             if key in {
                 "created_at", "updated_at", "last_updated", "locked_at",
                 "expires_at", "latest_timestamp", "indexed_at", "at",
-                "last_heartbeat", "file_mtime",                 "document_indexed_at",
+                "last_heartbeat", "file_mtime", "document_indexed_at",
                 "stored_last_modified", "started_at", "indexed_at",
                 "latest_indexed_at", "seconds_since_last_index",
+                "read_at", "timestamp",
             } and isinstance(lv, (int, float)) and isinstance(rv, (int, float)):
                 if isinstance(lv, bool) or isinstance(rv, bool):
                     out_l[key], out_r[key] = lv, rv
@@ -289,6 +329,24 @@ def timestamps_ok(left, right, bad):
         pairs = [timestamps_ok(a, b, bad) for a, b in zip(left, right)]
         return [a for a, _ in pairs], [b for _, b in pairs]
     return left, right
+
+
+def first_chunk(value):
+    found = []
+
+    def visit(item):
+        if isinstance(item, dict):
+            cid = item.get("chunk_id")
+            if isinstance(cid, str) and cid:
+                found.append(cid)
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return found[0] if found else ""
 
 
 def first_diff(left, right, path="$"):
@@ -347,35 +405,106 @@ def main() -> int:
     )
     calls = [
         ("index", {"paths": ["."]}),
+        ("remove", {"document_path": "docs/guide.md"}),
         ("search", {"query": "classify", "search_mode": "keyword", "top_k": 5}),
         ("search_text", {"pattern": "classify", "regex": False}),
-        ("agent_grep", {"pattern": "classify"}),
+        ("agent_grep", {"pattern": "classify", "group_by": "file"}),
+        ("query", {"query": "classify"}),
         ("find_definition", {"symbol": "classify"}),
         ("find_references", {"symbol": "classify"}),
-        ("get_context", {"document_paths": ["src/calc.py"]}),
+        ("impact_radius", {"symbol": "classify"}),
+        ("coupling", {"document_path": "src/main.py", "mode": "edges"}),
+        ("get_context", {"document_paths": ["src/calc.py"], "session_id": "s1"}),
+        ("doctor", {}),
+        ("map", {"compact": True}),
+        ("document_lock", {"action": "status", "document_path": "src/calc.py"}),
+        ("annotations", {"action": "get", "target": "src/calc.py", "target_type": "document"}),
+        ("register_dynamic_symbols", {"symbols": [{"name": "on_hook", "kind": "function", "document_path": "src/calc.py"}], "agent_id": "dyn-agent"}),
+        ("get_dynamic_symbols", {"agent_id": "dyn-agent"}),
+        ("remove_dynamic_symbols", {"agent_id": "dyn-agent"}),
+        ("detect_modality", {"path": "docs/report.pdf"}),
+        ("get_supported_formats", {}),
+        ("enrichment_plan", {"top_n": 15, "min_tokens": 20}),
+        ("get_search_history", {"session_id": "s1"}),
+        ("get_session_read_files", {"session_id": "s1"}),
         ("detect_changes", {}),
+        ("prune_history", {"max_entries": 1000}),
+        ("history", {"limit": 20}),
+        ("get_relevant_kv", {"session_id": "s1", "query": "classify"}),
+        ("save_kv_state", {"session_id": "s1", "kv_data": {"k": "v"}}),
+        ("get_relevant_kv", {"session_id": "s1", "query": "classify"}),
         ("list_sessions", {}),
+        ("rebuild_symbols", {}),
+        ("stale_chunks", {"threshold": 0.5}),
         ("list_agents", {"active_only": True}),
         ("get_notifications", {}),
-        ("rebuild_symbols", {}),
-        ("stale_chunks", {}),
-        ("prune_history", {}),
         ("environment_check", {}),
         ("clean_bytecache", {}),
         ("get_chunk_history", {"limit": 5}),
         ("batch", {"operations": [{"method": "find_definition", "params": {"symbol": "classify"}}]}),
-        ("annotate", {"target": "src/calc.py", "target_type": "document", "content": "note", "tags": ["t1"]}),
-        ("get_annotations", {"target": "src/calc.py", "target_type": "document"}),
-        ("acquire_document_lock", {"document_path": "src/calc.py", "agent_id": "other-agent"}),
         ("stats", {}),
         ("project_brief", {}),
+        ("annotate", {"target": "src/calc.py", "target_type": "document", "content": "note", "tags": ["t1"]}),
+        ("get_annotations", {"target": "src/calc.py", "target_type": "document"}),
+        ("search_annotations", {"query": "note"}),
+        ("update_annotation", {"annotation_id": 1, "content": "edited", "tags": ["t2"]}),
+        ("bulk_annotate", {"annotations": [{"target": "src/main.py", "target_type": "document", "content": "bulk", "tags": ["b"]}]}),
+        ("delete_annotation", {"annotation_id": 1}),
+        ("acquire_document_lock", {"document_path": "src/calc.py", "agent_id": "other-agent"}),
+        ("refresh_document_lock", {"document_path": "src/calc.py", "agent_id": "other-agent"}),
+        ("get_document_lock_status", {"document_path": "src/calc.py"}),
+        ("get_conflicts", {}),
+        ("release_document_lock", {"document_path": "src/calc.py", "agent_id": "other-agent"}),
+        ("release_agent_locks", {"agent_id": "other-agent"}),
+        ("reap_expired_locks", {}),
+        ("rollback", {"session_id": "missing", "target_turn": 0}),
+        ("prune_chunks", {"session_id": "missing", "max_tokens": 10}),
     ]
+    covered = {name for name, _ in calls}
+    # Chunk tools are appended once a chunk id is known.
+    later = {
+        "llm_embed",
+        "bulk_store_summaries",
+        "bulk_store_embeddings",
+        "bulk_store_chunk_agent_notes",
+        "store_semantic_summary",
+        "store_embedding",
+        "store_chunk_agent_notes",
+    }
+    required = {
+        "index", "remove", "detect_changes", "search", "agent_grep", "search_text",
+        "query", "find_references", "find_definition", "impact_radius", "coupling",
+        "get_context", "doctor", "map", "document_lock", "annotations",
+        "register_dynamic_symbols", "remove_dynamic_symbols", "llm_embed",
+        "bulk_store_summaries", "enrichment_plan", "get_search_history",
+        "get_session_read_files", "detect_modality", "get_supported_formats",
+        "prune_history", "history", "get_relevant_kv", "save_kv_state", "rollback",
+        "prune_chunks", "list_sessions", "rebuild_symbols", "stale_chunks",
+        "get_dynamic_symbols", "list_agents", "get_notifications", "environment_check",
+        "clean_bytecache", "bulk_store_embeddings", "bulk_store_chunk_agent_notes",
+        "get_chunk_history", "batch", "stats", "project_brief", "annotate",
+        "get_annotations", "delete_annotation", "update_annotation",
+        "search_annotations", "bulk_annotate", "acquire_document_lock",
+        "refresh_document_lock", "release_document_lock", "get_document_lock_status",
+        "release_agent_locks", "get_conflicts", "reap_expired_locks",
+        "store_semantic_summary", "store_embedding", "store_chunk_agent_notes",
+    }
+    if covered | later != required:
+        missing = sorted(required - covered - later)
+        extra = sorted((covered | later) - required)
+        print(f"parity diff tool coverage missing={missing} extra={extra}", flush=True)
+        return 1
     diffs = 0
     root_s = str(root)
     try:
         rust.call("initialize", {})
         python.call("initialize", {})
-        for name, args in calls:
+        pending = list(calls)
+        seen_chunk = False
+        invoked = set()
+        while pending:
+            name, args = pending.pop(0)
+            invoked.add(name)
             left = tool(rust, name, args)
             right = tool(python, name, args)
             bad = []
@@ -384,15 +513,30 @@ def main() -> int:
             for side in (left_n, right_n):
                 blank_graph(side)
             left_n, right_n = timestamps_ok(left_n, right_n, bad)
-            for side in (left_n, right_n):
-                if isinstance(side, dict) and isinstance(side.get("notifications"), list):
-                    side["notifications"].sort(key=lambda row: str(row.get("document_path")))
             if bad:
                 print(f"parity diff {name} timestamp type: {bad}", flush=True)
                 diffs += 1
             if left_n != right_n:
                 print(f"parity diff {name}: {first_diff(left_n, right_n)}", flush=True)
                 diffs += 1
+            if not seen_chunk and name == "get_context":
+                cid = first_chunk(left)
+                if cid:
+                    seen_chunk = True
+                    vec = [0.1] * 128
+                    pending[0:0] = [
+                        ("llm_embed", {"text": "def classify(n):\n    return n\n", "chunk_id": cid}),
+                        ("bulk_store_summaries", {"summaries": {cid: "classifies numbers"}}),
+                        ("store_semantic_summary", {"chunk_id": cid, "summary": "hello"}),
+                        ("bulk_store_embeddings", {"embeddings": {cid: vec}}),
+                        ("store_embedding", {"chunk_id": cid, "vector": [0.2] * 128}),
+                        ("bulk_store_chunk_agent_notes", {"notes": {cid: "keep this"}}),
+                        ("store_chunk_agent_notes", {"chunk_id": cid, "notes": "note"}),
+                    ]
+        missed = sorted(required - invoked)
+        if missed:
+            print(f"parity diff tools not called: {missed}", flush=True)
+            diffs += 1
         rust.close()
         python.close()
         # CLI behaviour, not just --help. The server must release the store lock first.

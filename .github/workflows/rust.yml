@@ -59,8 +59,11 @@ jobs:
         if: matrix.test
         shell: bash
         run: |
-          python3 -m pip install 'pymupdf>=1.23' || true
-          python -m pip install 'pymupdf>=1.23' || true
+          # Stay on the 1.x wheel. PyMuPDF 2.x publishes an sdist whose
+          # metadata name is pymupdf-lite, and macOS spends the job building it.
+          spec='pymupdf>=1.23,<2'
+          python3 -m pip install --user --break-system-packages "$spec" || python3 -m pip install --user "$spec" || true
+          python -m pip install --user --break-system-packages "$spec" || python -m pip install --user "$spec" || true
           python3 -c 'import pymupdf' || python -c 'import pymupdf'
 
       - name: Fetch parity corpora

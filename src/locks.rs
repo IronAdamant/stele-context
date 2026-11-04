@@ -91,7 +91,7 @@ fn refresh(
             write_lock(state, shared, path, agent, now + TTL);
             Ok(Value::object(vec![
                 ("refreshed", Value::Bool(true)),
-                ("expires_at", Value::Int(now + TTL)),
+                ("expires_at", Value::Float((now + TTL) as f64)),
             ]))
         }
         Some(_) => Ok(Value::object(vec![
@@ -203,13 +203,26 @@ fn release(
 fn status(state: &State, shared: Option<&Shared>, path: &str, now: i64, _cwd: &Path) -> Value {
     match live_holder(state, shared, path, now) {
         None => Value::object(vec![("locked", Value::Bool(false))]),
-        Some((holder, until)) => Value::object(vec![
-            ("locked", Value::Bool(true)),
-            ("locked_by", Value::string(holder)),
-            ("locked_at", Value::Int(until - TTL)),
-            ("expires_at", Value::Int(until)),
-            ("worktree", Value::Null),
-        ]),
+        Some((holder, until)) => {
+            let worktree = shared
+                .and_then(|shared| {
+                    shared.agents.iter().find_map(|row| {
+                        if text_field(row, "agent_id") == holder {
+                            Some(Value::string(text_field(row, "worktree_root")))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or(Value::Null);
+            Value::object(vec![
+                ("locked", Value::Bool(true)),
+                ("locked_by", Value::string(holder)),
+                ("locked_at", Value::Float((until - TTL) as f64)),
+                ("expires_at", Value::Float(until as f64)),
+                ("worktree", worktree),
+            ])
+        }
     }
 }
 
@@ -571,6 +584,10 @@ pub fn register_agent(start: &Path, agent: &str, worktree: &str) {
 }
 
 pub fn note_indexed(start: &Path, paths: &[String], agent: &str) {
+    note_change(start, paths, agent, "indexed")
+}
+
+pub fn note_change(start: &Path, paths: &[String], agent: &str, change_type: &str) {
     if paths.is_empty() {
         return;
     }
@@ -597,7 +614,7 @@ pub fn note_indexed(start: &Path, paths: &[String], agent: &str) {
         notes.push(Value::object(vec![
             ("id", Value::Int((notes.len() + 1) as i64)),
             ("document_path", Value::string(doc)),
-            ("change_type", Value::string("indexed")),
+            ("change_type", Value::string(change_type)),
             ("agent_id", Value::string(agent)),
             (
                 "worktree_root",

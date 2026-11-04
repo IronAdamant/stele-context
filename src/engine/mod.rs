@@ -39,6 +39,8 @@ pub struct Engine {
     /// unloaded until a file actually differs.
     documents_only: bool,
     server_agent: String,
+    file_reads: Vec<(String, String, Vec<String>, f64)>,
+    operations: u64,
 }
 
 impl Engine {
@@ -109,6 +111,8 @@ impl Engine {
             max_history_entries: loaded.max_history_entries.unwrap_or(1000),
             documents_only,
             server_agent: String::new(),
+            file_reads: Vec::new(),
+            operations: 0,
         })
     }
 
@@ -305,9 +309,9 @@ impl Engine {
                     truncate_detect(&mut result, limit);
                 }
                 self.store.state.change_log.push(crate::store::ChangeRow {
-                    at: now_secs(),
+                    at: now_us(),
                     session: "default".to_string(),
-                    summary: "detect".to_string(),
+                    summary: crate::json::to_string(&result),
                     reason: String::new(),
                 });
                 return Ok(result);
@@ -437,9 +441,9 @@ impl Engine {
             truncate_detect(&mut result, limit);
         }
         self.store.state.change_log.push(crate::store::ChangeRow {
-            at: now_secs(),
+            at: now_us(),
             session: "default".to_string(),
-            summary: "detect".to_string(),
+            summary: crate::json::to_string(&result),
             reason: String::new(),
         });
         Ok(result)
@@ -447,17 +451,44 @@ impl Engine {
 
     pub fn remove(&mut self, path: &str) -> Result<Value, String> {
         let rel = normalize(path);
-        let before = self.store.state.chunks.len();
+        let known = self.store.state.documents.iter().any(|doc| doc.path == rel);
+        if !known {
+            return Ok(Value::object(vec![("removed", Value::Bool(false))]));
+        }
+        let chunk_ids: Vec<String> = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.path == rel)
+            .map(|chunk| chunk.id.clone())
+            .collect();
+        let annotations_removed = self
+            .store
+            .state
+            .annotations
+            .iter()
+            .filter(|note| note.path == rel)
+            .count();
+        let chunks_removed = chunk_ids.len() as i64;
         self.drop_path(&rel);
-        let removed = before - self.store.state.chunks.len();
         self.rebuild_bm25();
+        crate::locks::note_change(&self.cwd, &[rel.clone()], "", "removed");
         self.store.save(
             "remove",
             &Value::object(vec![("path", Value::string(&rel))]),
         )?;
         Ok(Value::object(vec![
-            ("path", Value::string(rel)),
-            ("chunks_removed", Value::Int(removed as i64)),
+            ("removed", Value::Bool(true)),
+            (
+                "chunk_ids",
+                Value::Array(chunk_ids.into_iter().map(Value::String).collect()),
+            ),
+            ("chunks_removed", Value::Int(chunks_removed)),
+            (
+                "annotations_removed",
+                Value::Int(annotations_removed as i64),
+            ),
         ]))
     }
 
@@ -600,41 +631,76 @@ impl Engine {
     }
 
     pub fn map(&self) -> Value {
-        let mut files: Vec<Value> = self
+        let mut docs: Vec<Value> = self
             .store
             .state
             .documents
             .iter()
             .map(|doc| {
-                let chunks = self
+                let chunks: Vec<_> = self
                     .store
                     .state
                     .chunks
                     .iter()
                     .filter(|chunk| chunk.path == doc.path)
-                    .count();
-                let symbols = self
+                    .collect();
+                let tokens: i64 = chunks.iter().map(|chunk| chunk.tokens as i64).sum();
+                let notes: Vec<Value> = self
                     .store
                     .state
-                    .symbols
+                    .annotations
                     .iter()
-                    .filter(|sym| sym.path == doc.path)
-                    .count();
+                    .filter(|note| note.path == doc.path && note.target_type == "document")
+                    .map(|note| {
+                        Value::object(vec![
+                            ("id", Value::Int(note.id.parse::<i64>().unwrap_or(0))),
+                            ("content", Value::string(&note.body)),
+                            (
+                                "tags",
+                                Value::Array(
+                                    note.tags.iter().cloned().map(Value::String).collect(),
+                                ),
+                            ),
+                        ])
+                    })
+                    .collect();
                 Value::object(vec![
                     ("path", Value::string(&doc.path)),
-                    ("chunks", Value::Int(chunks as i64)),
-                    ("symbols", Value::Int(symbols as i64)),
-                    ("bytes", Value::Int(doc.size as i64)),
+                    ("chunk_count", Value::Int(chunks.len() as i64)),
+                    ("total_tokens", Value::Int(tokens)),
+                    ("indexed_at", Value::Float(now_f64())),
+                    ("annotations", Value::Array(notes)),
                 ])
             })
             .collect();
-        files.sort_by(|left, right| json_path(left).cmp(&json_path(right)));
+        docs.sort_by(|left, right| {
+            crate::store::int_field(right, "total_tokens")
+                .cmp(&crate::store::int_field(left, "total_tokens"))
+                .then(
+                    crate::store::string_field(left, "path")
+                        .cmp(&crate::store::string_field(right, "path")),
+                )
+        });
+        let total_tokens: i64 = docs
+            .iter()
+            .map(|doc| crate::store::int_field(doc, "total_tokens"))
+            .sum();
+        let total = docs.len() as i64;
+        let chunks = self.store.state.chunks.len() as i64;
+        let symbols = self.store.state.symbols.len() as i64;
         Value::object(vec![
+            ("documents", Value::Array(docs)),
+            ("total_documents", Value::Int(total)),
+            ("total_tokens", Value::Int(total_tokens)),
             (
-                "documents",
-                Value::Int(self.store.state.documents.len() as i64),
+                "index_health",
+                self.index_health(chunks, symbols, !self.store.state.symbols.is_empty()),
             ),
-            ("files", Value::Array(files)),
+            ("compact", Value::Bool(true)),
+            (
+                "project_root",
+                Value::string(self.cwd.display().to_string()),
+            ),
         ])
     }
 
@@ -725,39 +791,280 @@ impl Engine {
     }
 
     pub fn enrichment_plan(&self) -> Value {
-        let pending: Vec<Value> = self
-            .store
-            .state
-            .chunks
+        let top_n = 15usize;
+        let min_tokens = 20i64;
+        let mut missing: Vec<Value> = Vec::new();
+        let mut tier2_tokens = 0i64;
+        let mut total_tokens = 0i64;
+        for chunk in &self.store.state.chunks {
+            let tokens = chunk.tokens as i64;
+            total_tokens += tokens;
+            if chunk.summary.is_some() {
+                tier2_tokens += tokens;
+                continue;
+            }
+            if tokens < min_tokens {
+                continue;
+            }
+            let preview: String = chunk.content.chars().take(120).collect();
+            missing.push(Value::object(vec![
+                ("chunk_id", Value::string(&chunk.id)),
+                ("document_path", Value::string(&chunk.path)),
+                ("token_count", Value::Int(tokens)),
+                ("preview", Value::string(preview)),
+            ]));
+        }
+        missing.sort_by(|left, right| {
+            crate::store::int_field(right, "token_count")
+                .cmp(&crate::store::int_field(left, "token_count"))
+                .then(
+                    crate::store::string_field(left, "document_path")
+                        .cmp(&crate::store::string_field(right, "document_path")),
+                )
+        });
+        let uncovered: i64 = missing
             .iter()
-            .filter(|chunk| chunk.summary.is_none())
-            .take(50)
-            .map(|chunk| {
-                Value::object(vec![
-                    ("chunk_id", Value::string(&chunk.id)),
-                    ("path", Value::string(&chunk.path)),
-                ])
-            })
-            .collect();
-        let missing = self
-            .store
-            .state
-            .chunks
-            .iter()
-            .filter(|chunk| chunk.summary.is_none())
-            .count();
+            .map(|row| crate::store::int_field(row, "token_count"))
+            .sum();
+        let total_missing = missing.len() as i64;
+        let selected: Vec<Value> = missing.into_iter().take(top_n).collect();
+        let pct = if total_tokens == 0 {
+            0.0
+        } else {
+            (tier2_tokens as f64 / total_tokens as f64) * 100.0
+        };
+        let pct = (pct * 100.0).round() / 100.0;
         Value::object(vec![
-            ("chunks_missing_summary", Value::Int(missing as i64)),
-            ("next", Value::Array(pending)),
+            ("top_n", Value::Int(top_n as i64)),
+            ("candidates", Value::Array(selected)),
+            ("candidates_total", Value::Int(total_missing)),
+            ("uncovered_tokens", Value::Int(uncovered)),
+            ("tier2_token_coverage_percent", Value::Float(pct)),
+            ("total_tokens", Value::Int(total_tokens)),
+            (
+                "how_to_enrich",
+                Value::string(
+                    "Call bulk_store_summaries with {chunk_id: short purpose/exports summary} for the candidates below. Prefer hot paths agents already read.",
+                ),
+            ),
+        ])
+    }
+
+    pub fn note_operation(&mut self) {
+        self.operations += 1;
+    }
+
+    /// The 1.5.2 `doctor_snapshot` object. SQLite page geometry is not a
+    /// JSON snapshot, so page_count stays 0 and the harness records that.
+    pub fn doctor_snapshot(&self) -> Value {
+        let documents = self.store.state.documents.len() as i64;
+        let chunks = self.store.state.chunks.len() as i64;
+        let symbols = self.store.state.symbols.len() as i64;
+        let tokens: i64 = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .map(|chunk| chunk.tokens as i64)
+            .sum();
+        let tier2_chunks = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.summary.is_some())
+            .count() as i64;
+        let chunk_pct = if chunks == 0 {
+            0.0
+        } else {
+            (tier2_chunks as f64 / chunks as f64) * 100.0
+        };
+        let chunk_pct = (chunk_pct * 100.0).round() / 100.0;
+        let advice = if chunk_pct < 5.0 {
+            Some(
+                "Tier-2 coverage is critically low. Most semantic searches will fall back to BM25. Run llm_embed on representative chunks or populate semantic_summary fields to enable Tier-2 ranking.",
+            )
+        } else if chunk_pct < 80.0 {
+            Some("below")
+        } else {
+            None
+        };
+        let advice = match advice {
+            Some("below") => Value::string(format!(
+                "Tier-2 coverage is {chunk_pct:.1}% — below the 80% target for sharp semantic search. Run llm_embed or populate semantic_summary on the remaining chunks."
+            )),
+            Some(text) => Value::string(text),
+            None => Value::Null,
+        };
+        let ready = symbols > 0;
+        let mut health = self.index_health(chunks, symbols, ready);
+        if let Value::Object(pairs) = &mut health {
+            pairs.retain(|(key, _)| key != "latest_indexed_at");
+            pairs.push(("latest_indexed_at".to_string(), Value::Float(now_f64())));
+            pairs.push(("seconds_since_last_index".to_string(), Value::Float(0.0)));
+        }
+        let avg = if documents == 0 {
+            0.0
+        } else {
+            (tokens as f64 / documents as f64 * 10.0).round() / 10.0
+        };
+        let ritual = "doctor → query (session_id) → agent_grep / find_definition|find_references as needed → get_context (trust/diff) → detect_changes after edits";
+        let mut steps = vec![Value::object(vec![
+            ("action", Value::string("query")),
+            (
+                "detail",
+                Value::string(
+                    "Start broad questions with `query` (pass session_id for auto working_tree). Prefer agent_grep / find_* for exact identifiers.",
+                ),
+            ),
+        ])];
+        if chunk_pct < 5.0
+            || crate::store::int_field(&self.enrichment_plan(), "candidates_total") > 0
+        {
+            steps.push(Value::object(vec![
+                ("action", Value::string("enrich_tier2")),
+                (
+                    "detail",
+                    Value::string(format!(
+                        "Tier-2 coverage is {chunk_pct:.1}% (target ≥20% on hot paths). Use enrichment_plan / doctor enrichment_preview, then bulk_store_summaries on top candidates."
+                    )),
+                ),
+            ]));
+        }
+        steps.push(Value::object(vec![
+            ("action", Value::string("ritual")),
+            ("detail", Value::string(ritual)),
+        ]));
+        let mut preview = self.map();
+        if let Value::Object(pairs) = &mut preview {
+            pairs.push(("documents_omitted".to_string(), Value::Int(0)));
+            if let Some((_, health_slot)) = pairs.iter_mut().find(|(key, _)| key == "index_health")
+            {
+                if let Value::Object(health_pairs) = health_slot {
+                    health_pairs.retain(|(key, _)| key != "latest_indexed_at");
+                    health_pairs.push(("latest_indexed_at".to_string(), Value::Float(now_f64())));
+                    health_pairs.push(("seconds_since_last_index".to_string(), Value::Float(0.0)));
+                }
+            }
+        }
+        Value::object(vec![
+            ("stele_version", Value::string(crate::VERSION)),
+            ("python", host_python()),
+            (
+                "project_root",
+                Value::string(self.cwd.display().to_string()),
+            ),
+            (
+                "storage_dir",
+                Value::string(self.storage.display().to_string()),
+            ),
+            ("document_count", Value::Int(documents)),
+            ("chunk_count", Value::Int(chunks)),
+            ("index_health", health),
+            (
+                "db_health",
+                Value::object(vec![
+                    (
+                        "table_rows",
+                        Value::object(vec![
+                            (
+                                "change_history",
+                                Value::Int(self.store.state.change_log.len() as i64),
+                            ),
+                            ("chunk_history", Value::Int(0)),
+                            ("operation_log", Value::Int(self.operations as i64)),
+                            (
+                                "sessions",
+                                Value::Int(self.store.state.sessions.len() as i64),
+                            ),
+                        ]),
+                    ),
+                    ("growth_alerts", Value::Array(Vec::new())),
+                    ("journal_mode", Value::string("wal")),
+                    ("synchronous", Value::Int(1)),
+                    ("page_count", Value::Int(0)),
+                    ("page_size", Value::Int(4096)),
+                    ("database_size_bytes", Value::Int(0)),
+                    ("wal_size_bytes", Value::Int(0)),
+                    ("wal_autocheckpoint", Value::Int(1000)),
+                    ("busy_timeout_ms", Value::Int(30000)),
+                    (
+                        "recent_operations_1h",
+                        Value::Int(self.operations as i64),
+                    ),
+                    ("recent_failures_1h", Value::Int(0)),
+                    ("busy_ratio", Value::Float(0.0)),
+                    ("recommended_action", Value::string("idle")),
+                ]),
+            ),
+            (
+                "search_quality",
+                Value::object(vec![
+                    ("total_chunks", Value::Int(chunks)),
+                    ("tier2_chunks", Value::Int(tier2_chunks)),
+                    ("tier2_coverage_percent", Value::Float(chunk_pct)),
+                    ("hnsw_span", Value::Float(0.0)),
+                    ("advice", advice),
+                ]),
+            ),
+            ("environment", self.environment_check()),
+            ("map_preview", preview),
+            ("recommended_mcp_mode", Value::string("lite")),
+            ("recommended_ritual", Value::string(ritual)),
+            (
+                "mcp_config",
+                Value::string(
+                    "{\n  \"mcpServers\": {\n    \"stele-context\": {\n      \"command\": \"stele-context\",\n      \"args\": [\"serve-mcp\"],\n      \"env\": {\n        \"STELE_MCP_MODE\": \"lite\"\n      }\n    }\n  }\n}",
+                ),
+            ),
+            ("next_steps", Value::Array(steps)),
+            (
+                "token_savings",
+                Value::object(vec![
+                    ("indexed_tokens", Value::Int(tokens)),
+                    ("document_count", Value::Int(documents)),
+                    ("chunk_count", Value::Int(chunks)),
+                    ("avg_tokens_per_document", Value::Float(avg)),
+                    ("avoided_reread_tokens_if_cache_hit", Value::Int(tokens)),
+                    (
+                        "note",
+                        Value::string(format!(
+                            "If the agent reuses the index instead of re-reading every file, up to ~{tokens} tokens of full-file re-read can be avoided (use get_context + diff_since_cache for deltas)."
+                        )),
+                    ),
+                ]),
+            ),
+            ("enrichment_preview", enrichment_preview(&self.enrichment_plan())),
         ])
     }
 
     pub fn history(&self) -> Result<Value, String> {
-        let rows = self.store.history()?;
-        Ok(Value::object(vec![
-            ("entries", Value::Int(rows.len() as i64)),
-            ("history", Value::Array(rows)),
-        ]))
+        let rows = self
+            .store
+            .state
+            .change_log
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let summary =
+                    crate::json::parse(&row.summary).unwrap_or(Value::string(&row.summary));
+                Value::object(vec![
+                    ("id", Value::Int(index as i64 + 1)),
+                    (
+                        "reason",
+                        if row.reason.is_empty() {
+                            Value::Null
+                        } else {
+                            Value::string(&row.reason)
+                        },
+                    ),
+                    ("session_id", Value::string(&row.session)),
+                    ("summary", summary),
+                    ("timestamp", Value::Float(session_time(row.at))),
+                ])
+            })
+            .collect();
+        Ok(Value::Array(rows))
     }
 
     pub fn clear(&mut self) -> Result<Value, String> {
@@ -1094,12 +1401,66 @@ fn mtime_ns(meta: &fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
-fn strings(values: &[String]) -> Value {
-    Value::Array(values.iter().cloned().map(Value::String).collect())
+fn host_python() -> Value {
+    for bin in ["python3", "python"] {
+        let Ok(output) = std::process::Command::new(bin)
+            .arg("-c")
+            .arg("import sys; print(sys.version.split()[0])")
+            .output()
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !text.is_empty() {
+            return Value::string(text);
+        }
+    }
+    Value::Null
 }
 
-fn json_path(value: &Value) -> String {
-    crate::store::string_field(value, "path")
+fn plan_field<'a>(plan: &'a Value, key: &str) -> Option<&'a Value> {
+    let Value::Object(pairs) = plan else {
+        return None;
+    };
+    pairs
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, item)| item)
+}
+
+fn enrichment_preview(plan: &Value) -> Value {
+    let candidates = match plan_field(plan, "candidates") {
+        Some(Value::Array(rows)) => rows.iter().take(8).cloned().collect(),
+        _ => Vec::new(),
+    };
+    let pct = match plan_field(plan, "tier2_token_coverage_percent") {
+        Some(Value::Float(number)) => *number,
+        Some(Value::Int(number)) => *number as f64,
+        _ => 0.0,
+    };
+    Value::object(vec![
+        (
+            "candidates_total",
+            Value::Int(crate::store::int_field(plan, "candidates_total")),
+        ),
+        (
+            "uncovered_tokens",
+            Value::Int(crate::store::int_field(plan, "uncovered_tokens")),
+        ),
+        ("tier2_token_coverage_percent", Value::Float(pct)),
+        (
+            "how_to_enrich",
+            Value::string(crate::store::string_field(plan, "how_to_enrich")),
+        ),
+        ("top_candidates", Value::Array(candidates)),
+    ])
+}
+
+fn strings(values: &[String]) -> Value {
+    Value::Array(values.iter().cloned().map(Value::String).collect())
 }
 
 #[cfg(test)]

@@ -164,29 +164,33 @@ impl Engine {
                     continue;
                 }
             }
-            rows.push(Value::object(vec![
-                ("session_id", Value::string(&session.id)),
-                (
-                    "created_at",
-                    Value::Float(super::session_time(session.created_at)),
-                ),
-                (
-                    "last_updated",
-                    Value::Float(super::session_time(session.updated_at)),
-                ),
-                ("turn_count", Value::Int(session.turn)),
-                ("total_tokens", Value::Int(session.tokens)),
-                (
-                    "agent_id",
-                    if session.agent.is_empty() {
-                        Value::Null
-                    } else {
-                        Value::string(&session.agent)
-                    },
-                ),
-            ]));
+            rows.push((
+                super::session_time(session.updated_at),
+                Value::object(vec![
+                    ("session_id", Value::string(&session.id)),
+                    (
+                        "created_at",
+                        Value::Float(super::session_time(session.created_at)),
+                    ),
+                    (
+                        "last_updated",
+                        Value::Float(super::session_time(session.updated_at)),
+                    ),
+                    ("turn_count", Value::Int(session.turn)),
+                    ("total_tokens", Value::Int(session.tokens)),
+                    (
+                        "agent_id",
+                        if session.agent.is_empty() {
+                            Value::Null
+                        } else {
+                            Value::string(&session.agent)
+                        },
+                    ),
+                ]),
+            ));
         }
-        Value::Array(rows)
+        rows.sort_by(|left, right| right.0.total_cmp(&left.0));
+        Value::Array(rows.into_iter().map(|(_, row)| row).collect())
     }
 
     pub fn rebuild_symbols(&mut self) -> Result<Value, String> {
@@ -285,14 +289,20 @@ impl Engine {
             .dynamic
             .iter()
             .filter(|sym| agent.is_none_or(|id| sym.agent == id))
-            .map(|sym| {
+            .enumerate()
+            .map(|(index, sym)| {
                 Value::object(vec![
+                    (
+                        "id",
+                        Value::Int(self.store.state.symbols.len() as i64 + index as i64 + 1),
+                    ),
                     ("name", Value::string(&sym.name)),
                     ("kind", Value::string(&sym.kind)),
                     ("role", Value::string(&sym.role)),
                     ("chunk_id", Value::string(&sym.chunk_id)),
                     ("document_path", Value::string(&sym.path)),
-                    ("line_number", Value::Int(sym.line as i64)),
+                    ("line_number", Value::Null),
+                    ("container", Value::Null),
                 ])
             })
             .collect();

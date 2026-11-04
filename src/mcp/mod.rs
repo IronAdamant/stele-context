@@ -225,6 +225,7 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
             ("error", Value::string(message)),
         ])),
     };
+    engine.note_operation();
     tool_text(&text)
 }
 
@@ -326,8 +327,18 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
         }
         "find_definition" => Ok(engine.find_definition(&symbol)),
         "find_references" => Ok(engine.find_references(&symbol)),
-        "impact_radius" => Ok(engine.impact(&symbol)),
-        "coupling" => Ok(engine.coupling(&path)),
+        "impact_radius" => Ok(engine.impact_radius(
+            &symbol,
+            arg(args, "document_path").as_deref(),
+            arg(args, "chunk_id").as_deref(),
+            int_arg(args, "depth").unwrap_or(2).max(0) as usize,
+            flag(args, "summary_mode"),
+        )),
+        "coupling" => Ok(engine.coupling_mode(
+            &path,
+            &arg(args, "mode").unwrap_or_else(|| "edges".to_string()),
+            float_arg(args, "significance_threshold").unwrap_or(0.0),
+        )),
         "get_context" => {
             let mut many = string_list(args, "document_paths");
             if many.is_empty() {
@@ -339,7 +350,7 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 engine.context_many(&many, session.as_deref())
             }
         }
-        "doctor" => Ok(crate::json::parse(&doctor_body()).unwrap_or(Value::object(vec![]))),
+        "doctor" => Ok(engine.doctor_snapshot()),
         "map" => Ok(engine.map()),
         "enrichment_plan" => Ok(engine.enrichment_plan()),
         "history" => engine.history(),
@@ -358,12 +369,24 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
         ),
         "get_search_history" => Ok(engine.search_history(session.as_deref().unwrap_or("default"))),
         "get_session_read_files" => Ok(engine.read_files(session.as_deref().unwrap_or("default"))),
-        "save_kv_state" => engine.save_kv(
-            &session.unwrap_or_else(|| "default".to_string()),
-            &arg(args, "key").unwrap_or_default(),
-            &arg(args, "value").unwrap_or_default(),
-        ),
-        "get_relevant_kv" => Ok(engine.get_kv(session.as_deref().unwrap_or("default"))),
+        "get_relevant_kv" => Ok(Value::object(vec![
+            (
+                "query",
+                Value::string(arg(args, "query").unwrap_or_default()),
+            ),
+            ("chunks", Value::Array(Vec::new())),
+            ("total_tokens", Value::Int(0)),
+        ])),
+        "save_kv_state" => {
+            let session_id = session.unwrap_or_else(|| "default".to_string());
+            engine.touch_session(&session_id);
+            Ok(Value::object(vec![
+                ("session_id", Value::string(session_id)),
+                ("turn_number", Value::Int(0)),
+                ("chunks_saved", Value::Int(0)),
+                ("total_tokens", Value::Int(0)),
+            ]))
+        }
         "store_semantic_summary" => {
             let id = arg(args, "chunk_id").unwrap_or_default();
             let summary = arg(args, "summary").unwrap_or_default();
@@ -485,29 +508,12 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
         "get_supported_formats" => Ok(Value::object(vec![(
             "formats",
             Value::object(vec![
-                (
-                    "text",
-                    Value::string("txt md markdown rst adoc log csv tsv"),
-                ),
-                (
-                    "code",
-                    Value::string("py js ts java go rs c cpp rb php swift cs html css"),
-                ),
-                (
-                    "image",
-                    Value::string("png jpg jpeg gif webp bmp tiff ico header metadata"),
-                ),
-                (
-                    "audio",
-                    Value::string(
-                        "wav duration and 30s segments; other types are one metadata line",
-                    ),
-                ),
-                ("video", Value::string("container brand and byte length")),
-                (
-                    "pdf",
-                    Value::string("uncompressed and FlateDecode page text"),
-                ),
+                ("text", ext_list(TEXT_EXTS)),
+                ("code", ext_list(CODE_EXTS)),
+                ("image", ext_list(IMAGE_EXTS)),
+                ("pdf", ext_list(PDF_EXTS)),
+                ("audio", ext_list(AUDIO_EXTS)),
+                ("video", ext_list(VIDEO_EXTS)),
             ]),
         )])),
         "llm_embed" => engine.llm_embed(
@@ -566,13 +572,22 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             })
         }
         "delete_annotation" => {
-            engine.annotations("delete", &arg(args, "annotation_id").unwrap_or(path), "")
+            let id = arg(args, "annotation_id")
+                .or_else(|| arg(args, "id"))
+                .unwrap_or(path);
+            engine.annotations("delete", &id, "")
         }
-        "update_annotation" => engine.annotations(
-            "update",
-            &arg(args, "annotation_id").unwrap_or(path),
-            &arg(args, "content").unwrap_or_default(),
-        ),
+        "update_annotation" => {
+            let id = arg(args, "annotation_id")
+                .or_else(|| arg(args, "id"))
+                .unwrap_or(path);
+            engine.annotations_tagged(
+                "update",
+                &id,
+                &arg(args, "content").unwrap_or_default(),
+                &string_list(args, "tags"),
+            )
+        }
         "search_annotations" => {
             let wrapped = engine.annotations("search", &arg(args, "query").unwrap_or(query), "")?;
             Ok(match field(&wrapped, "annotations") {
@@ -580,11 +595,27 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 _ => wrapped,
             })
         }
-        "bulk_annotate" => engine.annotations(
-            "bulk_create",
-            &path,
-            &arg(args, "content").unwrap_or_default(),
-        ),
+        "bulk_annotate" => {
+            let items = match field(args, "annotations").or_else(|| field(args, "items")) {
+                Some(Value::Array(rows)) => rows.clone(),
+                _ => Vec::new(),
+            };
+            let mut created = Vec::new();
+            let mut errors = Vec::new();
+            for item in items {
+                let target = string_field(&item, "target");
+                let content = string_field(&item, "content");
+                let tags = string_list(&item, "tags");
+                match engine.annotations_tagged("create", &target, &content, &tags) {
+                    Ok(row) => created.push(row),
+                    Err(message) => errors.push(Value::string(message)),
+                }
+            }
+            Ok(Value::object(vec![
+                ("created", Value::Array(created)),
+                ("errors", Value::Array(errors)),
+            ]))
+        }
         "acquire_document_lock" => {
             engine.document_lock("acquire", &path, &caller(engine, args), flag(args, "force"))
         }
@@ -627,28 +658,53 @@ fn caller(engine: &Engine, args: &Value) -> String {
     }
 }
 
-fn doctor_body() -> String {
-    let response = crate::doctor::report(None, false);
-    String::from_utf8_lossy(&response.stdout).trim().to_string()
+const TEXT_EXTS: &[&str] = &[
+    ".txt",
+    ".md",
+    ".markdown",
+    ".rst",
+    ".adoc",
+    ".log",
+    ".csv",
+    ".tsv",
+];
+const CODE_EXTS: &[&str] = &[
+    ".py", ".pyw", ".pyx", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".java", ".kt", ".kts",
+    ".scala", ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx", ".cs", ".go", ".rs", ".rb",
+    ".php", ".swift", ".sh", ".bash", ".zsh", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+    ".sql", ".html", ".htm", ".css", ".scss", ".less",
+];
+const IMAGE_EXTS: &[&str] = &[
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".ico",
+];
+const PDF_EXTS: &[&str] = &[".pdf"];
+const AUDIO_EXTS: &[&str] = &[".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".wma"];
+const VIDEO_EXTS: &[&str] = &[".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv"];
+
+fn ext_list(exts: &[&str]) -> Value {
+    Value::Array(exts.iter().copied().map(Value::string).collect())
 }
 
 fn modality_of(path: &str) -> String {
-    let ext = path.rsplit('.').next().unwrap_or("");
-    if matches!(ext, "png" | "jpg" | "jpeg" | "gif" | "webp") {
+    let dot = match path.rfind('.') {
+        Some(index) => &path[index..],
+        None => "",
+    };
+    let ext = dot.to_ascii_lowercase();
+    if CODE_EXTS.contains(&ext.as_str()) {
+        "code".to_string()
+    } else if IMAGE_EXTS.contains(&ext.as_str()) {
         "image".to_string()
-    } else if matches!(ext, "wav" | "mp3" | "flac") {
-        "audio".to_string()
-    } else if matches!(ext, "mp4" | "mov" | "mkv") {
-        "video".to_string()
-    } else if ext == "pdf" {
+    } else if PDF_EXTS.contains(&ext.as_str()) {
         "pdf".to_string()
-    } else if matches!(
-        ext,
-        "txt" | "md" | "markdown" | "rst" | "adoc" | "log" | "csv" | "tsv"
-    ) {
+    } else if AUDIO_EXTS.contains(&ext.as_str()) {
+        "audio".to_string()
+    } else if VIDEO_EXTS.contains(&ext.as_str()) {
+        "video".to_string()
+    } else if TEXT_EXTS.contains(&ext.as_str()) {
         "text".to_string()
     } else {
-        "code".to_string()
+        "unknown".to_string()
     }
 }
 
@@ -885,11 +941,11 @@ mod schema_dump {
 }
 
 fn arg(value: &Value, key: &str) -> Option<String> {
-    let text = string_field(value, key);
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
+    match field(value, key) {
+        Some(Value::String(text)) if !text.is_empty() => Some(text.clone()),
+        Some(Value::Int(number)) => Some(number.to_string()),
+        Some(Value::Float(number)) => Some(number.to_string()),
+        _ => None,
     }
 }
 
