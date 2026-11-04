@@ -310,6 +310,18 @@ def first_diff(left, right, path="$"):
 
 
 def main() -> int:
+    if os.environ.get("STELE_PARITY_PY") != "1":
+        chosen = None
+        for cand in ("python3", "python", sys.executable):
+            if subprocess.run(
+                [cand, "-c", "import pymupdf"], capture_output=True
+            ).returncode == 0:
+                chosen = cand
+                break
+        if chosen and os.path.realpath(chosen) != os.path.realpath(sys.executable):
+            os.environ["STELE_PARITY_PY"] = "1"
+            os.execvp(chosen, [chosen, *sys.argv])
+        os.environ["STELE_PARITY_PY"] = "1"
     repo = Path(__file__).resolve().parents[1]
     binary = sys.argv[sys.argv.index("--binary") + 1]
     py = legacy_src(repo)
