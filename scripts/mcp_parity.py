@@ -59,6 +59,13 @@ trailer << /Root 1 0 R >>
 SHIM = r'''
 import json, os, sys
 sys.path.insert(0, os.environ["PYLEGACY"])
+import stele_context.engine as _engine
+import stele_context.engine_utils as _utils
+_orig_norm = _utils.normalize_path
+def _posix_norm(path, project_root):
+    return _orig_norm(path, project_root).replace("\\", "/")
+_utils.normalize_path = _posix_norm
+_engine._norm = _posix_norm
 from stele_context.engine import Stele
 from stele_context.tool_registry import build_tool_map
 root, store = sys.argv[1], sys.argv[2]
@@ -218,6 +225,14 @@ def walk(value, root, other_root, key=""):
         for prefix in (root, other_root):
             if prefix:
                 text = text.replace(prefix.replace("\\", "/"), "")
+        marker = "stele-mcp-"
+        lowered = text.lower()
+        if marker in lowered:
+            start = lowered.index(marker)
+            end = start + len(marker)
+            while end < len(text) and text[end] not in "/":
+                end += 1
+            text = text[end:]
         while "stele-context-mcp-" in text:
             start = text.index("stele-context-mcp-")
             end = start + len("stele-context-mcp-")
