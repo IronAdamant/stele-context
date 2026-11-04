@@ -13,12 +13,11 @@ from __future__ import annotations
 
 import json
 import os
-import select
 import shutil
 import subprocess
 import sys
 import tempfile
-import time
+import threading
 from pathlib import Path
 
 
@@ -186,25 +185,18 @@ class Server:
 
 
 def read_line(pipe, seconds, label):
-    buf = bytearray()
-    end = time.time() + seconds
-    fd = pipe.fileno()
-    os.set_blocking(fd, False)
-    while time.time() < end:
-        ready, _, _ = select.select([fd], [], [], 0.2)
-        if not ready:
-            continue
-        try:
-            chunk = os.read(fd, 65536)
-        except BlockingIOError:
-            continue
-        if not chunk:
-            break
-        buf.extend(chunk)
-        if b"\n" in buf:
-            line, _, _ = buf.partition(b"\n")
-            return line.decode()
-    raise SystemExit(f"timeout waiting for {label}: {bytes(buf[:120])!r}")
+    # select() on a pipe needs Winsock on Windows and fails there.
+    box = {}
+
+    def grab():
+        box["line"] = pipe.readline()
+
+    thread = threading.Thread(target=grab, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        raise SystemExit(f"timeout waiting for {label}")
+    return box.get("line", "")
 
 
 def tool(server, name, arguments):
