@@ -532,10 +532,11 @@ pub fn coordination_dir(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
         let git = dir.join(".git");
-        if git.is_dir() {
+        let kind = fs::metadata(&git).ok();
+        if kind.as_ref().is_some_and(|meta| meta.is_dir()) {
             return Some(common_of(&git).join("stele-context"));
         }
-        if git.is_file() {
+        if kind.as_ref().is_some_and(|meta| meta.is_file()) {
             let text = fs::read_to_string(&git).ok()?;
             let rest = text.trim().strip_prefix("gitdir:")?;
             let gitdir = PathBuf::from(rest.trim());

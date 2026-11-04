@@ -95,25 +95,25 @@ impl Engine {
         let mut fresh = Vec::new();
         let mut total_chunks = 0i64;
         let mut total_tokens = 0i64;
-        let known: std::collections::HashMap<String, (u64, i64)> = self
+        let known: std::collections::HashMap<String, (u64, i64, i64)> = self
             .store
             .state
             .documents
             .iter()
-            .map(|doc| (doc.path.clone(), (doc.size, doc.mtime_ns)))
+            .map(|doc| {
+                (
+                    doc.path.clone(),
+                    (doc.size, doc.mtime_ns, doc.chunk_count as i64),
+                )
+            })
             .collect();
-        let mut chunk_counts: std::collections::HashMap<String, i64> =
-            std::collections::HashMap::new();
-        for chunk in &self.store.state.chunks {
-            *chunk_counts.entry(chunk.path.clone()).or_default() += 1;
-        }
         for (rel, abs) in &files {
             seen.push(rel.clone());
             let meta = fs::metadata(abs).map_err(|err| format!("{rel}: {err}"))?;
             if !force {
-                if let Some((size, mtime)) = known.get(rel) {
+                if let Some((size, mtime, count)) = known.get(rel) {
                     if *size == meta.len() && *mtime == mtime_ns(&meta) {
-                        let count = chunk_counts.get(rel).copied().unwrap_or(0);
+                        let count = *count;
                         skipped_rows.push(Value::object(vec![
                             ("path", Value::string(rel)),
                             ("reason", Value::string("Unchanged")),
@@ -757,6 +757,7 @@ impl Engine {
             size: meta.len(),
             sha256: sha,
             doc_version: version,
+            chunk_count: produced.len() as u32,
         });
         let mine: Vec<_> = self
             .store

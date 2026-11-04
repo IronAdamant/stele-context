@@ -36,6 +36,13 @@ pub fn migrate_if_needed(storage: &Path, cwd: &Path, store: &mut Store) -> Resul
         );
     }
     store.state = copied;
+    let mut counts = std::collections::HashMap::<&str, u32>::new();
+    for chunk in &store.state.chunks {
+        *counts.entry(chunk.path.as_str()).or_default() += 1;
+    }
+    for doc in &mut store.state.documents {
+        doc.chunk_count = counts.get(doc.path.as_str()).copied().unwrap_or(0);
+    }
     store.save(
         "migrate",
         &Value::object(vec![("source", Value::string("stele_context.db"))]),
@@ -66,6 +73,7 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
             size,
             sha256: sql_text(&row, "content_hash"),
             doc_version: sql_number(&row, "doc_version") as u64,
+            chunk_count: 0,
         });
     }
     for row in opened

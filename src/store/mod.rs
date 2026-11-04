@@ -21,6 +21,7 @@ pub struct Document {
     pub size: u64,
     pub sha256: String,
     pub doc_version: u64,
+    pub chunk_count: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -399,6 +400,7 @@ impl Document {
             ("size", Value::Int(self.size as i64)),
             ("sha256", Value::string(&self.sha256)),
             ("doc_version", Value::Int(self.doc_version as i64)),
+            ("chunk_count", Value::Int(self.chunk_count as i64)),
         ])
     }
     fn from_json(value: &Value) -> Document {
@@ -408,6 +410,7 @@ impl Document {
             size: int_field(value, "size") as u64,
             sha256: string_field(value, "sha256"),
             doc_version: int_field(value, "doc_version") as u64,
+            chunk_count: int_field(value, "chunk_count") as u32,
         }
     }
 }
