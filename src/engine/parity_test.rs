@@ -184,6 +184,13 @@ fn standard_tools_match_python_on_a_one_file_project() {
     let script = r#"
 import json, sys
 from pathlib import Path
+import stele_context.engine as _engine
+import stele_context.engine_utils as _utils
+_orig_norm = _utils.normalize_path
+def _posix_norm(path, project_root):
+    return _orig_norm(path, project_root).replace("\\", "/")
+_utils.normalize_path = _posix_norm
+_engine._norm = _posix_norm
 from stele_context.engine import Stele
 from stele_context.llm_embedding import embed
 root = Path(sys.argv[1])
@@ -795,10 +802,19 @@ fn canonical(value: &crate::json::Value, root: &str, key: &str) -> crate::json::
             Array(rows)
         }
         String(text) => {
-            let text = text
-                .replace(root, "")
-                .replace("\r\n", "\n")
-                .replace('\\', "/");
+            let mut text = text.replace("\r\n", "\n").replace('\\', "/");
+            let mut roots = vec![root.to_string()];
+            if let Some(rest) = root.strip_prefix("/tmp") {
+                roots.push(format!("/private/tmp{rest}"));
+            }
+            if let Some(rest) = root.strip_prefix("/private/tmp") {
+                roots.push(format!("/tmp{rest}"));
+            }
+            for item in roots {
+                if !item.is_empty() {
+                    text = text.replace(&item, "");
+                }
+            }
             String(text)
         }
         Float(number) => Float((number * 1_000_000.0).round() / 1_000_000.0),
