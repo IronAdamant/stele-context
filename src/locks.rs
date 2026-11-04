@@ -208,16 +208,11 @@ fn status(state: &State, shared: Option<&Shared>, path: &str, now: i64) -> Value
 }
 
 fn conflicts(state: &State, shared: Option<&Shared>, path: &str) -> Value {
-    let mut rows: Vec<Conflict> = state.conflicts.clone();
-    if let Some(shared) = shared {
-        for row in &shared.conflicts {
-            if !rows.iter().any(|have| {
-                have.path == row.path && have.requester == row.requester && have.at == row.at
-            }) {
-                rows.push(row.clone());
-            }
-        }
-    }
+    let rows: Vec<Conflict> = if let Some(shared) = shared {
+        shared.conflicts.clone()
+    } else {
+        state.conflicts.clone()
+    };
     let rendered = rows
         .into_iter()
         .filter(|row| path.is_empty() || row.path == path)
@@ -261,14 +256,16 @@ fn live_holder(
     path: &str,
     now: i64,
 ) -> Option<(String, i64)> {
-    if let Some(lock) = state
+    // The coordination file is the holder for every worktree. A snapshot
+    // copy can still name the agent who lost a force-steal.
+    if let Some(shared) = shared {
+        return shared.live(path, now);
+    }
+    state
         .locks
         .iter()
         .find(|lock| lock.path == path && lock.until > now)
-    {
-        return Some((lock.agent.clone(), lock.until));
-    }
-    shared.and_then(|item| item.live(path, now))
+        .map(|lock| (lock.agent.clone(), lock.until))
 }
 
 #[cfg(test)]
@@ -309,13 +306,42 @@ mod tests {
         assert!(shared.contains("agent-b"), "{shared}");
         let status = apply(&mut state, &root, "status", "a.py", "", 1_020, false).unwrap();
         assert!(json::to_string(&status).contains("agent-b"));
-        let released = apply(
-            &mut state, &root, "release", "a.py", "agent-a", 1_030, false,
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn force_steal_is_visible_from_the_other_worktree() {
+        let root = std::env::temp_dir().join(format!("stele-lock-wt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let main = root.join("main");
+        let other = root.join("other");
+        fs::create_dir_all(main.join(".git")).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join(".git"), "gitdir: ../main/.git\n").unwrap();
+        let mut left = State::default();
+        let mut right = State::default();
+        apply(&mut left, &main, "acquire", "a.py", "agentA", 5_000, false).unwrap();
+        let blocked = apply(
+            &mut right, &other, "acquire", "a.py", "agentB", 5_010, false,
         )
         .unwrap();
-        assert!(json::to_string(&released).contains("not_owner"));
+        assert!(json::to_string(&blocked).contains("agentA"));
+        apply(&mut right, &other, "acquire", "a.py", "agentB", 5_020, true).unwrap();
+        let from_left = apply(&mut left, &main, "status", "a.py", "", 5_030, false).unwrap();
+        let from_right = apply(&mut right, &other, "status", "a.py", "", 5_030, false).unwrap();
+        let left_text = json::to_string(&from_left);
+        let right_text = json::to_string(&from_right);
+        assert!(left_text.contains("agentB"), "{left_text}");
+        assert!(right_text.contains("agentB"), "{right_text}");
+        let log = apply(&mut left, &main, "conflicts", "a.py", "", 5_030, false).unwrap();
+        let log_text = json::to_string(&log);
+        assert!(log_text.contains("lock_stolen"), "{log_text}");
+        assert!(log_text.contains("agentA"), "{log_text}");
+        assert!(log_text.contains("agentB"), "{log_text}");
+        let stale = apply(&mut left, &main, "release", "a.py", "agentA", 5_040, false).unwrap();
+        assert!(json::to_string(&stale).contains("not_owner"));
         let released = apply(
-            &mut state, &root, "release", "a.py", "agent-b", 1_030, false,
+            &mut right, &other, "release", "a.py", "agentB", 5_040, false,
         )
         .unwrap();
         assert!(json::to_string(&released).contains("\"released\":true"));

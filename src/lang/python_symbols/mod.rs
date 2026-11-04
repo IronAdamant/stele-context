@@ -4,6 +4,7 @@
 //! Visit order follows `FunctionDef` fields: the definition, then parameters,
 //! then the body, then decorators, then the return annotation.
 
+mod call_line;
 mod expr;
 mod store;
 mod valid;

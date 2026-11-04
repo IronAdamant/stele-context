@@ -120,11 +120,8 @@ fn health(engine: &std::sync::Mutex<Engine>) -> Value {
 }
 
 fn tools() -> Value {
-    let tools = mcp::lite_tools()
-        .into_iter()
-        .map(|name| Value::object(vec![("name", Value::string(*name))]))
-        .collect();
-    Value::object(vec![("tools", Value::Array(tools))])
+    json::parse(include_str!("mcp/http_tools.json"))
+        .unwrap_or_else(|_| Value::object(vec![("error", Value::string("tool schemas"))]))
 }
 
 fn call(engine: &std::sync::Mutex<Engine>, body: &str) -> (u16, Value) {
@@ -174,7 +171,6 @@ fn call(engine: &std::sync::Mutex<Engine>, body: &str) -> (u16, Value) {
 
 fn known_tool(name: &str) -> bool {
     mcp::lite_tools().contains(&name)
-        || matches!(name, "stats" | "project_brief" | "history" | "migrate")
 }
 
 fn http(status: u16, body: &str) -> String {
@@ -212,8 +208,28 @@ mod tests {
         });
         let health = request(port, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
         assert!(health.contains("healthy"), "{health}");
+        let health_body = json::parse(http_body(&health)).unwrap();
+        let storage = field(&health_body, "storage").unwrap();
+        for key in STORAGE_KEYS {
+            assert!(field(storage, key).is_some(), "missing storage.{key}");
+        }
         let tools = request(port, "GET /tools HTTP/1.1\r\nHost: localhost\r\n\r\n");
-        assert!(tools.contains("doctor"), "{tools}");
+        let tools_body = json::parse(http_body(&tools)).unwrap();
+        let Value::Array(rows) = field(&tools_body, "tools").unwrap() else {
+            panic!("tools");
+        };
+        assert_eq!(rows.len(), mcp::lite_tools().len());
+        for row in rows {
+            assert!(field(row, "name").is_some());
+            assert!(field(row, "description").is_some(), "{row:?}");
+            let params = field(row, "parameters").unwrap();
+            assert!(matches!(field(params, "type"), Some(Value::String(kind)) if kind == "object"));
+        }
+        let unknown = request(
+            port,
+            "POST /call HTTP/1.1\r\nHost: localhost\r\nContent-Length: 32\r\n\r\n{\"tool\":\"stats\",\"parameters\":{}}",
+        );
+        assert!(unknown.contains("Unknown tool"), "{unknown}");
         let body = "{\"tool\":\"doctor\",\"parameters\":{}}";
         let call = request(
             port,
@@ -224,6 +240,33 @@ mod tests {
         );
         assert!(call.contains("success"), "{call}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const STORAGE_KEYS: &[&str] = &[
+        "chunk_count",
+        "document_count",
+        "session_count",
+        "total_tokens",
+        "version_count",
+        "annotation_count",
+        "history_count",
+        "kv_cache_size_bytes",
+        "database_size_bytes",
+        "storage_dir",
+        "symbol_count",
+        "definition_count",
+        "reference_count",
+        "edge_count",
+        "runtime_symbol_count",
+        "locked_documents",
+        "expired_locks",
+        "active_lock_agents",
+        "total_conflicts",
+        "last_conflict_at",
+    ];
+
+    fn http_body(response: &str) -> &str {
+        response.split("\r\n\r\n").nth(1).unwrap_or("")
     }
 
     fn request(port: u16, message: &str) -> String {

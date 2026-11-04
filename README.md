@@ -24,6 +24,8 @@ Stele Context is a local context cache that fixes this: index once, then only pa
 
 Everything runs **100% offline on your machine**. No internet, no API keys, no cloud, no telemetry. Just Python's standard library and SQLite.
 
+Rust 2.0 indexes images, audio, video, and PDF with the standard library alone. Python indexes `imgs/*` only when Pillow imports, so a zero-dependency Python run of rich 13.9.4 is 475 documents and 1097 chunks, while Rust (and Python with Pillow) is 496 documents and 1118 chunks. The 21 extra documents are the PNG and GIF files under `imgs/`. Rust stores header metadata for those files. Pillow stores re-encoded PNG bytes, a perceptual hash, and a histogram, so the image chunk bodies differ. Text and code stay 475 files, 1097 chunks, and 32687 symbols on both sides.
+
 ![Semantic search demo](docs/semantic-search-demo.png)
 
 ## Quick Start
@@ -336,26 +338,26 @@ Measured with `bench/bench.py` on Linux 6.12.94+ x86_64, 4 vCPU, rustc 1.99.1, r
 
 | Command | Rust median | Rust min–max | Peak RSS | Python 1.5.1 median |
 |---|---:|---:|---:|---:|
-| `cli --version (startup)` | 1.8 ms | 1.6–2.3 | 10.4 MB | 79.4 ms |
-| `cli --help` | 1.7 ms | 1.5–1.7 | 10.4 MB | 75.7 ms |
-| `cli index . (cold, empty store)` | 8926.5 ms | 8914.2–8941.9 | 78.0 MB | 10656.1 ms |
-| `cli index . (warm, nothing changed)` | 68.5 ms | 67.1–72.5 | 65.2 MB | 197.8 ms |
-| `cli detect (nothing changed)` | 61.7 ms | 61.6–62.1 | 65.2 MB | 167.9 ms |
-| `cli stats` | 57.8 ms | 57.5–58.0 | 65.2 MB | 162.5 ms |
-| `cli doctor` | 1.6 ms | 1.6–1.7 | 10.4 MB | 189.7 ms |
-| `cli map --json` | 91.4 ms | 91.2–91.8 | 65.3 MB | 163.3 ms |
-| `cli project-brief --json` | 57.3 ms | 57.1–57.8 | 65.2 MB | 165.5 ms |
-| `cli search hybrid --json` | 67.1 ms | 66.9–67.1 | 65.3 MB | 169.0 ms |
-| `cli search keyword --json` | 66.9 ms | 66.5–67.2 | 65.3 MB | 161.2 ms |
-| `cli search-text --json` | 57.9 ms | 57.8–58.0 | 65.1 MB | 141.9 ms |
-| `cli agent-grep --json` | 59.2 ms | 59.2–59.3 | 65.1 MB | 228.3 ms |
-| `cli query --json` | 68.0 ms | 67.7–68.2 | 65.1 MB | 193.5 ms |
-| `cli find-definition --json` | 57.2 ms | 56.8–59.3 | 65.1 MB | 141.4 ms |
-| `cli find-references --json` | 60.2 ms | 59.6–60.4 | 65.1 MB | 166.2 ms |
-| `cli impact-radius --json` | 57.5 ms | 57.2–58.1 | 65.2 MB | 179.6 ms |
-| `cli coupling --json` | 82.0 ms | 81.2–82.4 | 65.1 MB | 185.3 ms |
-| `cli enrichment-plan --json` | 57.9 ms | 57.9–58.5 | 65.3 MB | 137.7 ms |
-| `cli history --json` | 57.1 ms | 56.8–58.4 | 65.3 MB | 135.1 ms |
+| `cli --version (startup)` | 1.8 ms | 1.7–2.3 | 10.5 MB | 79.4 ms |
+| `cli --help` | 1.8 ms | 1.6–2.1 | 10.6 MB | 75.7 ms |
+| `cli index . (cold, empty store)` | 8788.9 ms | 8772.6–8820.3 | 78.1 MB | 10656.1 ms |
+| `cli index . (warm, nothing changed)` | 69.5 ms | 69.1–74.5 | 65.2 MB | 197.8 ms |
+| `cli detect (nothing changed)` | 63.8 ms | 63.7–64.6 | 65.2 MB | 167.9 ms |
+| `cli stats` | 59.6 ms | 59.4–59.8 | 65.2 MB | 162.5 ms |
+| `cli doctor` | 48.4 ms | 48.2–48.8 | 48.9 MB | 189.7 ms |
+| `cli map --json` | 93.1 ms | 92.5–93.5 | 65.2 MB | 163.3 ms |
+| `cli project-brief --json` | 58.6 ms | 58.2–58.8 | 65.2 MB | 165.5 ms |
+| `cli search hybrid --json` | 68.7 ms | 68.3–69.0 | 65.1 MB | 169.0 ms |
+| `cli search keyword --json` | 68.3 ms | 68.1–68.6 | 65.1 MB | 161.2 ms |
+| `cli search-text --json` | 59.4 ms | 59.2–59.7 | 65.1 MB | 141.9 ms |
+| `cli agent-grep --json` | 60.9 ms | 60.8–61.1 | 65.1 MB | 228.3 ms |
+| `cli query --json` | 69.6 ms | 69.2–70.0 | 65.1 MB | 193.5 ms |
+| `cli find-definition --json` | 58.6 ms | 58.4–62.6 | 65.1 MB | 141.4 ms |
+| `cli find-references --json` | 60.2 ms | 59.9–61.3 | 65.1 MB | 166.2 ms |
+| `cli impact-radius --json` | 59.4 ms | 58.2–62.6 | 65.2 MB | 179.6 ms |
+| `cli coupling --json` | 82.8 ms | 82.1–83.7 | 65.1 MB | 185.3 ms |
+| `cli enrichment-plan --json` | 58.8 ms | 58.7–59.3 | 65.2 MB | 137.7 ms |
+| `cli history --json` | 58.1 ms | 58.1–58.2 | 65.2 MB | 135.1 ms |
 
 ## Development
 

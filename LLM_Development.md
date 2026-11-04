@@ -4,6 +4,14 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-04 - Re-verification fixes on 491bd8a
+
+- The git coordination file is the lock holder for every worktree. A force steal is visible from the worktree that lost it. Two-worktree test covers steal, status, conflict log, and release.
+- Multiline call symbols use the first line of the call expression. Text and code symbol lines on rich match Python, still 32687 symbols.
+- `GET /tools` returns Python's lite `name` / `description` / `parameters` objects. `GET /health` storage has the same 20 fields. `stats` is not a lite tool.
+- `parity/fixtures/media` plus `parity/goldens/media.json` lock the media corpus at 7 documents, 7 chunks, 0 symbols. The earlier 2 symbols were `def hello(name)` in an uncommitted `sample.py`.
+- `doctor` parses `snapshot.json` and reports index health, db health, and search quality. Median 48.4 ms against the Python floor of 189.7 ms.
+
 ## 2026-11-04 - Rust 2.0 parity with Python 1.5.2 on rich
 
 - Python extractor and chunker now match rich 13.9.4 with Pillow installed: 496 documents, 1118 chunks, 32687 symbols. Text and code chunk boundaries match, including Devanagari marks and `JSONHighlighter` splits. Keyword and hybrid top-10 overlap is 10/10 on the 25 audit queries.

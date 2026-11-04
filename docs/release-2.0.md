@@ -2,6 +2,8 @@
 
 Do this only after the rewrite pull request is green on Linux, macOS, and Windows, including the `benchmark-gate` job. The agent that prepared this branch does not merge, tag, or publish.
 
+Rust indexes PNG, GIF, JPEG, audio, video, and PDF without optional libraries. Python indexes images only when Pillow imports. On rich 13.9.4 that is 496 documents and 1118 chunks with Pillow, and 475 documents and 1097 chunks without it. Rust always reports the Pillow counts. Image chunk bodies are header metadata, not Pillow's re-encoded bytes. Audio and video chunks are metadata lines, not librosa MFCCs or OpenCV frames. PDF text is literal and hex strings from uncompressed and Flate streams.
+
 ## Tags, in this order
 
 1. `v2.0.0` on the merge commit of the rewrite. Rust crate version is already `2.0.0`.

@@ -155,7 +155,7 @@ impl Cursor<'_> {
             self.skip_space();
             if self.at(kind::IDENT) {
                 let attr = self.ident_text().unwrap_or_default();
-                let line = self.line_here();
+                let line = self.chain_start_line();
                 let call = self.next_real_is("(");
                 self.bump();
                 if call {
@@ -204,15 +204,15 @@ impl Cursor<'_> {
             let is_call = self.next_real_is("(") && !is_keyword(&name);
             let is_attr = self.next_real_is(".");
             if is_call {
-                if let Some((attr, attr_line)) = self.attr_after_call() {
-                    self.chain_name = attr.clone();
-                    self.chain_line = attr_line;
+                if let Some((attr, _)) = self.attr_after_call() {
                     self.chain_armed = false;
-                    self.emit("function", "reference", &attr, attr_line);
-                    self.chain_armed = true;
+                    self.emit("function", "reference", &attr, line);
                     if !is_keyword(&name) {
                         self.emit("function", "reference", &name, line);
                     }
+                    self.chain_name = attr;
+                    self.chain_line = line;
+                    self.chain_armed = true;
                     self.bump();
                     self.skip_space();
                     self.bump();
@@ -304,11 +304,12 @@ impl Cursor<'_> {
             return;
         }
         let attr = self.ident_text().unwrap_or_default();
-        let attr_line = self.line_here();
         self.bump();
         self.skip_space();
         if self.at_word("(") {
-            self.emit("function", "reference", &attr, attr_line);
+            // Python's Call.lineno is the first line of the receiver, not
+            // the line of the callee token.
+            self.emit("function", "reference", &attr, line);
             if emit_receiver && !is_keyword(receiver) && receiver != "_" {
                 self.emit("name", "reference", receiver, line);
             }
@@ -320,7 +321,7 @@ impl Cursor<'_> {
             self.emit("name", "reference", receiver, line);
         }
         if self.at_word(".") {
-            self.emit_receiver_chain(&attr, attr_line, depth, false);
+            self.emit_receiver_chain(&attr, line, depth, false);
         }
     }
 

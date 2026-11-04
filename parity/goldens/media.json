@@ -1,0 +1,6 @@
+{
+  "documents": 7,
+  "chunks": 7,
+  "symbols": 0,
+  "note": "Media files contribute no symbols. An earlier 7/7/2 figure included sample.py, whose def hello(name) is one definition and one name load. Python with Pillow, PyMuPDF, librosa, and OpenCV also indexes this set as 7 documents, 7 chunks, and 0 symbols; chunk bodies differ because those libraries store pixels, MFCC, or keyframes."
+}

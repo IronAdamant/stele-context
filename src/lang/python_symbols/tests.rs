@@ -154,6 +154,28 @@ fn garbled_and_truncated_inputs_yield_symbols() {
 }
 
 #[test]
+fn multiline_calls_use_the_expression_start_line() {
+    let source = "def get(self):\n    render_width = (\n        get_console_width(console, options)\n        .normalize()\n        .with_maximum(_max_width)\n    )\n    lines = (\n        Text(\"\\n\")\n        .join(lines)\n        .with_indent_guides(1)\n        .split(\"\\n\")\n    )\n    return Measurement(\n        column.width, column.width\n    ).with_maximum(max_width)\n    html_style = Style(\n        bold=True,\n    ).get_html_style()\n";
+    let hits = extract(source);
+    let line = |name: &str| {
+        hits.iter()
+            .find(|hit| hit.name == name && hit.role == "reference")
+            .map(|hit| hit.line)
+    };
+    assert_eq!(line("normalize"), line("get_console_width"), "{hits:?}");
+    assert_eq!(line("with_maximum"), line("get_console_width"), "{hits:?}");
+    assert_eq!(line("join"), line("Text"), "{hits:?}");
+    assert_eq!(line("split"), line("Text"), "{hits:?}");
+    assert_eq!(line("with_indent_guides"), line("Text"), "{hits:?}");
+    assert_eq!(line("get_html_style"), line("Style"), "{hits:?}");
+    let measurement = hits.iter().find(|hit| hit.name == "Measurement").unwrap();
+    let maximum = hits
+        .iter()
+        .find(|hit| hit.name == "with_maximum" && hit.line == measurement.line);
+    assert!(maximum.is_some(), "{hits:?}");
+}
+
+#[test]
 fn python_fixture_symbols_match_the_golden() {
     let golden = std::fs::read_to_string("parity/goldens/fixtures.json").unwrap();
     let value = json::parse(&golden).unwrap();

@@ -171,35 +171,74 @@ impl Engine {
 
     /// Storage block of Python `get_stats()["storage"]`, for `GET /health`.
     pub fn storage_report(&self) -> Value {
-        let tokens: i64 = self
-            .store
-            .state
-            .chunks
+        let state = &self.store.state;
+        let tokens: i64 = state.chunks.iter().map(|chunk| chunk.tokens as i64).sum();
+        let definitions = state
+            .symbols
             .iter()
-            .map(|chunk| chunk.tokens as i64)
-            .sum();
+            .filter(|symbol| symbol.role == "definition")
+            .count() as i64;
+        let references = state
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.role == "reference")
+            .count() as i64;
+        let now = now_secs();
+        let expired = state.locks.iter().filter(|lock| lock.until <= now).count() as i64;
+        let mut agents = Vec::new();
+        for lock in &state.locks {
+            if !agents.iter().any(|agent| agent == &lock.agent) {
+                agents.push(lock.agent.clone());
+            }
+        }
+        let last_conflict = state.conflicts.iter().map(|row| row.at).max();
+        let kv_bytes: u64 = state
+            .sessions
+            .iter()
+            .flat_map(|session| session.kv.iter())
+            .map(|(key, value)| key.len() + value.len())
+            .sum::<usize>() as u64;
+        let store_dir = self.storage.join("store");
+        let database_size = file_len(&store_dir.join("snapshot.json"))
+            + file_len(&store_dir.join("journal.jsonl"))
+            + file_len(&store_dir.join("signatures.bin"))
+            + file_len(&store_dir.join("bm25.bin"));
         Value::object(vec![
-            (
-                "document_count",
-                Value::Int(self.store.state.documents.len() as i64),
-            ),
-            (
-                "chunk_count",
-                Value::Int(self.store.state.chunks.len() as i64),
-            ),
-            (
-                "symbol_count",
-                Value::Int(self.store.state.symbols.len() as i64),
-            ),
+            ("chunk_count", Value::Int(state.chunks.len() as i64)),
+            ("document_count", Value::Int(state.documents.len() as i64)),
+            ("session_count", Value::Int(state.sessions.len() as i64)),
+            ("total_tokens", Value::Int(tokens)),
+            ("version_count", Value::Int(0)),
             (
                 "annotation_count",
-                Value::Int(self.store.state.annotations.len() as i64),
+                Value::Int(state.annotations.len() as i64),
             ),
             (
-                "session_count",
-                Value::Int(self.store.state.sessions.len() as i64),
+                "history_count",
+                Value::Int(journal_lines(&store_dir.join("journal.jsonl")) as i64),
             ),
-            ("total_tokens", Value::Int(tokens)),
+            ("kv_cache_size_bytes", Value::Int(kv_bytes as i64)),
+            ("database_size_bytes", Value::Int(database_size as i64)),
+            (
+                "storage_dir",
+                Value::string(self.storage.display().to_string()),
+            ),
+            ("symbol_count", Value::Int(state.symbols.len() as i64)),
+            ("definition_count", Value::Int(definitions)),
+            ("reference_count", Value::Int(references)),
+            ("edge_count", Value::Int(0)),
+            (
+                "runtime_symbol_count",
+                Value::Int(state.dynamic.len() as i64),
+            ),
+            ("locked_documents", Value::Int(state.locks.len() as i64)),
+            ("expired_locks", Value::Int(expired)),
+            ("active_lock_agents", Value::Int(agents.len() as i64)),
+            ("total_conflicts", Value::Int(state.conflicts.len() as i64)),
+            (
+                "last_conflict_at",
+                last_conflict.map(Value::Int).unwrap_or(Value::Null),
+            ),
         ])
     }
 
@@ -412,6 +451,17 @@ impl Engine {
     }
 }
 
+fn file_len(path: &Path) -> u64 {
+    fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
+}
+
+fn journal_lines(path: &Path) -> usize {
+    let Ok(text) = fs::read_to_string(path) else {
+        return 0;
+    };
+    text.lines().filter(|line| !line.is_empty()).count()
+}
+
 fn bm25_fingerprint(chunks: &[Chunk]) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for chunk in chunks {
@@ -501,6 +551,38 @@ mod tests {
         let found = engine.search("classify", "keyword", 5);
         assert!(crate::json::to_string(&found).contains("classify"));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn media_fixture_matches_the_expected_counts() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("parity/fixtures/media");
+        let expected = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("parity/goldens/media.json"),
+        )
+        .unwrap();
+        let store = std::env::temp_dir().join(format!(
+            "stele-media-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&store);
+        let mut engine = Engine::open_at(root, store.clone()).unwrap();
+        engine.index(&[".".to_string()], false).unwrap();
+        let stats = engine.stats();
+        let rendered = crate::json::to_string(&stats);
+        for key in ["documents", "chunks", "symbols"] {
+            let value = crate::store::int_field(&stats, key);
+            assert!(
+                expected.contains(&format!("\"{key}\": {value}"))
+                    || expected.contains(&format!("\"{key}\":{value}")),
+                "{key}={value} not in {expected}\n{rendered}"
+            );
+        }
+        let found = engine.search("Hello PDF symbols", "keyword", 3);
+        assert!(crate::json::to_string(&found).contains("note.pdf"));
+        let _ = fs::remove_dir_all(&store);
     }
 }
 
