@@ -1,47 +1,9 @@
-//! Tool and migrate comparison against the Python tree on `python-legacy`.
+//! Tool and migrate comparison against installed PyPI stele-context 1.5.2.
 
 use super::Engine;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::Mutex;
-
-fn python_src() -> PathBuf {
-    static LOCK: Mutex<()> = Mutex::new(());
-    let _guard = LOCK.lock().unwrap_or_else(|err| err.into_inner());
-    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dest = repo.join("target").join("python-legacy-src");
-    if dest.join("stele_context").join("engine.py").is_file() {
-        return dest;
-    }
-    let archived = Command::new("git")
-        .current_dir(&repo)
-        .args(["archive", "origin/python-legacy", "stele_context"])
-        .output()
-        .expect("git archive");
-    assert!(
-        archived.status.success(),
-        "git archive origin/python-legacy: {}",
-        String::from_utf8_lossy(&archived.stderr)
-    );
-    let _ = fs::remove_dir_all(&dest);
-    fs::create_dir_all(&dest).unwrap();
-    let mut tar = Command::new("tar")
-        .current_dir(&dest)
-        .arg("-x")
-        .stdin(Stdio::piped())
-        .spawn()
-        .expect("tar");
-    tar.stdin
-        .take()
-        .unwrap()
-        .write_all(&archived.stdout)
-        .unwrap();
-    let status = tar.wait().unwrap();
-    assert!(status.success(), "tar extract failed");
-    dest
-}
+use std::process::Command;
 
 fn python_bin() -> &'static str {
     fn imports(bin: &str) -> bool {
@@ -60,7 +22,6 @@ fn python_bin() -> &'static str {
 
 #[test]
 fn migrate_reads_a_database_written_by_python_152() {
-    let py = python_src();
     let root = std::env::temp_dir().join(format!("stele-mig-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
@@ -77,7 +38,6 @@ print(json.dumps({"chunks": indexed.get("total_chunks", 0)}))
 "#;
     let store = root.join("py-store");
     let ran = Command::new(python_bin())
-        .env("PYTHONPATH", &py)
         .arg("-c")
         .arg(script)
         .arg(&root)
@@ -136,7 +96,6 @@ print(json.dumps({"chunks": indexed.get("total_chunks", 0)}))
 
 #[test]
 fn standard_tools_match_python_on_a_one_file_project() {
-    let py = python_src();
     let root = std::env::temp_dir().join(format!("stele-par-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("src")).unwrap();
@@ -282,7 +241,6 @@ print(json.dumps(payload))
 "#;
     let py_store = root.join("py-store");
     let ran = Command::new(python_bin())
-        .env("PYTHONPATH", &py)
         .arg("-c")
         .arg(script)
         .arg(&root)

@@ -102,6 +102,8 @@ pub struct Session {
     pub tokens: i64,
     pub agent: String,
     pub attached: Vec<(String, i64, f64)>,
+    /// JSON payload saved with each chunk, keyed by chunk id and turn.
+    pub kv_state: Vec<(String, i64, String)>,
     pub search_rows: Vec<SearchRow>,
 }
 
@@ -470,7 +472,7 @@ fn read_sigs(path: &Path, count: usize) -> Vec<[f32; 128]> {
     out
 }
 
-fn decode_hex_sig(hex: &str) -> [f32; 128] {
+pub(crate) fn decode_hex_sig(hex: &str) -> [f32; 128] {
     let mut out = [0f32; 128];
     let bytes = hex.as_bytes();
     for lane in 0..128 {
@@ -740,9 +742,37 @@ impl Session {
             ("turn", Value::Int(self.turn)),
             ("tokens", Value::Int(self.tokens)),
             ("agent", Value::string(&self.agent)),
+            (
+                "kv_state",
+                Value::Array(
+                    self.kv_state
+                        .iter()
+                        .map(|(chunk_id, turn, data)| {
+                            Value::object(vec![
+                                ("chunk_id", Value::string(chunk_id)),
+                                ("turn", Value::Int(*turn)),
+                                ("data", Value::string(data)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
         ])
     }
     fn from_json(value: &Value) -> Session {
+        let kv_state: Vec<(String, i64, String)> = array(value, "kv_state")
+            .map(|item| {
+                (
+                    string_field(item, "chunk_id"),
+                    int_field(item, "turn"),
+                    string_field(item, "data"),
+                )
+            })
+            .collect();
+        let attached = kv_state
+            .iter()
+            .map(|(chunk_id, turn, _)| (chunk_id.clone(), *turn, 1.0))
+            .collect();
         Session {
             id: string_field(value, "id"),
             searches: strings(value, "searches"),
@@ -755,7 +785,8 @@ impl Session {
             turn: int_field(value, "turn"),
             tokens: int_field(value, "tokens"),
             agent: string_field(value, "agent"),
-            attached: Vec::new(),
+            attached,
+            kv_state,
             search_rows: Vec::new(),
         }
     }

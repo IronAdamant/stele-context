@@ -21,6 +21,8 @@ pub fn apply(
     now: i64,
     force: bool,
 ) -> Result<Value, String> {
+    let stored = crate::walk::native_sep(path);
+    let path = stored.as_str();
     let mut shared = coordination_dir(cwd).and_then(|dir| Shared::load(&dir));
     let outcome = match action {
         "acquire" => acquire(state, shared.as_mut(), path, agent, now, force),

@@ -753,6 +753,7 @@ impl Engine {
                 tokens: 0,
                 agent: String::new(),
                 attached: Vec::new(),
+                kv_state: Vec::new(),
                 search_rows: Vec::new(),
             });
         }

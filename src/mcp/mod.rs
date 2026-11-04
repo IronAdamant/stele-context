@@ -208,6 +208,71 @@ fn tools_list() -> Value {
     Value::object(vec![("tools", Value::Array(tools))])
 }
 
+fn attach_hint(name: &str, value: &mut Value) {
+    let Value::Object(pairs) = value else {
+        return;
+    };
+    if pairs.iter().any(|(key, _)| key == "hint") {
+        return;
+    }
+    let err = pairs.iter().find_map(|(key, item)| {
+        if key == "error" {
+            Some(json::to_string(item).to_lowercase())
+        } else {
+            None
+        }
+    });
+    let hint = if let Some(err) = err.as_deref() {
+        healing_hint(name, err)
+    } else if name == "impact_radius"
+        && pairs
+            .iter()
+            .any(|(key, item)| key == "affected_chunks" && matches!(item, Value::Int(0)))
+    {
+        healing_hint(name, "0 affected")
+    } else if name == "coupling"
+        && pairs.iter().any(|(key, item)| {
+            (key == "coupled_files" || key == "files")
+                && matches!(item, Value::Array(rows) if rows.is_empty())
+                || (key == "count" && matches!(item, Value::Int(0)))
+        })
+    {
+        healing_hint(name, "0 affected")
+    } else {
+        None
+    };
+    if let Some(hint) = hint {
+        pairs.push(("hint".to_string(), Value::string(hint)));
+    }
+}
+
+fn healing_hint(name: &str, err: &str) -> Option<&'static str> {
+    if err.contains("database is locked")
+        || err.contains("busy")
+        || err.contains("unable to open database file")
+    {
+        return Some("SQLite is under load. Run detect_changes or wait a moment and retry.");
+    }
+    if name == "impact_radius" || name == "coupling" {
+        if err.contains("0 affected")
+            || err.contains("no seed")
+            || err.contains("provide chunk_id")
+            || err.contains("no definitions")
+            || err.contains("empty")
+        {
+            return Some(
+                "Impact/coupling found no useful seeds or edges. Pass document_path, chunk_id, or symbol; for base classes with high fan-in try find_references on exported symbols and impact_radius(direction='dependents', summary_mode=true).",
+            );
+        }
+    }
+    if name == "search" && err.contains('0') && !err.contains("hnsw") {
+        return Some(
+            "Tier-1 semantic search returned no strong matches. Results may fall back to BM25 keyword ranking. Consider adding Tier-2 summaries for this topic.",
+        );
+    }
+    None
+}
+
 fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
     let name = string_field(params, "name");
     let Some(engine) = engine else {
@@ -219,11 +284,19 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
         .cloned()
         .unwrap_or(Value::object(vec![]));
     let text = match dispatch(engine, &name, &args) {
-        Ok(value) => json::to_string(&value),
-        Err(message) => json::to_string(&Value::object(vec![
-            ("ok", Value::Bool(false)),
-            ("error", Value::string(message)),
-        ])),
+        Ok(mut value) => {
+            attach_hint(&name, &mut value);
+            json::to_string(&value)
+        }
+        Err(message) => {
+            engine.note_failure();
+            let mut value = Value::object(vec![
+                ("ok", Value::Bool(false)),
+                ("error", Value::string(message)),
+            ]);
+            attach_hint(&name, &mut value);
+            json::to_string(&value)
+        }
     };
     engine.note_operation();
     tool_text(&text)

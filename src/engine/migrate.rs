@@ -175,6 +175,7 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
             tokens: sql_number(&row, "total_tokens") as i64,
             agent: sql_text(&row, "agent_id"),
             attached: Vec::new(),
+            kv_state: Vec::new(),
             search_rows: Vec::new(),
         });
     }

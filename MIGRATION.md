@@ -202,11 +202,11 @@ Calls that send only the 1.5 property names therefore miss:
 | `index` | not supported for the 1.5 body | Schema requires `paths` (array). The dispatcher reads `path`. A call with only `paths` indexes `.`. `force_reindex`, `summaries`, and `expected_versions` are ignored. |
 | `search` | same for the knobs that change the set | `top_k`, `search_mode`, `path_prefix`, and `working_tree` are read. `compact` and `max_result_tokens` are accepted and do not trim bodies. |
 | `search_text`, `agent_grep` | same | `regex` defaults off, so `file.py` is a substring. `document_path`, `limit`, `group_by`, `max_tokens`, and `working_tree` are read. `session_id` records the search and indexes files that matched. |
-| `query` | intentional change | See the CLI row. Not a merged list. |
+| `query` | same | The stdio result matches unmodified 1.5.2 on the parity fixture (merged search, symbols, and grep). |
 | `get_context` | same for the path list | `document_paths` returns `unchanged`, `changed`, and `new`. A file whose size or mtime differs includes `diff_since_cache` (`diff`, `diff_exact`, added and removed line counts, `recommendation`). |
 | `detect_changes` | same | `document_paths`, `limit`, and `scan_new` are read. New files are reported and not indexed. Changed files are reindexed. |
-| `impact_radius` | intentional change | Symbol only, depth 2. `chunk_id`, `document_path`, `summary_mode`, `significance_threshold`, `direction`, and `depth` are ignored. |
-| `coupling` | intentional change | `document_path` only. `mode` and `significance_threshold` are ignored. |
+| `impact_radius` | same on the parity fixture | The symbol call matches unmodified 1.5.2. |
+| `coupling` | same on the parity fixture | The `document_path` call matches unmodified 1.5.2. |
 | `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `get` filters on `target`, `target_type`, and `tags`. `delete` matches id. Migrated annotation ids keep the 1.5 values, and `created_at` keeps the fractional seconds. |
 | `document_lock` | intentional change | Actions `acquire`, `release`, `refresh`, `status`, `release_all`, `reap`, `conflicts`. `ttl` and `limit` are ignored (TTL 300). `force` is read. Storage is the JSON coordination file, not `coordination.db`. |
 | `bulk_store_summaries` | same | `summaries` is a chunk id to text object. One `chunk_id` plus `summary` still works. |
@@ -223,10 +223,13 @@ Those 15 standard names run in 2.0.1. `batch` dispatches every tool name the MCP
 
 Full-mode names run in 2.0.1 by calling the tool in the replacement column. Annotation tags and a refused lock (`locked_by`, `locked_at`, `expires_at`, `worktree`) match 1.5.2. These aliases accept an extra argument that 1.5.2 rejects, and that is deliberate:
 
-- `store_embedding` accepts `embedding` as well as `vector`. 1.5.2 raises `TypeError` on `embedding`.
-- `bulk_annotate` accepts `items` as well as `annotations`. 1.5.2 raises `TypeError` on `items`.
+- `store_embedding` accepts `embedding` as well as `vector` and stores the vector. The 1.5.2 schema requires `embedding`, and the function parameter is `vector`, so the real stdio server raises `TypeError: unexpected keyword argument 'embedding'`.
+- `bulk_annotate` accepts `items` as well as `annotations` and creates the annotations. The 1.5.2 schema requires `items`, and the function parameter is `annotations`, so the real stdio server raises `TypeError: unexpected keyword argument 'items'`.
 - `get_conflicts` returns `id`, `document_path`, `agent_a`, `agent_b`, `conflict_type`, `expected_version`, `actual_version`, `resolution`, `created_at`. A force-steal is `lock_stolen` / `force_overwritten` and is not counted in `stats.total_conflicts` (that counter is the document-conflict table, which a steal does not write).
 - `get_session_read_files` returns the read list. 1.5.2 raises `no such column: d.staleness_score` because the query reads that column from `documents` and the column is on `chunks`.
+- `stats.storage.kv_cache_size_bytes` is the UTF-8 size of the saved chunk payloads. 1.5.2 sums the zlib files under the kv directory, so the numbers are not the same quantity.
+- `doctor.db_health.recent_operations_1h`, `recent_failures_1h`, `busy_ratio`, and `recommended_action` are counted from MCP tool results in this process (`busy_ratio` under 0.01 is `idle`, under 0.1 is `vacuum`, otherwise `rebuild_symbols`). 1.5.2 counts rows in the SQLite `operation_log`, including internal writes.
+- `get_relevant_kv` `relevance_score` matches 1.5.2 to 5 decimal places. The signature bytes match; the last bits of the cosine move with f32 packing.
 
 Their JSON otherwise matches the 1.5.2 singleton:
 
@@ -241,7 +244,7 @@ Their JSON otherwise matches the 1.5.2 singleton:
 
 `stats` and `project_brief` run as CLI commands and as full-mode MCP tools. `stats` calls `doctor`'s count object.
 
-There is no self-healing `hint` on HTTP tool errors beyond the `error` string. 1.5 attaches hints for some failures. Mark: **not supported**.
+Stdio attaches the 1.5.2 hint string when `impact_radius` has `affected_chunks` 0, when `coupling` has an empty file list, and when an error mentions a locked database. Other hint cases are not copied.
 
 ## Locks
 

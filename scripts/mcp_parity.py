@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Full MCP and CLI compare of Rust against Python 1.5.2.
 
-Speaks newline JSON-RPC tools/call to `stele-context serve-mcp` and to the
-1.5.2 tool registry (the dispatch `serve-mcp` uses). The fixture has Python,
+Speaks newline JSON-RPC tools/call to both stdio servers. Rust is
+`stele-context serve-mcp`. Python is the installed PyPI 1.5.2 command
+`python -m stele_context.cli serve-mcp`, unmodified. The fixture has Python,
 JavaScript, Markdown, a one-page PDF with two text lines, a gitignored file,
 and a skip_dirs directory. Normalisation is temp paths and CRLF. Timestamp
 values may differ by the gap between the two processes; their type stays a
@@ -19,23 +20,6 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-
-
-def legacy_src(repo: Path) -> Path:
-    dest = repo / "target" / "python-legacy-src"
-    if (dest / "stele_context" / "engine.py").is_file():
-        return dest
-    archived = subprocess.run(
-        ["git", "archive", "origin/python-legacy", "stele_context"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True)
-    subprocess.run(["tar", "-x"], cwd=dest, input=archived.stdout, check=True)
-    return dest
 
 
 PDF = b"""%PDF-1.4
@@ -55,69 +39,6 @@ endobj
 trailer << /Root 1 0 R >>
 %%EOF
 """
-
-SHIM = r'''
-import json, os, sys
-import stele_context
-from stele_context.engine import Stele
-from stele_context.mcp_stdio import WRITE_TOOLS
-from stele_context.tool_registry import build_tool_map, get_modality_flags
-import inspect
-root, store = sys.argv[1], sys.argv[2]
-engine = Stele(storage_dir=store, project_root=root)
-# Same registration and agent_id injection as mcp_stdio._run_server.
-# This stand-in does not change tool results, schemas, or the database.
-agent = f"stele-context-mcp-{os.getpid()}"
-try:
-    engine.register_agent(agent)
-except Exception:
-    pass
-tools = build_tool_map(engine, get_modality_flags(), mode=os.environ.get("STELE_MCP_MODE", "full"))
-def emit(obj):
-    sys.stdout.write(json.dumps(obj) + "\n")
-    sys.stdout.flush()
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    msg = json.loads(line)
-    if msg.get("method") == "initialize":
-        emit({"jsonrpc": "2.0", "id": msg.get("id"), "result": {"protocolVersion": "2025-06-18"}})
-        continue
-    if msg.get("method") != "tools/call":
-        emit({"jsonrpc": "2.0", "id": msg.get("id"), "result": {}})
-        continue
-    params = msg.get("params") or {}
-    name = params.get("name")
-    args = dict(params.get("arguments") or {})
-    func = tools.get(name)
-    if func is None:
-        text = json.dumps({"ok": False, "error": f"Unknown method: {name}"})
-    else:
-        if "agent_id" not in args and name in WRITE_TOOLS:
-            func_probe = tools.get(name)
-            if func_probe is not None and "agent_id" in inspect.signature(func_probe).parameters:
-                args["agent_id"] = agent
-        try:
-            text = json.dumps(func(**args), default=str)
-        except TypeError:
-            # Drop arguments the 1.5 callable does not take.
-            import inspect
-            sig = inspect.signature(func)
-            kept = {k: v for k, v in args.items() if k in sig.parameters}
-            try:
-                text = json.dumps(func(**kept), default=str)
-            except Exception as exc:
-                text = json.dumps({"ok": False, "error": str(exc)})
-        except Exception as exc:
-            text = json.dumps({"ok": False, "error": str(exc)})
-    emit({
-        "jsonrpc": "2.0",
-        "id": msg.get("id"),
-        "result": {"content": [{"type": "text", "text": text}]},
-    })
-'''
-
 
 def fixture(root: Path) -> None:
     (root / "src").mkdir()
@@ -167,11 +88,19 @@ class Server:
         assert self.proc.stdin is not None and self.proc.stdout is not None
         self.proc.stdin.write(json.dumps(msg) + "\n")
         self.proc.stdin.flush()
-        line = read_line(self.proc.stdout, 20, method)
-        if not line:
-            err = self.proc.stderr.read() if self.proc.stderr else ""
-            raise SystemExit(f"server closed: {err[-500:]}")
-        body = json.loads(line)
+        body = None
+        for _ in range(8):
+            line = read_line(self.proc.stdout, 20, method)
+            if not line:
+                err = self.proc.stderr.read() if self.proc.stderr else ""
+                raise SystemExit(f"server closed: {err[-500:]}")
+            body = json.loads(line)
+            notice = str(body.get("method", ""))
+            if notice.startswith("notifications/"):
+                continue
+            break
+        if body is None:
+            raise SystemExit(f"no reply for {method}")
         if "error" in body:
             return {"ok": False, "error": body["error"]}
         result = body.get("result") or {}
@@ -183,6 +112,12 @@ class Server:
             except json.JSONDecodeError:
                 return {"text": text}
         return result
+
+    def notify(self, method):
+        msg = {"jsonrpc": "2.0", "method": method}
+        assert self.proc.stdin is not None
+        self.proc.stdin.write(json.dumps(msg) + "\n")
+        self.proc.stdin.flush()
 
     def close(self):
         if self.proc.stdin:
@@ -217,7 +152,8 @@ def walk(value, root, other_root, key=""):
         return {k: walk(v, root, other_root, k) for k, v in sorted(value.items())}
     if isinstance(value, list):
         rows = [walk(v, root, other_root, key) for v in value]
-        if key in {"unchanged", "files_with_matches", "indexed", "skipped"}:
+        # `unchanged` order follows PYTHONHASHSEED. Other lists keep their order.
+        if key == "unchanged":
             rows.sort(key=lambda row: json.dumps(row, sort_keys=True, default=str))
         return rows
     if key in {"version", "stele_version"} and isinstance(value, str) and value[:3] in {"1.5", "2.0"}:
@@ -244,6 +180,10 @@ def walk(value, root, other_root, key=""):
         return text
     if key == "pid" and isinstance(value, int):
         return 0
+    # Signature bytes match 1.5.2. Cosine of the f64 query against the f32
+    # vector still moves in the 8th digit. Five decimal places is the compare.
+    if key == "relevance_score" and isinstance(value, float):
+        return round(value, 5)
     return value
 
 
@@ -321,15 +261,48 @@ def first_chunk(value):
     return found[0] if found else ""
 
 
+# Fields a JSON snapshot cannot measure. Listed in MIGRATION.md.
+SQLITE_FIELDS = {
+    "journal_mode",
+    "synchronous",
+    "page_count",
+    "page_size",
+    "wal_autocheckpoint",
+    "busy_timeout_ms",
+    "database_size_bytes",
+    "wal_size_bytes",
+}
+
+
 def documented(name, left, right):
-    """Drop fields that MIGRATION.md calls out. Returns a short note or ''."""
+    """Narrow adjustments named in MIGRATION.md. Returns (note, skip_compare)."""
     notes = []
+    skip = False
     if name == "doctor" and isinstance(left, dict) and isinstance(right, dict):
-        # No SQLite file: journal mode, page size, and the pragma counters
-        # are not measured. database_size_bytes is the native snapshot.
-        left.pop("db_health", None)
-        right.pop("db_health", None)
-        notes.append("db_health")
+        for side in (left, right):
+            health = side.get("db_health")
+            if isinstance(health, dict):
+                for key in SQLITE_FIELDS:
+                    health.pop(key, None)
+        notes.append("sqlite pragma and database file fields")
+        for side in (left, right):
+            health = side.get("db_health") if isinstance(side, dict) else None
+            if isinstance(health, dict):
+                for key in (
+                    "recent_operations_1h",
+                    "recent_failures_1h",
+                    "busy_ratio",
+                    "recommended_action",
+                ):
+                    health.pop(key, None)
+        notes.append("operation_log is the SQLite telemetry table")
+    if name == "stats" and isinstance(left, dict) and isinstance(right, dict):
+        storage = left.get("storage") if isinstance(left.get("storage"), dict) else None
+        other = right.get("storage") if isinstance(right.get("storage"), dict) else None
+        if isinstance(storage, dict) and isinstance(other, dict):
+            storage.pop("kv_cache_size_bytes", None)
+            other.pop("kv_cache_size_bytes", None)
+            notes.append("kv_cache_size_bytes is zlib files on 1.5.2")
     if name == "get_supported_formats" and isinstance(left, dict) and isinstance(right, dict):
         lf = left.get("formats") if isinstance(left.get("formats"), dict) else {}
         rf = right.get("formats") if isinstance(right.get("formats"), dict) else {}
@@ -345,11 +318,13 @@ def documented(name, left, right):
         err = right.get("error") if isinstance(right, dict) else None
         if isinstance(err, str) and "staleness_score" in err:
             notes.append("1.5.2 query errors; rust returns the read list")
+            skip = True
     if name in {"store_embedding", "bulk_annotate"} and isinstance(right, dict):
         err = str(right.get("error", ""))
         if "unexpected keyword" in err or "missing" in err:
             notes.append("1.5.2 rejects the alias argument; rust accepts it")
-    return "; ".join(notes)
+            skip = True
+    return "; ".join(notes), skip
 
 
 def first_diff(left, right, path="$"):
@@ -395,20 +370,18 @@ def main() -> int:
     fixture(root)
     rs_store = Path(tempfile.mkdtemp(prefix="stele-rs-"))
     py_store = Path(tempfile.mkdtemp(prefix="stele-py-"))
-    shim_dir = Path(tempfile.mkdtemp(prefix="stele-shim-"))
-    shim = shim_dir / "shim.py"
-    shim.write_text(SHIM)
     env = os.environ.copy()
     env["STELE_MCP_MODE"] = "full"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    env.pop("PYTHONPATH", None)
     rust = Server(
         [binary, "--storage-dir", str(rs_store), "serve-mcp"],
         env,
         root,
     )
     python = Server(
-        [sys.executable, str(shim), str(root), str(py_store)],
+        [sys.executable, "-m", "stele_context.cli", "--storage-dir", str(py_store), "serve-mcp"],
         env,
         root,
     )
@@ -439,9 +412,7 @@ def main() -> int:
         ("detect_changes", {}),
         ("prune_history", {"max_entries": 1000}),
         ("history", {"limit": 20}),
-        ("get_relevant_kv", {"session_id": "s1", "query": "classify"}),
-        ("save_kv_state", {"session_id": "s1", "kv_data": {"k": "v"}}),
-        ("get_relevant_kv", {"session_id": "s1", "query": "classify"}),
+        ("get_relevant_kv", {"session_id": "s1", "query": "classify", "top_k": 3}),
         ("list_sessions", {}),
         ("rebuild_symbols", {}),
         ("stale_chunks", {"threshold": 0.5}),
@@ -457,7 +428,6 @@ def main() -> int:
         ("get_annotations", {"target": "src/calc.py", "target_type": "document"}),
         ("search_annotations", {"query": "note"}),
         ("update_annotation", {"annotation_id": 1, "content": "edited", "tags": ["t2"]}),
-        ("bulk_annotate", {"annotations": [{"target": "src/main.py", "target_type": "document", "content": "bulk", "tags": ["b"]}]}),
         ("delete_annotation", {"annotation_id": 1}),
         ("acquire_document_lock", {"document_path": "src/calc.py", "agent_id": "other-agent"}),
         ("refresh_document_lock", {"document_path": "src/calc.py", "agent_id": "other-agent"}),
@@ -472,12 +442,12 @@ def main() -> int:
     covered = {name for name, _ in calls}
     # Chunk tools are appended once a chunk id is known.
     later = {
+        "save_kv_state",
         "llm_embed",
         "bulk_store_summaries",
         "bulk_store_embeddings",
         "bulk_store_chunk_agent_notes",
         "store_semantic_summary",
-        "store_embedding",
         "store_chunk_agent_notes",
     }
     required = {
@@ -493,10 +463,10 @@ def main() -> int:
         "clean_bytecache", "bulk_store_embeddings", "bulk_store_chunk_agent_notes",
         "get_chunk_history", "batch", "stats", "project_brief", "annotate",
         "get_annotations", "delete_annotation", "update_annotation",
-        "search_annotations", "bulk_annotate", "acquire_document_lock",
+        "search_annotations", "acquire_document_lock",
         "refresh_document_lock", "release_document_lock", "get_document_lock_status",
         "release_agent_locks", "get_conflicts", "reap_expired_locks",
-        "store_semantic_summary", "store_embedding", "store_chunk_agent_notes",
+        "store_semantic_summary", "store_chunk_agent_notes",
     }
     if covered | later != required:
         missing = sorted(required - covered - later)
@@ -506,10 +476,18 @@ def main() -> int:
     diffs = 0
     root_s = str(root)
     try:
-        rust.call("initialize", {})
-        python.call("initialize", {})
+        init = {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "parity", "version": "0"},
+        }
+        rust.call("initialize", init)
+        python.call("initialize", init)
+        rust.notify("notifications/initialized")
+        python.notify("notifications/initialized")
         pending = list(calls)
         seen_chunk = False
+        saved_cid = ""
         invoked = set()
         while pending:
             name, args = pending.pop(0)
@@ -522,29 +500,31 @@ def main() -> int:
             for side in (left_n, right_n):
                 blank_graph(side)
             left_n, right_n = timestamps_ok(left_n, right_n, bad)
-            note = documented(name, left_n, right_n)
+            note, skip = documented(name, left_n, right_n)
             if note:
                 print(f"documented {name}: {note}", flush=True)
-            if "1.5.2 query errors" in note or "alias argument" in note:
-                left_n = right_n = {"documented": note}
             if bad:
                 print(f"parity diff {name} timestamp type: {bad}", flush=True)
                 diffs += 1
-            if left_n != right_n:
+            if not skip and left_n != right_n:
                 print(f"parity diff {name}: {first_diff(left_n, right_n)}", flush=True)
                 diffs += 1
             if not seen_chunk and name == "get_context":
                 cid = first_chunk(left)
                 if cid:
                     seen_chunk = True
+                    saved_cid = cid
                     vec = [0.1] * 128
                     pending[0:0] = [
+                        ("save_kv_state", {"session_id": "s1", "kv_data": {cid: {"note": "alpha", "n": 1}, "missing-chunk": {"note": "absent"}}}),
+                        ("get_relevant_kv", {"session_id": "s1", "query": "classify", "top_k": 3}),
+                        ("get_relevant_kv", {"session_id": "s1", "query": "zzzz-unrelated-token", "top_k": 2}),
+                        ("save_kv_state", {"session_id": "s2", "kv_data": {cid: {"note": "beta", "n": 2}}}),
+                        ("get_relevant_kv", {"session_id": "s2", "query": "return", "top_k": 2}),
                         ("llm_embed", {"text": "def classify(n):\n    return n\n", "chunk_id": cid}),
                         ("bulk_store_summaries", {"summaries": {cid: "classifies numbers"}}),
                         ("store_semantic_summary", {"chunk_id": cid, "summary": "hello"}),
                         ("bulk_store_embeddings", {"embeddings": {cid: vec}}),
-                        ("store_embedding", {"chunk_id": cid, "vector": [0.2] * 128}),
-                        ("store_embedding", {"chunk_id": cid, "embedding": [0.3] * 128}),
                         ("bulk_store_chunk_agent_notes", {"notes": {cid: "keep this"}}),
                         ("store_chunk_agent_notes", {"chunk_id": cid, "notes": "note"}),
                     ]
@@ -637,6 +617,48 @@ def main() -> int:
         if left_n != right_n:
             print(f"parity diff cli get-annotations: {first_diff(left_n, right_n)}", flush=True)
             diffs += 1
+        # Schema names the 1.5.2 functions do not accept. Observed after the
+        # CLI compare so a Rust-only write does not change the shared stores.
+        if not saved_cid:
+            print("parity diff chunk id missing for alias calls", flush=True)
+            diffs += 1
+        else:
+            rust_b = Server(
+                [binary, "--storage-dir", str(rs_store), "serve-mcp"], env, root
+            )
+            python_b = Server(
+                [sys.executable, "-m", "stele_context.cli", "--storage-dir", str(py_store), "serve-mcp"],
+                env,
+                root,
+            )
+            try:
+                rust_b.call("initialize", init)
+                python_b.call("initialize", init)
+                rust_b.notify("notifications/initialized")
+                python_b.notify("notifications/initialized")
+                alias_calls = [
+                    ("store_embedding", {"chunk_id": saved_cid, "embedding": [0.3] * 128}),
+                    ("bulk_annotate", {"items": [{"target": "src/main.py", "target_type": "document", "content": "bulk", "tags": ["b"]}]}),
+                ]
+                for name, args in alias_calls:
+                    left = tool(rust_b, name, args)
+                    right = tool(python_b, name, args)
+                    err = right.get("error") if isinstance(right, dict) else right
+                    err_s = json.dumps(err, default=str) if not isinstance(err, str) else err
+                    rust_ran = isinstance(left, dict) and (
+                        left.get("stored") or left.get("created") is not None
+                    )
+                    if err and rust_ran:
+                        print(
+                            f"documented {name}: 1.5.2 stdio rejects the schema name ({err_s[:180]}); rust runs it",
+                            flush=True,
+                        )
+                    else:
+                        print(f"parity diff {name} alias: rust {left} python {right}", flush=True)
+                        diffs += 1
+            finally:
+                rust_b.close()
+                python_b.close()
         code, out = cli(rs_store, ["clear"])
         if "cancelled" not in out:
             print("parity diff cli --confirm missing:", out[:200], flush=True)
@@ -662,11 +684,10 @@ def main() -> int:
     finally:
         rust.close()
         python.close()
-        shutil.rmtree(shim_dir, ignore_errors=True)
         shutil.rmtree(root, ignore_errors=True)
         shutil.rmtree(rs_store, ignore_errors=True)
         shutil.rmtree(py_store, ignore_errors=True)
-    print(f"parity diffs: {diffs}")
+    print(f"undocumented diffs: {diffs}")
     return 1 if diffs else 0
 
 

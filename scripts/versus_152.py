@@ -3,7 +3,7 @@
 
 The corpus is parity/fixtures. Each row uses a fresh storage directory.
 Warm rows index once, then time the command. Rust must be strictly faster
-on every row. Python is the stele_context tree on origin/python-legacy.
+on every row. Python is the installed PyPI package stele-context 1.5.2.
 """
 
 from __future__ import annotations
@@ -17,23 +17,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-
-
-def legacy_src(repo: Path) -> Path:
-    dest = repo / "target" / "python-legacy-src"
-    if (dest / "stele_context" / "cli.py").is_file():
-        return dest
-    archived = subprocess.run(
-        ["git", "archive", "origin/python-legacy", "stele_context"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
-    if dest.exists():
-        shutil.rmtree(dest)
-    dest.mkdir(parents=True)
-    subprocess.run(["tar", "-x"], cwd=dest, input=archived.stdout, check=True)
-    return dest
 
 
 def median(samples: list[float]) -> float:
@@ -92,7 +75,12 @@ def main() -> int:
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     binary = Path(args.binary).resolve()
-    src = legacy_src(repo)
+    version = subprocess.check_output(
+        [sys.executable, "-c", "import stele_context; print(stele_context.__version__)"],
+        text=True,
+    ).strip()
+    if version != "1.5.2":
+        raise SystemExit(f"need PyPI stele-context 1.5.2, found {version}")
     corpus = prepare_corpus(repo)
     py_file = next(corpus.rglob("*.py"))
     rel_py = py_file.relative_to(corpus).as_posix()
@@ -120,7 +108,7 @@ def main() -> int:
         ("cli history", ["history"], "warm"),
     ]
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(src)
+    env.pop("PYTHONPATH", None)
     env.pop("STELE_CONTEXT_STORAGE_DIR", None)
     print(f"{'row':<28} {'python ms':>10} {'rust ms':>10} result")
     failed = False

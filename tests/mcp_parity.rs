@@ -22,7 +22,7 @@ fn mcp_full_output_matches_python_152() {
         "mcp parity failed\n{stdout}\n{stderr}"
     );
     assert!(
-        stdout.contains("parity diffs: 0"),
+        stdout.contains("undocumented diffs: 0"),
         "missing parity line\n{stdout}"
     );
 }

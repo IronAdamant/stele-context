@@ -41,6 +41,7 @@ pub struct Engine {
     server_agent: String,
     file_reads: Vec<(String, String, Vec<String>, f64)>,
     operations: u64,
+    failures: u64,
 }
 
 impl Engine {
@@ -113,6 +114,7 @@ impl Engine {
             server_agent: String::new(),
             file_reads: Vec::new(),
             operations: 0,
+            failures: 0,
         })
     }
 
@@ -257,6 +259,7 @@ impl Engine {
                 tokens: 0,
                 agent: agent.clone(),
                 attached: Vec::new(),
+                kv_state: Vec::new(),
                 search_rows: Vec::new(),
             });
         }
@@ -593,8 +596,19 @@ impl Engine {
         let kv_bytes: u64 = state
             .sessions
             .iter()
-            .flat_map(|session| session.kv.iter())
-            .map(|(key, value)| key.len() + value.len())
+            .map(|session| {
+                let pairs = session
+                    .kv
+                    .iter()
+                    .map(|(key, value)| key.len() + value.len())
+                    .sum::<usize>();
+                let saved = session
+                    .kv_state
+                    .iter()
+                    .map(|(chunk_id, _, data)| chunk_id.len() + data.len())
+                    .sum::<usize>();
+                pairs + saved
+            })
             .sum::<usize>() as u64;
         let store_dir = self.storage.join("store");
         let database_size = file_len(&store_dir.join("snapshot.json"))
@@ -883,8 +897,13 @@ impl Engine {
         self.operations += 1;
     }
 
-    /// The 1.5.2 `doctor_snapshot` object. SQLite page geometry is not a
-    /// JSON snapshot, so page_count stays 0 and the harness records that.
+    pub fn note_failure(&mut self) {
+        self.failures += 1;
+    }
+
+    /// The 1.5.2 `doctor_snapshot` object. There is no SQLite file, so the
+    /// pragma fields are null. Byte sizes and the operation counters are
+    /// measured. `recommended_action` uses the 1.5.2 busy-ratio bands.
     pub fn doctor_snapshot(&self) -> Value {
         let documents = self.store.state.documents.len() as i64;
         let chunks = self.store.state.chunks.len() as i64;
@@ -1021,9 +1040,15 @@ impl Engine {
                         "recent_operations_1h",
                         Value::Int(self.operations as i64),
                     ),
-                    ("recent_failures_1h", Value::Int(0)),
-                    ("busy_ratio", Value::Float(0.0)),
-                    ("recommended_action", Value::string("idle")),
+                    ("recent_failures_1h", Value::Int(self.failures as i64)),
+                    (
+                        "busy_ratio",
+                        Value::Float(busy_ratio(self.failures, self.operations)),
+                    ),
+                    (
+                        "recommended_action",
+                        Value::string(busy_action(self.failures, self.operations)),
+                    ),
                 ]),
             ),
             (
@@ -1318,6 +1343,29 @@ impl Engine {
             return;
         }
         self.rebuild_bm25();
+    }
+}
+
+fn busy_ratio(failures: u64, operations: u64) -> f64 {
+    if operations == 0 {
+        return 0.0;
+    }
+    let ratio = failures as f64 / operations as f64;
+    (ratio * 10_000.0).round() / 10_000.0
+}
+
+fn busy_action(failures: u64, operations: u64) -> &'static str {
+    let ratio = if operations == 0 {
+        0.0
+    } else {
+        failures as f64 / operations as f64
+    };
+    if ratio < 0.01 {
+        "idle"
+    } else if ratio < 0.1 {
+        "vacuum"
+    } else {
+        "rebuild_symbols"
     }
 }
 

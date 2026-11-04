@@ -315,17 +315,12 @@ mod tests {
     fn matches_python_semantic_fingerprint() {
         let text = "def classify(n):\n    return n + 1\n";
         let rust = embed_text(text);
-        let py = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/python-legacy-src");
-        if !py.join("stele_context/llm_embedding.py").is_file() {
-            return;
-        }
         let script = r#"
 import json, sys
 from stele_context.llm_embedding import embed
 print(json.dumps(embed(sys.stdin.read())))
 "#;
         let out = Command::new("python3")
-            .env("PYTHONPATH", &py)
             .arg("-c")
             .arg(script)
             .stdin(std::process::Stdio::piped())
@@ -361,8 +356,6 @@ print(json.dumps(embed(sys.stdin.read())))
             );
         }
     }
-
-    use std::path::PathBuf;
 }
 
 fn count_strings(text: &str) -> usize {

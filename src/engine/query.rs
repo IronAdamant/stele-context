@@ -7,6 +7,24 @@ use crate::search::{self, VectorDoc};
 use crate::store::{Annotation, Dynamic, Session};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+fn cosine_stored(query: &[f64], stored: &[f32]) -> f64 {
+    // 1.5.2 scores the f64 query signature against the f32 vector on disk.
+    let mut dot = 0.0f64;
+    let mut left_norm = 0.0f64;
+    let mut right_norm = 0.0f64;
+    for (a, b) in query.iter().zip(stored.iter()) {
+        let b = f64::from(*b);
+        dot += a * b;
+        left_norm += a * a;
+        right_norm += b * b;
+    }
+    if left_norm > 0.0 && right_norm > 0.0 {
+        dot / (left_norm.sqrt() * right_norm.sqrt())
+    } else {
+        0.0
+    }
+}
+
 impl Engine {
     pub fn search(&mut self, query: &str, mode: &str, top_k: usize) -> Value {
         self.ensure_bm25();
@@ -947,6 +965,15 @@ impl Engine {
         tags: &[String],
         target_type: &str,
     ) -> Result<Value, String> {
+        // Document targets are stored the way Python Path renders them:
+        // backslashes on Windows, slashes elsewhere. A search query is text.
+        let stored;
+        let path = if matches!(action, "create" | "get" | "bulk_create") {
+            stored = crate::walk::native_sep(path);
+            stored.as_str()
+        } else {
+            path
+        };
         match action {
             "bulk_create" => {
                 let created = self.annotations("create", path, body)?;
@@ -1121,7 +1148,7 @@ impl Engine {
             };
             added += tokens as i64;
             saved += 1;
-            let score = 1.0;
+            let encoded = crate::json::to_string(&data);
             if let Some(slot) = self
                 .store
                 .state
@@ -1129,9 +1156,9 @@ impl Engine {
                 .iter_mut()
                 .find(|item| item.id == session)
             {
-                slot.attached.push((chunk_id, turn_number, score));
+                slot.attached.push((chunk_id.clone(), turn_number, 1.0));
+                slot.kv_state.push((chunk_id, turn_number, encoded));
             }
-            let _ = data;
         }
         let slot = self
             .store
@@ -1181,8 +1208,8 @@ impl Engine {
             else {
                 continue;
             };
-            let sig = crate::chunk::signature(&chunk.content);
-            let score: f64 = query_sig.iter().zip(sig).map(|(a, b)| a * b).sum();
+            let stored = crate::store::decode_hex_sig(&chunk.signature);
+            let score = cosine_stored(&query_sig, &stored);
             scored.push((score, chunk));
         }
         scored.sort_by(|left, right| right.0.total_cmp(&left.0));
@@ -1507,6 +1534,7 @@ impl Engine {
                 tokens: 0,
                 agent: String::new(),
                 attached: Vec::new(),
+                kv_state: Vec::new(),
                 search_rows: Vec::new(),
             });
         }
