@@ -112,7 +112,7 @@ impl Parsed {
                 }
             },
         };
-        let opened = if command == "detect" {
+        let opened = if command == "detect" || command == "index" {
             Engine::open_detect(cwd, self.storage.as_deref())
         } else {
             Engine::open_from(cwd, self.storage.as_deref())

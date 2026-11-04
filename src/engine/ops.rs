@@ -413,15 +413,7 @@ impl Engine {
                 errors.push(Value::string(id.clone()));
                 continue;
             };
-            if self.store.state.sigs.len() != self.store.state.chunks.len() {
-                self.store.state.sigs = self
-                    .store
-                    .state
-                    .chunks
-                    .iter()
-                    .map(|chunk| decode_or_zero(&chunk.signature))
-                    .collect();
-            }
+            self.store.ensure_sigs();
             let mut sig = [0f32; 128];
             for (lane, value) in values.iter().enumerate() {
                 sig[lane] = *value as f32;
@@ -775,33 +767,6 @@ impl Engine {
             .iter_mut()
             .find(|item| item.id == id)
             .unwrap()
-    }
-}
-
-fn decode_or_zero(hex_text: &str) -> [f32; 128] {
-    let mut out = [0f32; 128];
-    let bytes = hex_text.as_bytes();
-    for lane in 0..128 {
-        let start = lane * 8;
-        if start + 8 > bytes.len() {
-            break;
-        }
-        let mut le = [0u8; 4];
-        for (slot, pair) in le.iter_mut().enumerate() {
-            let offset = start + slot * 2;
-            *pair = (nibble(bytes[offset]) << 4) | nibble(bytes[offset + 1]);
-        }
-        out[lane] = f32::from_le_bytes(le);
-    }
-    out
-}
-
-fn nibble(byte: u8) -> u8 {
-    match byte {
-        b'0'..=b'9' => byte - b'0',
-        b'a'..=b'f' => byte - b'a' + 10,
-        b'A'..=b'F' => byte - b'A' + 10,
-        _ => 0,
     }
 }
 

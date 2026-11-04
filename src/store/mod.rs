@@ -214,16 +214,28 @@ impl Store {
         Ok(())
     }
 
+    /// Keyword search does not read signatures. Load the side file on the
+    /// first hybrid query or save, and keep a hex signature if the file is absent.
+    pub fn ensure_sigs(&mut self) {
+        if self.state.sigs.len() == self.state.chunks.len() {
+            return;
+        }
+        let loaded = read_sigs(&self.dir.join("signatures.bin"), self.state.chunks.len());
+        if loaded.len() == self.state.chunks.len() {
+            self.state.sigs = loaded;
+            return;
+        }
+        self.state.sigs = self
+            .state
+            .chunks
+            .iter()
+            .map(|chunk| decode_hex_sig(&chunk.signature))
+            .collect();
+    }
+
     pub fn save(&mut self, op: &str, detail: &Value) -> Result<(), String> {
         self.state.seq = self.state.seq.saturating_add(1);
-        if self.state.sigs.len() != self.state.chunks.len() {
-            self.state.sigs = self
-                .state
-                .chunks
-                .iter()
-                .map(|chunk| decode_hex_sig(&chunk.signature))
-                .collect();
-        }
+        self.ensure_sigs();
         write_sigs(&self.dir.join("signatures.bin"), &self.state)?;
         let body = json::to_vec(&self.state.to_json());
         let tmp = self.dir.join("snapshot.json.tmp");
@@ -325,11 +337,7 @@ impl State {
 fn load_snapshot(path: &Path) -> Option<State> {
     let text = fs::read_to_string(path).ok()?;
     let value = json::parse(&text).ok()?;
-    let mut state = State::from_json(&value);
-    if let Some(dir) = path.parent() {
-        state.sigs = read_sigs(&dir.join("signatures.bin"), state.chunks.len());
-    }
-    Some(state)
+    Some(State::from_json(&value))
 }
 
 fn load_documents_only(path: &Path) -> Option<State> {

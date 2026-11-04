@@ -111,6 +111,13 @@ impl Engine {
     }
 
     pub fn index(&mut self, paths: &[String], force: bool) -> Result<Value, String> {
+        if self.documents_only && !force && !self.store.state.documents.is_empty() {
+            if let Some(result) = self.index_if_unchanged(paths)? {
+                return Ok(result);
+            }
+            self.store.reload_full()?;
+            self.documents_only = false;
+        }
         let files = collect(&self.cwd, paths, self.respect_gitignore, &self.skip_dirs)?;
         let mut indexed_rows = Vec::new();
         let mut skipped_rows = Vec::new();
@@ -743,6 +750,60 @@ impl Engine {
                 ("legacy_untouched", Value::Bool(true)),
             ])),
         }
+    }
+
+    /// `Ok(Some)` when every indexed file still matches mtime and size.
+    /// The caller has not loaded chunk bodies, so a miss must reload first.
+    fn index_if_unchanged(&self, paths: &[String]) -> Result<Option<Value>, String> {
+        let files = collect(&self.cwd, paths, self.respect_gitignore, &self.skip_dirs)?;
+        let known: std::collections::HashMap<&str, (u64, i64, i64)> = self
+            .store
+            .state
+            .documents
+            .iter()
+            .map(|doc| {
+                (
+                    doc.path.as_str(),
+                    (doc.size, doc.mtime_ns, doc.chunk_count as i64),
+                )
+            })
+            .collect();
+        let mut skipped_rows = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (rel, abs) in &files {
+            seen.insert(rel.as_str());
+            let Some((size, mtime, count)) = known.get(rel.as_str()).copied() else {
+                return Ok(None);
+            };
+            let meta = fs::metadata(abs).map_err(|err| format!("{rel}: {err}"))?;
+            if size != meta.len() || mtime != mtime_ns(&meta) {
+                return Ok(None);
+            }
+            skipped_rows.push(Value::object(vec![
+                ("path", Value::string(rel)),
+                ("reason", Value::string("Unchanged")),
+                ("chunk_count", Value::Int(count)),
+            ]));
+        }
+        let whole = paths.is_empty() || paths.iter().any(|path| path == "." || path == "./");
+        if whole
+            && self
+                .store
+                .state
+                .documents
+                .iter()
+                .any(|doc| !seen.contains(doc.path.as_str()))
+        {
+            return Ok(None);
+        }
+        Ok(Some(Value::object(vec![
+            ("indexed", Value::Array(Vec::new())),
+            ("skipped", Value::Array(skipped_rows)),
+            ("errors", Value::Array(Vec::new())),
+            ("conflicts", Value::Array(Vec::new())),
+            ("total_chunks", Value::Int(0)),
+            ("total_tokens", Value::Int(0)),
+        ])))
     }
 
     fn reindex_file(

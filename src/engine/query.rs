@@ -12,6 +12,7 @@ impl Engine {
         self.ensure_bm25();
         let top_k = top_k.max(1);
         let hits = if mode == "hybrid" {
+            self.store.ensure_sigs();
             let docs: Vec<VectorDoc> = self
                 .store
                 .state
