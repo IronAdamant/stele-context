@@ -186,6 +186,7 @@ class Server:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
+            encoding="utf-8",
         )
         self.n = 0
 
@@ -393,6 +394,8 @@ def main() -> int:
     env = os.environ.copy()
     env["STELE_MCP_MODE"] = "full"
     env["PYLEGACY"] = str(py)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     rust = Server(
         [binary, "--storage-dir", str(rs_store), "serve-mcp"],
         env,
