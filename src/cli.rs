@@ -70,6 +70,7 @@ struct Parsed {
     significance: Option<f64>,
     mode: Option<String>,
     summary_mode: bool,
+    all_languages: bool,
     chunk_id: Option<String>,
     top_n: Option<usize>,
     min_tokens: Option<usize>,
@@ -346,7 +347,7 @@ impl Parsed {
                 self.max_result_tokens,
             ),
             "find-definition" => Ok(engine.find_definition(positional)),
-            "find-references" => Ok(engine.find_references(positional)),
+            "find-references" => Ok(engine.find_references_in(positional, self.all_languages)),
             "impact-radius" => Ok(engine.impact_radius(
                 self.symbol.as_deref().unwrap_or(positional),
                 self.document.as_deref(),
@@ -444,6 +445,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         significance: None,
         mode: None,
         summary_mode: false,
+        all_languages: false,
         chunk_id: None,
         top_n: None,
         min_tokens: None,
@@ -503,6 +505,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                 "--json" => {}
                 "--force" | "--force-reindex" => parsed.force = true,
                 "--summary-mode" => parsed.summary_mode = true,
+                "--all-languages" => parsed.all_languages = true,
                 "--no-summary-mode" => parsed.summary_mode = false,
                 "--regex" => parsed.regex = true,
                 "--working-tree" => parsed.working_tree = true,
@@ -693,7 +696,7 @@ JSON is the default on commands. --human prints text.
 --version prints the version line and exits. --help prints this text.
 Flags: --storage-dir --json --regex --working-tree --confirm --path-prefix
 --limit --document --document-path --session --session-id --depth
---significance-threshold --mode --group-by --summary-mode --top-n --top-k
+--significance-threshold --mode --group-by --summary-mode --all-languages --top-n --top-k
 --min-tokens --max-tokens --max-result-tokens --context-lines --compact
 --no-compact --no-classify --no-scope --no-dedup --no-index --scan-new
 --no-scan-new --force --search-mode --symbol --port --host --blocking

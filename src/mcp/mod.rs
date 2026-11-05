@@ -571,7 +571,7 @@ pub(crate) fn lite_tools() -> &'static [&'static str] {
 
 /// Run a tool for MCP or HTTP and apply the 2.2 compact defaults.
 pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, String> {
-    run_tool(engine, name, args).map(|value| compact::apply(name, args, value))
+    run_tool(engine, name, args).map(|value| compact::apply(engine, name, args, value))
 }
 
 fn run_tool(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, String> {
@@ -682,7 +682,7 @@ fn run_tool(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, Stri
             )
         }
         "find_definition" => Ok(engine.find_definition(&symbol)),
-        "find_references" => Ok(engine.find_references(&symbol)),
+        "find_references" => Ok(engine.find_references_in(&symbol, flag(args, "all_languages"))),
         "impact_radius" => Ok(engine.impact_radius(
             &symbol,
             arg(args, "document_path").as_deref(),

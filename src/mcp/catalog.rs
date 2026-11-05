@@ -15,7 +15,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("agent_grep", "Grep indexed files with enclosing scope and classification, within max_tokens (default 1000)."),
     ("search_text", "Exact substring or regex over every indexed chunk, with perfect recall. limit defaults to 20."),
     ("query", "Start here for a question: merges ranked search, symbol lookups and grep in one list."),
-    ("find_references", "Definitions and every usage of a symbol, with a verdict (referenced, unreferenced, external)."),
+    ("find_references", "Definitions and every usage of a symbol, with the line that names it, in its definitions' language (all_languages=true for all), and a verdict."),
     ("find_definition", "Where a symbol is defined: path, line, signature and a short preview. full=true adds the chunk text."),
     ("impact_radius", "What depends on a symbol, file or chunk, through the symbol graph."),
     ("coupling", "Files coupled to a file through shared symbols."),
