@@ -7,6 +7,7 @@ mod csharp;
 mod edges;
 mod javascript;
 mod javascript_prepass;
+mod rust_refs;
 mod source;
 mod swift;
 mod util;
@@ -49,6 +50,24 @@ pub fn extract(extension: &str, content: &str) -> Vec<Hit> {
         "php" => source::extract_php(content),
         _ => Vec::new(),
     }
+}
+
+/// `extract` plus what 2.3 adds on top of 1.5.2's patterns: the Rust
+/// references of grouped imports, `::` paths and type names
+/// (`rust_refs`). The empty name 1.5.2 records for `use a::{..}` is dropped.
+/// The index uses this; `extract` stays 1.5.2's, checked by the goldens.
+pub fn extract_all(extension: &str, content: &str) -> Vec<Hit> {
+    let mut hits = extract(extension, content);
+    let ext = extension
+        .strip_prefix('.')
+        .unwrap_or(extension)
+        .to_ascii_lowercase();
+    if ext == "rs" {
+        hits.retain(|hit| !hit.name.is_empty());
+        let extra = rust_refs::extra(content, &hits);
+        hits.extend(extra);
+    }
+    hits
 }
 
 fn from_python(content: &str) -> Vec<Hit> {

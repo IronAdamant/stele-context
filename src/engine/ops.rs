@@ -202,13 +202,13 @@ impl Engine {
                 .language
                 .clone()
                 .unwrap_or_else(|| super::extension_of(&chunk.path).to_string());
-            for hit in crate::symbols::extract(&ext, &chunk.content) {
+            for hit in crate::symbols::extract_all(&ext, &chunk.content) {
                 let _id = self.take_symbol_id();
                 self.store.state.symbols.push(crate::store::Symbol {
                     name: hit.name,
                     kind: hit.kind,
                     role: hit.role,
-                    line: hit.line,
+                    line: crate::chunk::lines::absolute(&chunk.line_map, hit.line),
                     container: hit.container,
                     chunk_id: chunk.id.clone(),
                     path: chunk.path.clone(),
@@ -636,6 +636,7 @@ impl Engine {
                 staleness: 0.0,
                 stale_since: None,
                 embedding: Vec::new(),
+                line_map: Vec::new(),
             });
             self.store.state.sigs.push([0f32; 128]);
         }
