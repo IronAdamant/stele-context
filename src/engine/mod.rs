@@ -2082,9 +2082,16 @@ impl Engine {
                 .unwrap_or([0.0; 128])
                 .to_vec()
         };
-        let mut graph = self.hnsw.borrow_mut();
-        graph.remove(chunk_id);
-        graph.insert(chunk_id, vector);
+        {
+            let mut graph = self.hnsw.borrow_mut();
+            graph.remove(chunk_id);
+            graph.insert(chunk_id, vector);
+        }
+        // Keep the saved numbers current, so the next process (another
+        // agent's server) reuses them instead of rebuilding.
+        if self.store.state.chunks.len() >= GRAPH_CACHE_MIN {
+            let _ = self.graph_stats();
+        }
     }
 
     fn hnsw_span(&self) -> f64 {
