@@ -180,6 +180,10 @@ fn mcp_session(
         .ok_or_else(|| "mcp stdin closed".to_string())?;
     let (tx, rx) = mpsc::channel::<String>();
     thread::spawn(move || {
+        // Touch the memory the reader is about to fill, so a longer reply
+        // does not cost this client more first-touch page faults (the
+        // freed block is reused below; it stays under glibc's trim size).
+        drop(std::hint::black_box(vec![1u8; 96 * 1024]));
         // A 64 KiB buffer, as MCP clients read: a long reply is one read.
         let reader = BufReader::with_capacity(1 << 16, stdout);
         for line in reader.lines() {
