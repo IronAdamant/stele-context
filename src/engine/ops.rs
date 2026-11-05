@@ -440,12 +440,7 @@ impl Engine {
                 }
                 self.store.state.sigs[index] = sig;
             }
-            // remove + add of an existing id. The add increments only when
-            // another node is still in the index. A lone chunk is the new
-            // entry point and 1.5.2 does not count it.
-            if self.store.state.chunks.len() > 1 {
-                self.store.state.inserts += 1;
-            }
+            self.note_vector_replace();
             stored += 1;
         }
         self.store.save("embeddings", &Value::Int(stored))?;
@@ -497,6 +492,9 @@ impl Engine {
             };
             chunk.summary = Some(summary.clone());
             stored += 1;
+        }
+        if self.store.state.chunks.len() > 1 {
+            self.store.state.inserts += stored as u64;
         }
         self.store.save("summaries", &Value::Int(stored))?;
         Ok(Value::object(vec![

@@ -231,8 +231,8 @@ Full-mode names run in 2.0.1 by calling the tool in the replacement column. Anno
 - `doctor.db_health.recent_operations_1h`, `recent_failures_1h`, `busy_ratio`, and `recommended_action` are counted from MCP tool results in this process (`busy_ratio` under 0.01 is `idle`, under 0.1 is `vacuum`, otherwise `rebuild_symbols`). 1.5.2 counts rows in the SQLite `operation_log`, including internal writes.
 - `get_relevant_kv` `relevance_score` matches 1.5.2 to 5 decimal places. The signature bytes match; the last bits of the cosine move with f32 packing.
 
-- `llm_embed` without `chunk_id` is an MCP tool error (`isError` true). The text is `{"error": "_IndexMixin.llm_embed() missing 1 required positional argument: 'chunk_id'"}`, which is the TypeError 1.5.2 raises.
-- `agent_grep` with `path_prefix` is an MCP tool error (`isError` true). The text is `{"error": "_SearchMixin.agent_grep() got an unexpected keyword argument 'path_prefix'"}`. 1.5.2's function does not take that argument.
+- `llm_embed` without `chunk_id` is an MCP tool error (`isError` true). The text is `Input validation error: 'chunk_id' is a required property`, which is what the 1.5.2 stdio server returns before the function runs. A call with no `text` is `Input validation error: 'text' is a required property`.
+- `agent_grep` with `path_prefix` returns `{"error": "_SearchMixin.agent_grep() got an unexpected keyword argument 'path_prefix'"}`. 1.5.2's function does not take that argument. The stdio result is not marked `isError`.
 - Keyword `relevance_score` uses 1.5.2 BM25 over chunks with non-empty content, the proximity nudge, and the same identifier split (`renderWidget` contributes `render`, `widget`, and `renderwidget`). An empty file such as `__init__.py` is stored as a chunk and is left out of the keyword index.
 
 `bulk_store_embeddings` and `store_embedding` accept any non-empty vector and L2-normalise it. A 64-value vector is stored. A zero vector stays zeros of that length. Their other singleton payloads match 1.5.2 except the alias errors and `kv_cache_size_bytes` above. The names still run; they are not `tool_removed`.

@@ -1741,6 +1741,13 @@ pub fn session_time(value: i64) -> f64 {
 // moved value. `store_piece` above is replaced by the helper in this impl
 // once the borrow is split. See `commit_piece`.
 impl Engine {
+    fn note_vector_replace(&mut self) {
+        // remove + add. The first node in an empty index is not counted.
+        if self.store.state.chunks.len() > 1 {
+            self.store.state.inserts += 1;
+        }
+    }
+
     fn take_symbol_id(&mut self) -> i64 {
         if self.store.state.next_symbol_id <= 0 {
             let from_dynamic = self

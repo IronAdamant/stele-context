@@ -299,16 +299,21 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
         }
         Err(message) => {
             engine.note_failure();
-            let mut value = if name == "llm_embed" || name == "agent_grep" {
-                Value::object(vec![("error", Value::string(message))])
+            if name == "llm_embed" {
+                // The 1.5.2 stdio server rejects this in the schema checker.
+                // The tool text is that sentence, and isError is true.
+                (message, true)
+            } else if name == "agent_grep" {
+                let value = Value::object(vec![("error", Value::string(message))]);
+                (json::to_string(&value), false)
             } else {
-                Value::object(vec![
+                let mut value = Value::object(vec![
                     ("ok", Value::Bool(false)),
                     ("error", Value::string(message)),
-                ])
-            };
-            attach_hint(&name, &mut value);
-            (json::to_string(&value), true)
+                ]);
+                attach_hint(&name, &mut value);
+                (json::to_string(&value), false)
+            }
         }
     };
     engine.note_operation();
@@ -453,7 +458,12 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
         }
         "doctor" => Ok(engine.doctor_snapshot()),
         "map" => {
-            let prefix = arg(args, "path_prefix");
+            // An empty string is a prefix. `arg` drops empty strings, and
+            // 1.5.2 then resolves `""` to `.`, which matches no document.
+            let prefix = match field(args, "path_prefix") {
+                Some(Value::String(text)) => Some(text.clone()),
+                _ => None,
+            };
             Ok(engine.map_with(prefix.as_deref(), None, None))
         }
         "enrichment_plan" => Ok(engine.enrichment_plan_with(
@@ -631,11 +641,19 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 ("video", ext_list(VIDEO_EXTS)),
             ]),
         )])),
-        "llm_embed" => engine.llm_embed(
-            &arg(args, "text").unwrap_or_default(),
-            &arg(args, "chunk_id").unwrap_or_default(),
-            float_list(args, "fingerprint_values"),
-        ),
+        "llm_embed" => {
+            if field(args, "text").is_none() {
+                return Err("Input validation error: 'text' is a required property".to_string());
+            }
+            if field(args, "chunk_id").is_none() {
+                return Err("Input validation error: 'chunk_id' is a required property".to_string());
+            }
+            engine.llm_embed(
+                &arg(args, "text").unwrap_or_default(),
+                &arg(args, "chunk_id").unwrap_or_default(),
+                float_list(args, "fingerprint_values"),
+            )
+        }
         "prune_history" => engine.prune_history(
             int_arg(args, "max_age_seconds"),
             int_arg(args, "max_entries"),

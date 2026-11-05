@@ -1324,16 +1324,20 @@ impl Engine {
     }
 
     pub fn store_summary(&mut self, chunk_id: &str, summary: &str) -> Result<Value, String> {
-        let Some(chunk) = self
+        let found = self
             .store
             .state
             .chunks
             .iter_mut()
             .find(|chunk| chunk.id == chunk_id)
-        else {
+            .map(|chunk| {
+                chunk.summary = Some(summary.to_string());
+            })
+            .is_some();
+        if !found {
             return Err(format!("unknown chunk '{chunk_id}'"));
-        };
-        chunk.summary = Some(summary.to_string());
+        }
+        self.note_vector_replace();
         self.store.save("summary", &Value::string(chunk_id))?;
         Ok(Value::object(vec![
             ("stored", Value::Bool(true)),
