@@ -1,6 +1,6 @@
 # Stele Context - Complete Project Documentation
 
-**Last updated:** 2026-11-05. **Release:** Rust crate 2.2.0.
+**Last updated:** 2026-11-05. **Release:** Rust crate 2.3.0.
 
 The product is the std-only Rust binary. The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
 
@@ -26,7 +26,7 @@ The product is the std-only Rust binary. The old Python 1.x version lives on the
 
 | Path | Purpose |
 |------|---------|
-| `Cargo.toml`, `Cargo.lock` | Crate `stele-context` 2.2.0. No dependencies |
+| `Cargo.toml`, `Cargo.lock` | Crate `stele-context` 2.3.0. No dependencies |
 | `src/` | Library, `stele-context`, `stele-context-mcp` |
 | `src/bin/stele-bench/` | B1 floor and D13 gate. Not shipped in the GitHub Release |
 | `src/engine/` | Index, detect, search, query, locks |

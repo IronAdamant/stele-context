@@ -728,7 +728,7 @@ mod tests {
     fn version_line_is_twenty_bytes() {
         let response = dispatch(&["--version".to_string()]);
         assert_eq!(response.code, 0);
-        assert_eq!(response.stdout, b"stele-context 2.2.0\n");
+        assert_eq!(response.stdout, b"stele-context 2.3.0\n");
         assert_eq!(response.stdout.len(), 20);
     }
 
@@ -740,7 +740,7 @@ mod tests {
         let value = json::parse(text.trim_end()).unwrap();
         let rendered = json::to_string(&value);
         assert!(rendered.contains("\"ok\":true"));
-        assert!(rendered.contains("\"version\":\"2.2.0\""));
+        assert!(rendered.contains("\"version\":\"2.3.0\""));
         assert!(rendered.contains("\"implementation\":\"rust\""));
         assert!(rendered.contains("No 2.0 store yet") || rendered.contains("native store"));
     }
