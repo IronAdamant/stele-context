@@ -59,6 +59,7 @@ pub struct Engine {
 impl Engine {
     pub fn open(storage_flag: Option<&Path>) -> Result<Engine, String> {
         let cwd = std::env::current_dir().map_err(|err| format!("cwd: {err}"))?;
+        let cwd = crate::root::resolved(&cwd);
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
@@ -66,6 +67,7 @@ impl Engine {
     }
 
     pub fn open_from(cwd: PathBuf, storage_flag: Option<&Path>) -> Result<Engine, String> {
+        let cwd = crate::root::resolved(&cwd);
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
@@ -75,6 +77,7 @@ impl Engine {
     /// Open for `detect`. Document rows are enough while every indexed file
     /// still matches mtime and size.
     pub fn open_detect(cwd: PathBuf, storage_flag: Option<&Path>) -> Result<Engine, String> {
+        let cwd = crate::root::resolved(&cwd);
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
@@ -82,6 +85,7 @@ impl Engine {
     }
 
     pub fn open_at(cwd: PathBuf, storage: PathBuf) -> Result<Engine, String> {
+        let cwd = crate::root::resolved(&cwd);
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         Self::finish(cwd, storage, loaded, false, root.is_some())

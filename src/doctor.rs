@@ -22,6 +22,7 @@ pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
             );
         }
     };
+    let cwd = crate::root::resolved(&cwd);
     let project_root = detect_project_root(&cwd);
     let config = Config::load_at(project_root.as_deref());
     let storage = match resolve_storage_dir(storage_flag, &config, project_root.as_deref()) {

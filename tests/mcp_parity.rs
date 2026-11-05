@@ -2207,14 +2207,12 @@ fn compare_scenario(
     extra_check: impl Fn(&[Option<Outcome>], &[Option<Outcome>]) -> usize,
 ) -> usize {
     let work = TempDir::new("stele-v5-").expect("mkdtemp");
-    let root = work.path().join(label);
+    // Both sides report the resolved path (8.3 names and symlinks
+    // expanded), so run in and strip that form.
+    let base = stele_context::root::resolved(work.path());
+    let root = base.join(label);
     let root_s = root.display().to_string();
-    let store = |side: &str| {
-        work.path()
-            .join(format!("{side}-store"))
-            .display()
-            .to_string()
-    };
+    let store = |side: &str| base.join(format!("{side}-store")).display().to_string();
     let py_store = store("py");
     let rs_store = store("rs");
     let py_serve = vec![
