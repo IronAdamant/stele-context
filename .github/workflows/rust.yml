@@ -102,9 +102,7 @@ jobs:
         run: |
           ext=""
           if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
-          py=python3
-          if ! command -v python3 >/dev/null 2>&1; then py=python; fi
-          "$py" scripts/versus_152.py \
+          "target/${{ matrix.target }}/release/stele-bench${ext}" versus \
             --binary "target/${{ matrix.target }}/release/stele-context${ext}" \
             --runs 3
 

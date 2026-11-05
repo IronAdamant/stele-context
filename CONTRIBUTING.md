@@ -96,7 +96,7 @@ cargo test
 
 The fetch step is optional. Corpus round-trip tests skip when `parity/.cache` is absent, and they run when it is present.
 
-`cargo test` runs the parity tests against an installed interpreter. That interpreter needs `python3`, `stele-context==1.5.2`, and PyMuPDF (`pymupdf`). The tests skip the live comparison when those imports are missing.
+`cargo test` runs the parity tests against the reference: unmodified PyPI `stele-context==1.5.2` with PyMuPDF (`pip install 'stele-context[mcp]==1.5.2' 'pymupdf>=1.23,<2'`). Set `STELE_PARITY_PYTHON` to that interpreter, or put it first on PATH as `python3` or `python`. A parity test that cannot find it fails; it does not skip. `stele-bench versus --binary target/release/stele-context` times the same corpus against 1.5.2. Python is only the test oracle; the binaries never start it.
 
 ### Writing Tests
 
