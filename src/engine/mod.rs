@@ -162,6 +162,28 @@ impl Engine {
         &self.server_agent
     }
 
+    /// Between tool calls a server lets go of the store, so another agent's
+    /// server or the CLI can use it.
+    pub fn release_store(&mut self) {
+        self.store.unlock();
+    }
+
+    /// Take the store back for a tool call. When another process wrote it
+    /// meanwhile, reload it and drop what was derived from the old state.
+    pub fn reacquire_store(&mut self) -> Result<(), String> {
+        if !self.store.relock()? {
+            return Ok(());
+        }
+        self.store.reload_full()?;
+        self.documents_only = false;
+        self.bm25 = Bm25::new();
+        self.bm25_ready = false;
+        self.bm25_excluded.clear();
+        self.hnsw_ready.set(false);
+        self.graph_cache.set(None);
+        Ok(())
+    }
+
     pub fn remember_server_agent(&mut self, id: &str) {
         self.server_agent = id.to_string();
     }

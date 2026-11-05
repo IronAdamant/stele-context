@@ -120,7 +120,12 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
     let background = std::thread::Builder::new()
         .name("store-open".to_string())
         .spawn(move || {
-            let _ = sender.send(Engine::open(owned.as_deref()).ok());
+            let mut opened = Engine::open(owned.as_deref()).ok();
+            // Idle between calls: the store is free for other processes.
+            if let Some(engine) = opened.as_mut() {
+                engine.release_store();
+            }
+            let _ = sender.send(opened);
             let _ = crate::pyver::host_version();
         })
         .is_ok();
@@ -198,7 +203,20 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
                     }
                     registered = true;
                 }
-                tools_call(engine.as_mut(), &params)
+                // The store is held for one call at a time, so two agents'
+                // servers (and the CLI) can share a project.
+                let reacquired = engine.as_mut().map(Engine::reacquire_store);
+                let result = match reacquired {
+                    Some(Err(message)) => tool_result(
+                        &json::to_string(&Value::object(vec![("error", Value::string(message))])),
+                        true,
+                    ),
+                    _ => tools_call(engine.as_mut(), &params),
+                };
+                if let Some(engine) = engine.as_mut() {
+                    engine.release_store();
+                }
+                result
             }
             "ping" => Value::object(vec![]),
             _ => {

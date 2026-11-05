@@ -16,7 +16,9 @@ pub fn listen(engine: Engine, host: &str, port: u16) -> Result<(), String> {
     serve_listener(engine, listener)
 }
 
-pub fn serve_listener(engine: Engine, listener: TcpListener) -> Result<(), String> {
+pub fn serve_listener(mut engine: Engine, listener: TcpListener) -> Result<(), String> {
+    // The store is held for one request at a time (see `call`).
+    engine.release_store();
     let addr = listener
         .local_addr()
         .map_err(|err| format!("addr: {err}"))?;
@@ -172,7 +174,18 @@ fn call(engine: &std::sync::Mutex<Engine>, body: &str) -> (u16, Value) {
             )]),
         );
     }
-    match mcp::dispatch(&mut engine, &tool, &params) {
+    if let Err(message) = engine.reacquire_store() {
+        return (
+            200,
+            Value::object(vec![(
+                "error",
+                Value::string(format!("Tool execution failed: {message}")),
+            )]),
+        );
+    }
+    let outcome = mcp::dispatch(&mut engine, &tool, &params);
+    engine.release_store();
+    match outcome {
         Ok(mut result) => {
             let hint = mcp::result_hint(&tool, &result);
             let mut pairs = vec![("success".to_string(), Value::Bool(true))];
