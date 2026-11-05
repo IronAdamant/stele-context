@@ -120,10 +120,19 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
     // reports (file reads along PATH, slow on Windows; nothing is started).
     let mut engine: Option<Engine> = None;
     let (sender, opened) = std::sync::mpsc::channel::<Option<Engine>>();
+    let (warm_sender, warmed) = std::sync::mpsc::channel::<Vec<u8>>();
     let owned = storage.map(std::path::Path::to_path_buf);
     let background = std::thread::Builder::new()
         .name("store-open".to_string())
         .spawn(move || {
+            // First, while the client is still on initialize: page in the
+            // tools/list document and a reply buffer that holds it, so the
+            // first tools/list does not pay those page faults.
+            let listed = cached_tools_json().as_bytes();
+            let mut reply = Vec::with_capacity(listed.len() + 64);
+            reply.extend_from_slice(listed);
+            reply.clear();
+            let _ = warm_sender.send(reply);
             let mut opened = Engine::open(owned.as_deref()).ok();
             // Idle between calls: the store is free for other processes.
             if let Some(engine) = opened.as_mut() {
@@ -187,13 +196,18 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
                 } else {
                     filtered.get_or_insert_with(|| filtered_tools_json(selection))
                 };
-                send(
-                    &mut stdout,
-                    format!(
-                        "{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{listed}}}",
-                        id_json = json::to_string(&id),
-                    ),
+                let mut reply = warmed.try_recv().unwrap_or_default();
+                reply.clear();
+                reply.extend_from_slice(b"{\"jsonrpc\":\"2.0\",\"id\":");
+                reply.extend_from_slice(json::to_string(&id).as_bytes());
+                reply.extend_from_slice(b",\"result\":");
+                reply.extend_from_slice(listed.as_bytes());
+                reply.extend_from_slice(
+                    b"}
+",
                 );
+                let _ = stdout.write_all(&reply);
+                let _ = stdout.flush();
                 continue;
             }
             "tools/call" => {
