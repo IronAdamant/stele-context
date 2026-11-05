@@ -76,7 +76,19 @@ impl Engine {
         }
         let mut rows = Vec::new();
         let limit = limit.max(1);
-        for chunk in &self.store.state.chunks {
+        // 1.5.2: `ORDER BY document_path, start_pos` (byte order).
+        let chunks = &self.store.state.chunks;
+        let mut order: Vec<usize> = (0..chunks.len()).collect();
+        let sorted = chunks.windows(2).all(|pair| {
+            (pair[0].path.as_str(), pair[0].start) <= (pair[1].path.as_str(), pair[1].start)
+        });
+        if !sorted {
+            order.sort_by(|left, right| {
+                let (a, b) = (&chunks[*left], &chunks[*right]);
+                (a.path.as_str(), a.start).cmp(&(b.path.as_str(), b.start))
+            });
+        }
+        for chunk in order.into_iter().map(|index| &chunks[index]) {
             if document.is_some_and(|path| chunk.path != path) {
                 continue;
             }
@@ -176,19 +188,67 @@ impl Engine {
         if working_tree {
             self.index_working_tree();
         }
-        let found = self.text_search(pattern, regex, document, 10_000, None, false)?;
-        let Value::Object(pairs) = &found else {
-            return Ok(found);
+        // 1.5.2 `agent_grep`: storage.search_text(limit=500), each match
+        // (the first 10 per chunk) is one entry, then duplicates collapse.
+        let found = self.text_search(pattern, regex, document, 500, None, false)?;
+        let results = match object_field(&found, "results") {
+            Some(Value::Array(rows)) => rows.clone(),
+            _ => Vec::new(),
         };
-        let results = pairs
+        let mut doc_paths: Vec<String> = results
             .iter()
-            .find(|(key, _)| key == "results")
-            .and_then(|(_, value)| match value {
-                Value::Array(rows) => Some(rows.clone()),
-                _ => None,
-            })
-            .unwrap_or_default();
-        let mut matches = Vec::new();
+            .map(|row| crate::store::string_field(row, "document_path"))
+            .collect();
+        doc_paths.sort();
+        doc_paths.dedup();
+        if let Some(session) = session {
+            let count = doc_paths.len() as i64;
+            self.record_search_row(session, pattern, "agent_grep", count, count);
+            if !doc_paths.is_empty() {
+                let _ = self.index(&doc_paths, false);
+            }
+            let _ = self.store.save("search", &Value::string(pattern));
+        }
+        if results.is_empty() {
+            return Ok(Value::object(vec![
+                (
+                    "summary",
+                    Value::string(format!("0 matches for '{}'", truncate_chars(pattern, 40))),
+                ),
+                ("groups", Value::Array(Vec::new())),
+                ("total_matches", Value::Int(0)),
+                ("shown_matches", Value::Int(0)),
+                ("truncated", Value::Int(0)),
+                ("total_tokens", Value::Int(0)),
+                ("files_checked", Value::Int(0)),
+                ("files_with_matches", Value::Array(Vec::new())),
+            ]));
+        }
+        // 1.5.2 `_compute_base_lines` over each matched document's chunks.
+        let mut base_lines: HashMap<&str, usize> = HashMap::new();
+        {
+            let mut by_doc: HashMap<&str, Vec<&crate::store::Chunk>> = HashMap::new();
+            for chunk in &self.store.state.chunks {
+                if doc_paths.binary_search(&chunk.path).is_ok() {
+                    by_doc.entry(chunk.path.as_str()).or_default().push(chunk);
+                }
+            }
+            for (_, mut siblings) in by_doc {
+                siblings.sort_by_key(|chunk| chunk.start);
+                let mut cumulative = 1usize;
+                for chunk in siblings {
+                    base_lines.insert(chunk.id.as_str(), cumulative);
+                    cumulative += chunk.content.matches('\n').count()
+                        + usize::from(!chunk.content.ends_with('\n'));
+                }
+            }
+        }
+        let base_lines: HashMap<String, usize> = base_lines
+            .into_iter()
+            .map(|(id, line)| (id.to_string(), line))
+            .collect();
+        let mut enriched: Vec<Vec<(String, Value)>> = Vec::new();
+        let mut total = 0i64;
         for row in &results {
             let file = crate::store::string_field(row, "document_path");
             let chunk_id = crate::store::string_field(row, "chunk_id");
@@ -200,70 +260,110 @@ impl Engine {
                 .find(|chunk| chunk.id == chunk_id)
                 .map(|chunk| chunk.content.clone())
                 .unwrap_or_default();
+            let lines: Vec<&str> = content.split('\n').collect();
+            let base_line = base_lines.get(&chunk_id).copied().unwrap_or(1);
             let hit_list = match object_field(row, "matches") {
                 Some(Value::Array(items)) => items.clone(),
                 _ => Vec::new(),
             };
             for hit in hit_list {
-                let start = crate::store::int_field(&hit, "start") as usize;
-                let chunk_line = content.chars().take(start).filter(|ch| *ch == '\n').count() + 1;
-                let line = document_base_line(self, &chunk_id) + chunk_line - 1;
-                let excerpt = line_at(&content, chunk_line.saturating_sub(1));
-                let class = if classify {
-                    classify_line(&excerpt)
+                total += 1;
+                let start = crate::store::int_field(&hit, "start").max(0) as usize;
+                let line_idx = content.chars().take(start).filter(|ch| *ch == '\n').count();
+                let first = (line_idx as i64 - context_lines).max(0);
+                let end = (line_idx as i64 + 1 + context_lines).min(lines.len() as i64);
+                let excerpt = if first < end {
+                    lines[first as usize..end as usize].join("\n")
                 } else {
                     String::new()
                 };
-                let scope = if include_scope {
-                    scope_for(self, &chunk_id, chunk_line as u32)
-                } else {
-                    String::new()
-                };
-                let _ = context_lines;
-                matches.push((file.clone(), line, excerpt, class, scope));
+                let match_line = lines.get(line_idx).copied().unwrap_or("");
+                let mut entry = vec![
+                    ("file".to_string(), Value::string(&file)),
+                    (
+                        "line".to_string(),
+                        Value::Int((base_line + line_idx) as i64),
+                    ),
+                    ("excerpt".to_string(), Value::string(excerpt)),
+                ];
+                if include_scope {
+                    let scope = scope_for(self, &chunk_id, (line_idx + 1) as u32);
+                    entry.push((
+                        "scope".to_string(),
+                        if scope.is_empty() {
+                            Value::Null
+                        } else {
+                            Value::string(scope)
+                        },
+                    ));
+                }
+                if classify {
+                    entry.push((
+                        "classification".to_string(),
+                        Value::string(classify_line(match_line)),
+                    ));
+                }
+                enriched.push(entry);
             }
         }
+        let mut dedup_count = 0i64;
         if deduplicate {
-            let mut seen = std::collections::HashSet::new();
-            matches.retain(|row| seen.insert(format!("{}:{}", row.0, row.2.trim())));
-        }
-        let total = matches.len() as i64;
-        let key_of = |row: &(String, usize, String, String, String)| -> String {
-            match group_by {
-                "scope" => {
-                    if row.4.is_empty() {
-                        "(top-level)".to_string()
-                    } else {
-                        row.4.clone()
+            // Python dict order: one bucket per normalised excerpt, in first
+            // appearance order. More than two copies collapse into the first.
+            let mut buckets: Vec<Vec<Vec<(String, Value)>>> = Vec::new();
+            let mut slot: HashMap<String, usize> = HashMap::new();
+            for entry in enriched {
+                let key = py_split_join(&entry_text(&entry, "excerpt"));
+                match slot.get(&key) {
+                    Some(index) => buckets[*index].push(entry),
+                    None => {
+                        slot.insert(key, buckets.len());
+                        buckets.push(vec![entry]);
                     }
                 }
-                "classification" => {
-                    if row.3.is_empty() {
-                        "code".to_string()
-                    } else {
-                        row.3.clone()
-                    }
-                }
-                _ => row.0.clone(),
             }
-        };
+            let mut deduped = Vec::new();
+            for bucket in buckets {
+                if bucket.len() > 2 {
+                    let mut first = bucket[0].clone();
+                    let first_file = entry_text(&first, "file");
+                    first.push(("also_in".to_string(), Value::Int(bucket.len() as i64 - 1)));
+                    let mut others: Vec<String> = bucket[1..]
+                        .iter()
+                        .map(|entry| entry_text(entry, "file"))
+                        .filter(|name| *name != first_file)
+                        .collect();
+                    others.sort();
+                    others.dedup();
+                    if !others.is_empty() {
+                        others.truncate(5);
+                        first.push((
+                            "also_in_files".to_string(),
+                            Value::Array(others.into_iter().map(Value::String).collect()),
+                        ));
+                    }
+                    dedup_count += bucket.len() as i64 - 1;
+                    deduped.push(first);
+                } else {
+                    deduped.extend(bucket);
+                }
+            }
+            enriched = deduped;
+        }
         let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
-        for row in &matches {
-            let key = key_of(row);
-            let item = Value::object(vec![
-                ("file", Value::string(&row.0)),
-                ("line", Value::Int(row.1 as i64)),
-                ("excerpt", Value::string(&row.2)),
-                ("classification", Value::string(&row.3)),
-                (
-                    "scope",
-                    if row.4.is_empty() {
-                        Value::Null
-                    } else {
-                        Value::string(&row.4)
-                    },
-                ),
-            ]);
+        for entry in enriched {
+            let key = match group_by {
+                "scope" => match entry.iter().find(|(key, _)| key == "scope") {
+                    Some((_, Value::String(text))) if !text.is_empty() => text.clone(),
+                    _ => "(top-level)".to_string(),
+                },
+                "classification" => match entry.iter().find(|(key, _)| key == "classification") {
+                    Some((_, Value::String(text))) if !text.is_empty() => text.clone(),
+                    _ => "code".to_string(),
+                },
+                _ => entry_text(&entry, "file"),
+            };
+            let item = Value::Object(entry);
             if let Some(group) = groups.iter_mut().find(|(name, _)| name == &key) {
                 group.1.push(item);
             } else {
@@ -287,45 +387,30 @@ impl Engine {
                 ("matches", Value::Array(rows)),
             ]));
         }
-        let files = {
-            let mut names = Vec::new();
-            for row in &matches {
-                if !names.iter().any(|have: &String| have == &row.0) {
-                    names.push(row.0.clone());
-                }
-            }
-            names
-        };
-        if let Some(session) = session {
-            self.record_search_row(
-                session,
-                pattern,
-                "agent_grep",
-                self.store.state.documents.len() as i64,
-                files.len() as i64,
-            );
-            if !files.is_empty() {
-                let _ = self.index(&files, false);
-            }
-            let _ = self.store.save("search", &Value::string(pattern));
-        }
-        let summary = format!(
-            "{total} match{} in {} file{}",
+        let truncated = total - shown - dedup_count;
+        let file_count = doc_paths.len();
+        let mut summary = format!(
+            "{total} match{} in {file_count} file{}",
             if total == 1 { "" } else { "es" },
-            files.len(),
-            if files.len() == 1 { "" } else { "s" }
+            if file_count == 1 { "" } else { "s" }
         );
+        if dedup_count > 0 {
+            summary.push_str(&format!(" ({dedup_count} duplicates collapsed)"));
+        }
+        if truncated > 0 {
+            summary.push_str(&format!(" (showing {shown}, ~{tokens} tokens)"));
+        }
         Ok(Value::object(vec![
             ("summary", Value::string(summary)),
             ("groups", Value::Array(kept)),
             ("total_matches", Value::Int(total)),
             ("shown_matches", Value::Int(shown)),
-            ("truncated", Value::Int((total - shown).max(0))),
+            ("truncated", Value::Int(truncated.max(0))),
             ("total_tokens", Value::Int(tokens)),
-            ("files_checked", Value::Int(files.len() as i64)),
+            ("files_checked", Value::Int(file_count as i64)),
             (
                 "files_with_matches",
-                Value::Array(files.into_iter().map(Value::String).collect()),
+                Value::Array(doc_paths.into_iter().map(Value::String).collect()),
             ),
         ]))
     }
@@ -1991,8 +2076,32 @@ fn object_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
         .map(|(_, item)| item)
 }
 
-fn line_at(content: &str, index: usize) -> String {
-    content.lines().nth(index).unwrap_or("").to_string()
+fn entry_text(entry: &[(String, Value)], key: &str) -> String {
+    match entry.iter().find(|(name, _)| name == key) {
+        Some((_, Value::String(text))) => text.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Python `" ".join(text.split())`. `str.split()` also splits on the
+/// information separators U+001C..U+001F, which Rust's whitespace does not
+/// include.
+fn py_split_join(text: &str) -> String {
+    text.split(|ch: char| ch.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&ch))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 1.5.2 `_truncate`: at most `max` characters, ending in `...` when cut.
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        let mut cut: String = text.chars().take(max - 3).collect();
+        cut.push_str("...");
+        cut
+    }
 }
 
 fn classify_line(line: &str) -> String {
@@ -2039,35 +2148,6 @@ fn classify_line(line: &str) -> String {
     "code".to_string()
 }
 
-fn document_base_line(engine: &Engine, chunk_id: &str) -> usize {
-    let Some(chunk) = engine
-        .store
-        .state
-        .chunks
-        .iter()
-        .find(|chunk| chunk.id == chunk_id)
-    else {
-        return 1;
-    };
-    let mut siblings: Vec<_> = engine
-        .store
-        .state
-        .chunks
-        .iter()
-        .filter(|other| other.path == chunk.path)
-        .collect();
-    siblings.sort_by_key(|other| other.start);
-    let mut cumulative = 1usize;
-    for other in siblings {
-        if other.id == chunk_id {
-            return cumulative;
-        }
-        let newlines = other.content.matches('\n').count();
-        cumulative += newlines + usize::from(!other.content.ends_with('\n'));
-    }
-    1
-}
-
 fn scope_for(engine: &Engine, chunk_id: &str, line: u32) -> String {
     engine
         .store
@@ -2085,25 +2165,30 @@ fn scope_for(engine: &Engine, chunk_id: &str, line: u32) -> String {
         .unwrap_or_default()
 }
 
+/// 1.5.2 `content.find(pattern, start)` with `start = idx + 1`: every
+/// occurrence, overlapping ones included, as character offsets. An empty
+/// pattern matches at every position, end included.
 fn literal_hits(pattern: &str, text: &str) -> Vec<(usize, usize)> {
-    if pattern.is_empty() {
-        return Vec::new();
-    }
     let width = pattern.chars().count();
     let mut hits = Vec::new();
+    if pattern.is_empty() {
+        let count = text.chars().count();
+        return (0..=count).map(|at| (at, at)).collect();
+    }
+    let mut chars_before = 0usize;
+    let mut counted_to = 0usize;
     let mut from = 0usize;
     while let Some(pos) = text[from..].find(pattern) {
         let byte = from + pos;
-        let start = text[..byte].chars().count();
-        hits.push((start, start + width));
-        if hits.len() >= 100 {
+        chars_before += text[counted_to..byte].chars().count();
+        counted_to = byte;
+        hits.push((chars_before, chars_before + width));
+        // The next search starts one character after this match.
+        let step = text[byte..].chars().next().map(char::len_utf8).unwrap_or(1);
+        from = byte + step;
+        if from > text.len() {
             break;
         }
-        let next = byte + pattern.len();
-        if next <= from {
-            break;
-        }
-        from = next;
     }
     hits
 }
