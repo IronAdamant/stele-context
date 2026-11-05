@@ -1664,42 +1664,9 @@ fn wal_bytes(storage: &Path) -> i64 {
     file_len(&storage.join("stele_context.db-wal")) as i64
 }
 
-/// Start reading `python3`'s version before `doctor` runs. The doctor call
-/// only waits for a lookup that is already in flight, and a later call does
-/// not start a process.
-pub fn prefetch_python() {
-    let _ = std::thread::Builder::new()
-        .name("python-version".to_string())
-        .spawn(|| {
-            let _ = python_version();
-        });
-}
-
-fn python_version() -> &'static str {
-    static READY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    READY.get_or_init(|| {
-        for bin in ["python3", "python"] {
-            let Ok(output) = std::process::Command::new(bin)
-                .arg("-c")
-                .arg("import sys; print(sys.version.split()[0], end='')")
-                .output()
-            else {
-                continue;
-            };
-            if !output.status.success() {
-                continue;
-            }
-            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !text.is_empty() {
-                return text;
-            }
-        }
-        String::new()
-    })
-}
-
+/// `doctor.python`. See `crate::pyver`: no interpreter is started.
 pub fn host_python() -> crate::json::Value {
-    let text = python_version();
+    let text = crate::pyver::host_version();
     if text.is_empty() {
         crate::json::Value::Null
     } else {

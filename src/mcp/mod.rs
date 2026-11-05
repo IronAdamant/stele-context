@@ -113,13 +113,7 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
             continue;
         }
         let result = match method.as_str() {
-            "initialize" => {
-                let result = initialize(&params);
-                // The version lookup overlaps later tool calls. Initialize
-                // itself does not wait for it.
-                crate::engine::prefetch_python();
-                result
-            }
+            "initialize" => initialize(&params),
             "tools/list" => {
                 let _ = writeln!(
                     stdout,

@@ -8,7 +8,6 @@ use crate::VERSION;
 use std::fs;
 use std::path::Path;
 pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
-    crate::engine::prefetch_python();
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(err) => {

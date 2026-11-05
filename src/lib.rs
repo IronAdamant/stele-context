@@ -17,6 +17,7 @@ pub mod media;
 #[cfg(test)]
 pub(crate) mod oracle;
 pub mod pyre;
+pub mod pyver;
 pub mod root;
 pub mod search;
 pub mod store;
