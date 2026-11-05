@@ -36,30 +36,34 @@ pub fn signature(text: &str) -> [f64; 128] {
     let length = chars.len().max(1);
     let mut lower_chars = Vec::with_capacity(chars.len());
     for ch in &chars {
-        lower_chars.extend(ch.to_lowercase());
+        if ch.is_ascii() {
+            lower_chars.push(ch.to_ascii_lowercase());
+        } else {
+            lower_chars.extend(ch.to_lowercase());
+        }
     }
 
-    let trigrams = top_trigrams(&lower_chars, 64);
-    for (index, count) in trigrams.into_iter().enumerate() {
+    for (index, count) in top_trigrams(&lower_chars, 64).into_iter().enumerate() {
         sig[index] = count as f64 / length as f64;
     }
 
-    let words = ascii_words(&lower_chars);
-    let filtered: Vec<&str> = words
-        .iter()
-        .filter(|word| word.chars().count() > 2)
-        .map(String::as_str)
+    // Words of three or more ASCII characters, as ranges of `lower_chars`.
+    let filtered: Vec<(usize, usize)> = ascii_words(&lower_chars)
+        .into_iter()
+        .filter(|(start, end)| end - start > 2)
         .collect();
     let total_words = filtered.len().max(1);
-    for (index, count) in top_counts(&owned_counts(filtered.iter().copied()), 16)
+    for (index, count) in word_counts(&lower_chars, &filtered, 16)
         .into_iter()
         .enumerate()
     {
         sig[64 + index] = count as f64 / total_words as f64;
     }
-    let bigrams = word_bigrams(&filtered);
-    let total_bigrams = bigrams.iter().map(|(_, count)| *count).sum::<u32>().max(1);
-    for (index, count) in top_counts(&bigrams, 16).into_iter().enumerate() {
+    let total_bigrams = filtered.len().saturating_sub(1).max(1);
+    for (index, count) in bigram_counts(&lower_chars, &filtered, 16)
+        .into_iter()
+        .enumerate()
+    {
         sig[80 + index] = count as f64 / total_bigrams as f64;
     }
 
@@ -131,20 +135,20 @@ pub fn signature(text: &str) -> [f64; 128] {
     sig[110] = non_empty / num_lines;
     let comment_chars = chars.iter().filter(|ch| **ch == '#').count() as f64;
     sig[111] = (comment_chars / length as f64 * 10.0).min(1.0);
-    let unicode_words = unicode_words(&lower_chars);
+    let mut unicode_words = unicode_words(&lower_chars);
     if !unicode_words.is_empty() {
-        let unique = {
-            let mut set = unicode_words.clone();
-            set.sort();
-            set.dedup();
-            set.len()
-        };
-        sig[112] = unique as f64 / unicode_words.len() as f64;
         let mean_len = unicode_words
             .iter()
-            .map(|word| word.chars().count())
+            .map(|(start, end)| end - start)
             .sum::<usize>() as f64
             / unicode_words.len() as f64;
+        let total = unicode_words.len();
+        unicode_words.sort_unstable_by(|left, right| {
+            lower_chars[left.0..left.1].cmp(&lower_chars[right.0..right.1])
+        });
+        unicode_words
+            .dedup_by(|left, right| lower_chars[left.0..left.1] == lower_chars[right.0..right.1]);
+        sig[112] = unicode_words.len() as f64 / total as f64;
         sig[113] = (mean_len / 10.0).min(1.0);
     }
     let punct = chars
@@ -171,32 +175,25 @@ fn split_lines(text: &str) -> Vec<&str> {
     text.split('\n').collect()
 }
 
+/// The `n` largest trigram counts, largest first. Only the counts are
+/// kept, so equal counts need no tie order: sort the packed trigrams and
+/// count runs.
 fn top_trigrams(chars: &[char], n: usize) -> Vec<u32> {
-    // First-seen order is the tie break. A map keeps that order without
-    // scanning every earlier trigram on each window.
-    let mut at = std::collections::HashMap::<[char; 3], usize>::new();
-    let mut counts: Vec<u32> = Vec::new();
-    if chars.len() >= 3 {
-        for window in chars.windows(3) {
-            let key = [window[0], window[1], window[2]];
-            if let Some(&index) = at.get(&key) {
-                counts[index] += 1;
-            } else {
-                at.insert(key, counts.len());
-                counts.push(1);
-            }
-        }
+    if chars.len() < 3 {
+        return Vec::new();
     }
-    let mut order: Vec<usize> = (0..counts.len()).collect();
-    order.sort_by(|&left, &right| counts[right].cmp(&counts[left]).then(left.cmp(&right)));
-    order
-        .into_iter()
-        .take(n)
-        .map(|index| counts[index])
-        .collect()
+    // A char is at most 21 bits, so three fit in one u64 exactly.
+    let mut keys: Vec<u64> = chars
+        .windows(3)
+        .map(|w| ((w[0] as u64) << 42) | ((w[1] as u64) << 21) | w[2] as u64)
+        .collect();
+    keys.sort_unstable();
+    let mut counts = runs(&keys, |left, right| left == right);
+    largest(&mut counts, n)
 }
 
-fn ascii_words(chars: &[char]) -> Vec<String> {
+/// `[a-z_][a-z0-9_]*` over the lowered text, as char ranges.
+fn ascii_words(chars: &[char]) -> Vec<(usize, usize)> {
     let mut words = Vec::new();
     let mut index = 0;
     while index < chars.len() {
@@ -209,7 +206,7 @@ fn ascii_words(chars: &[char]) -> Vec<String> {
             }
             let next_word = index < chars.len() && is_word(chars[index]);
             if !next_word {
-                words.push(chars[start..index].iter().collect());
+                words.push((start, index));
             }
         } else {
             index += 1;
@@ -218,7 +215,8 @@ fn ascii_words(chars: &[char]) -> Vec<String> {
     words
 }
 
-fn unicode_words(chars: &[char]) -> Vec<String> {
+/// `\w+` runs, as char ranges.
+fn unicode_words(chars: &[char]) -> Vec<(usize, usize)> {
     let mut words = Vec::new();
     let mut index = 0;
     while index < chars.len() {
@@ -229,7 +227,7 @@ fn unicode_words(chars: &[char]) -> Vec<String> {
             while index < chars.len() && is_word(chars[index]) {
                 index += 1;
             }
-            words.push(chars[start..index].iter().collect());
+            words.push((start, index));
         } else {
             index += 1;
         }
@@ -237,47 +235,51 @@ fn unicode_words(chars: &[char]) -> Vec<String> {
     words
 }
 
-fn word_bigrams(words: &[&str]) -> Vec<(String, u32)> {
-    let mut counts = Counter::default();
-    for pair in words.windows(2) {
-        counts.bump(format!("{}_{}", pair[0], pair[1]));
-    }
-    counts.order
+/// The `n` largest word counts.
+fn word_counts(chars: &[char], words: &[(usize, usize)], n: usize) -> Vec<u32> {
+    let mut sorted: Vec<&[char]> = words
+        .iter()
+        .map(|(start, end)| &chars[*start..*end])
+        .collect();
+    sorted.sort_unstable();
+    let mut counts = runs(&sorted, |left, right| left == right);
+    largest(&mut counts, n)
 }
 
-fn owned_counts<'a>(words: impl Iterator<Item = &'a str>) -> Vec<(String, u32)> {
-    let mut counts = Counter::default();
-    for word in words {
-        counts.bump(word.to_string());
-    }
-    counts.order
+/// The `n` largest counts of `f"{a}_{b}"` over adjacent words. The key is
+/// the joined text, so `ab_c`+`d` and `ab`+`c_d` count as one bigram.
+fn bigram_counts(chars: &[char], words: &[(usize, usize)], n: usize) -> Vec<u32> {
+    let joined = |pair: &[(usize, usize)]| {
+        chars[pair[0].0..pair[0].1]
+            .iter()
+            .chain(std::iter::once(&'_'))
+            .chain(chars[pair[1].0..pair[1].1].iter())
+    };
+    let mut pairs: Vec<&[(usize, usize)]> = words.windows(2).collect();
+    pairs.sort_unstable_by(|left, right| joined(left).cmp(joined(right)));
+    let mut counts = runs(&pairs, |left, right| joined(left).eq(joined(right)));
+    largest(&mut counts, n)
 }
 
-#[derive(Default)]
-struct Counter {
-    order: Vec<(String, u32)>,
-    at: std::collections::HashMap<String, usize>,
-}
-
-impl Counter {
-    fn bump(&mut self, key: String) {
-        if let Some(&index) = self.at.get(&key) {
-            self.order[index].1 += 1;
-        } else {
-            self.at.insert(key.clone(), self.order.len());
-            self.order.push((key, 1));
+/// Lengths of the runs of equal neighbours in a sorted slice.
+fn runs<T>(sorted: &[T], same: impl Fn(&T, &T) -> bool) -> Vec<u32> {
+    let mut counts = Vec::new();
+    let mut index = 0;
+    while index < sorted.len() {
+        let mut end = index + 1;
+        while end < sorted.len() && same(&sorted[index], &sorted[end]) {
+            end += 1;
         }
+        counts.push((end - index) as u32);
+        index = end;
     }
+    counts
 }
 
-fn top_counts(counts: &[(String, u32)], n: usize) -> Vec<u32> {
-    let mut order: Vec<usize> = (0..counts.len()).collect();
-    order.sort_by(|&left, &right| counts[right].1.cmp(&counts[left].1).then(left.cmp(&right)));
-    order
-        .into_iter()
-        .take(n)
-        .map(|index| counts[index].1)
-        .collect()
+fn largest(counts: &mut Vec<u32>, n: usize) -> Vec<u32> {
+    counts.sort_unstable_by(|left, right| right.cmp(left));
+    counts.truncate(n);
+    std::mem::take(counts)
 }
 
 fn is_word(ch: char) -> bool {
