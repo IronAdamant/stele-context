@@ -211,7 +211,12 @@ impl Engine {
         let mut seen: HashSet<(&str, &str, &str, &str)> = HashSet::new();
         let mut added = Vec::new();
         for sym in &self.store.state.symbols {
-            if sym.role != "definition" || !wanted.contains(&sym.name.to_ascii_lowercase()) {
+            // SQLite LOWER(name) folds ASCII only.
+            if sym.role != "definition"
+                || !wanted
+                    .iter()
+                    .any(|want| sym.name.eq_ignore_ascii_case(want))
+            {
                 continue;
             }
             if !seen.insert((
@@ -2185,35 +2190,105 @@ fn set_score(row: &mut Value, score: f64) {
 /// 1.5.2 returns them from a set, so its order is per process; this keeps
 /// first-appearance order.
 pub(crate) fn py_query_identifiers(query: &str) -> Vec<String> {
-    use std::sync::OnceLock;
-    static PATTERNS: OnceLock<Option<(crate::pyre::Regex, crate::pyre::Regex)>> = OnceLock::new();
-    let Some((parts, full)) = PATTERNS
-        .get_or_init(|| {
-            let parts = crate::pyre::Regex::compile(
-                r"[A-Z]?[a-z]{2,}|[A-Z]{2,}(?=[A-Z][a-z]|\b)|[a-z_]\w{2,}",
-            )
-            .ok()?;
-            let full = crate::pyre::Regex::compile(r"[a-zA-Z_]\w{2,}").ok()?;
-            Some((parts, full))
-        })
-        .as_ref()
-    else {
-        return Vec::new();
-    };
     let chars: Vec<char> = query.chars().collect();
     let mut out: Vec<String> = Vec::new();
-    for regex in [parts, full] {
-        for hit in regex.find_iter(query) {
-            let token: String = chars[hit.start..hit.end].iter().collect();
-            if STOP_WORDS.contains(&token.to_lowercase().as_str()) {
-                continue;
-            }
-            if !out.contains(&token) {
-                out.push(token);
-            }
+    let keep = |start: usize, end: usize, out: &mut Vec<String>| {
+        let token: String = chars[start..end].iter().collect();
+        if !STOP_WORDS.contains(&token.to_lowercase().as_str()) && !out.contains(&token) {
+            out.push(token);
+        }
+    };
+    // findall(r"[A-Z]?[a-z]{2,}|[A-Z]{2,}(?=[A-Z][a-z]|)|[a-z_]\w{2,}")
+    let mut at = 0usize;
+    while at < chars.len() {
+        if let Some(end) = camel_piece(&chars, at)
+            .or_else(|| upper_run(&chars, at))
+            .or_else(|| snake_piece(&chars, at))
+        {
+            keep(at, end, &mut out);
+            at = end;
+        } else {
+            at += 1;
         }
     }
+    // findall(r"[a-zA-Z_]\w{2,}")
+    let mut at = 0usize;
+    while at < chars.len() {
+        let c = chars[at];
+        if c.is_ascii_alphabetic() || c == '_' {
+            let end = word_end(&chars, at + 1);
+            if end - at >= 3 {
+                keep(at, end, &mut out);
+                at = end;
+                continue;
+            }
+        }
+        at += 1;
+    }
     out
+}
+
+fn py_word(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+fn word_end(chars: &[char], from: usize) -> usize {
+    let mut end = from;
+    while end < chars.len() && py_word(chars[end]) {
+        end += 1;
+    }
+    end
+}
+
+/// `[A-Z]?[a-z]{2,}`, greedy.
+fn camel_piece(chars: &[char], at: usize) -> Option<usize> {
+    let lower_run = |from: usize| {
+        let mut end = from;
+        while end < chars.len() && chars[end].is_ascii_lowercase() {
+            end += 1;
+        }
+        end
+    };
+    if chars[at].is_ascii_uppercase() {
+        let end = lower_run(at + 1);
+        if end - (at + 1) >= 2 {
+            return Some(end);
+        }
+    }
+    let end = lower_run(at);
+    (end - at >= 2).then_some(end)
+}
+
+/// `[A-Z]{2,}(?=[A-Z][a-z]|)`: the longest uppercase run that is
+/// followed by a capitalised word or a word boundary.
+fn upper_run(chars: &[char], at: usize) -> Option<usize> {
+    let mut max = at;
+    while max < chars.len() && chars[max].is_ascii_uppercase() {
+        max += 1;
+    }
+    let mut end = max;
+    while end >= at + 2 {
+        let camel = end + 1 < chars.len()
+            && chars[end].is_ascii_uppercase()
+            && chars[end + 1].is_ascii_lowercase();
+        let before = py_word(chars[end - 1]);
+        let after = end < chars.len() && py_word(chars[end]);
+        if camel || before != after {
+            return Some(end);
+        }
+        end -= 1;
+    }
+    None
+}
+
+/// `[a-z_]\w{2,}`, greedy.
+fn snake_piece(chars: &[char], at: usize) -> Option<usize> {
+    let c = chars[at];
+    if !(c.is_ascii_lowercase() || c == '_') {
+        return None;
+    }
+    let end = word_end(chars, at + 1);
+    (end - at >= 3).then_some(end)
 }
 
 fn score_of(value: &Value) -> f64 {
@@ -2229,138 +2304,40 @@ fn round6(number: f64) -> f64 {
 }
 
 fn proximity_terms(query: &str) -> Vec<String> {
-    // 1.5.2 `extract_proximity_terms`: identifier pieces, the whole
-    // identifier, and letter-words of length 4 or more. Order does not
-    // change the score.
-    let chars: Vec<char> = query.chars().collect();
-    let mut terms = Vec::new();
-    let mut add = |word: &str| {
-        let lower = word.to_ascii_lowercase();
-        if lower.chars().count() < 3 || STOP_WORDS.contains(&lower.as_str()) {
-            return;
-        }
-        if !terms.iter().any(|have: &String| have == &lower) {
+    // 1.5.2 `extract_proximity_terms`: the lowercased query identifiers
+    // plus letter-words of four or more letters, without stop words.
+    // Order does not change the score.
+    let mut terms: Vec<String> = Vec::new();
+    for ident in py_query_identifiers(query) {
+        let lower = ident.to_lowercase();
+        if !terms.contains(&lower) {
             terms.push(lower);
         }
-    };
+    }
+    let chars: Vec<char> = query.chars().collect();
     let mut index = 0usize;
     while index < chars.len() {
-        if let Some(end) = ident_piece(&chars, index) {
-            let word: String = chars[index..end].iter().collect();
-            add(&word);
-            index = end;
-        } else {
-            index += 1;
-        }
-    }
-    index = 0;
-    while index < chars.len() {
-        if is_ident_start(chars[index]) {
-            let start = index;
-            index += 1;
-            while index < chars.len() && is_ident_cont(chars[index]) {
-                index += 1;
-            }
-            if index - start >= 3 {
-                let word: String = chars[start..index].iter().collect();
-                add(&word);
-            }
-        } else {
-            index += 1;
-        }
-    }
-    index = 0;
-    while index < chars.len() {
-        let bound = index == 0 || !chars[index - 1].is_ascii_alphabetic();
+        let bound = index == 0 || !py_word(chars[index - 1]);
         if bound && chars[index].is_ascii_alphabetic() {
             let start = index;
-            index += 1;
             while index < chars.len() && chars[index].is_ascii_alphabetic() {
                 index += 1;
             }
-            if index - start >= 4 {
-                let word: String = chars[start..index].iter().collect();
-                add(&word);
+            let at_end = index == chars.len() || !py_word(chars[index]);
+            if index - start >= 4 && at_end {
+                let lower: String = chars[start..index]
+                    .iter()
+                    .collect::<String>()
+                    .to_lowercase();
+                if !STOP_WORDS.contains(&lower.as_str()) && !terms.contains(&lower) {
+                    terms.push(lower);
+                }
             }
         } else {
             index += 1;
         }
     }
     terms
-}
-
-fn ident_piece(chars: &[char], start: usize) -> Option<usize> {
-    if let Some(end) = camel_word(chars, start) {
-        return Some(end);
-    }
-    if let Some(end) = acronym(chars, start) {
-        return Some(end);
-    }
-    snake_word(chars, start)
-}
-
-fn camel_word(chars: &[char], start: usize) -> Option<usize> {
-    let mut index = start;
-    if chars.get(index).is_some_and(|ch| ch.is_ascii_uppercase()) {
-        index += 1;
-    }
-    let lower_from = index;
-    while index < chars.len() && chars[index].is_ascii_lowercase() {
-        index += 1;
-    }
-    if index - lower_from >= 2 {
-        Some(index)
-    } else {
-        None
-    }
-}
-
-fn acronym(chars: &[char], start: usize) -> Option<usize> {
-    if !chars.get(start).is_some_and(|ch| ch.is_ascii_uppercase()) {
-        return None;
-    }
-    let mut index = start;
-    while index < chars.len() && chars[index].is_ascii_uppercase() {
-        index += 1;
-    }
-    if index - start < 2 {
-        return None;
-    }
-    let next = chars.get(index);
-    let boundary = next.is_none_or(|ch| !is_ident_cont(*ch));
-    let capital_word = next.is_some_and(|ch| ch.is_ascii_uppercase())
-        && chars
-            .get(index + 1)
-            .is_some_and(|ch| ch.is_ascii_lowercase());
-    if boundary || capital_word {
-        Some(index)
-    } else {
-        None
-    }
-}
-
-fn snake_word(chars: &[char], start: usize) -> Option<usize> {
-    let first = *chars.get(start)?;
-    if !(first.is_ascii_lowercase() || first == '_') {
-        return None;
-    }
-    let mut index = start + 1;
-    while index < chars.len() && is_ident_cont(chars[index]) {
-        index += 1;
-    }
-    if index - start >= 3 {
-        Some(index)
-    } else {
-        None
-    }
-}
-
-fn is_ident_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || ch == '_'
-}
-
-fn is_ident_cont(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_'
 }
 
 fn proximity_score(content: &str, terms: &[String]) -> f64 {
@@ -2423,6 +2400,63 @@ fn py_stat_time(ns: i64) -> f64 {
     let sec = ns.div_euclid(1_000_000_000);
     let nsec = ns.rem_euclid(1_000_000_000);
     sec as f64 + nsec as f64 * 1e-9
+}
+
+#[cfg(test)]
+mod identifier_tests {
+    use super::py_query_identifiers;
+
+    /// Same tokens as 1.5.2 `extract_query_identifiers` (as a set).
+    #[test]
+    fn matches_python_identifier_extraction() {
+        let script = r#"
+import json, sys
+from stele_context.search_engine import extract_query_identifiers
+for q in json.loads(sys.stdin.read()):
+    print(json.dumps(sorted(extract_query_identifiers(q))))
+"#;
+        let queries = [
+            "TallowLedger cinder_sum",
+            "wicket yarrow route",
+            "parseHTTPResponse and JSONHighlighter",
+            "how does the HTMLParser handle _private_x2 names",
+            "ABC def GHIjkl MNO_pq r2d2 éclair_x",
+            "the and for",
+            "XMLHttpRequest URLs",
+        ];
+        let body = crate::json::to_string(&crate::json::Value::Array(
+            queries
+                .iter()
+                .map(|q| crate::json::Value::string(*q))
+                .collect(),
+        ));
+        let mut child = std::process::Command::new(crate::oracle::reference())
+            .args(["-c", script])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("python");
+        {
+            use std::io::Write;
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(body.as_bytes())
+                .unwrap();
+        }
+        let done = child.wait_with_output().unwrap();
+        let text = String::from_utf8_lossy(&done.stdout);
+        for (query, line) in queries.iter().zip(text.lines()) {
+            let mut ours = py_query_identifiers(query);
+            ours.sort();
+            let ours = crate::json::to_string(&crate::json::Value::Array(
+                ours.into_iter().map(crate::json::Value::String).collect(),
+            ));
+            let theirs = crate::json::to_string(&crate::json::parse(line).unwrap());
+            assert_eq!(ours, theirs, "{query}");
+        }
+    }
 }
 
 fn entry_text(entry: &[(String, Value)], key: &str) -> String {
