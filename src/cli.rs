@@ -154,6 +154,21 @@ impl Parsed {
                 ),
             );
         }
+        if self.command.as_deref() == Some("annotate")
+            && (self.ann_type.is_none() || self.note_body.is_none())
+        {
+            // 1.5.2's argparse requires both flags (exit 2). The content is
+            // not taken from a second positional.
+            return Response::failure(
+                "annotate",
+                EXIT_USAGE,
+                ErrorBody::new(
+                    "usage",
+                    "annotate needs --type (document or chunk) and --content",
+                    "stele-context annotate TARGET --type document --content \"note\" [--tags a b]",
+                ),
+            );
+        }
         let result = self.execute(&mut engine);
         match result {
             Ok(value) => {
@@ -381,11 +396,7 @@ impl Parsed {
             "init" => init_marker(&engine.cwd),
             "annotate" => {
                 let target_type = self.ann_type.as_deref().unwrap_or("document");
-                let body = self
-                    .note_body
-                    .clone()
-                    .or_else(|| self.positionals.get(1).cloned())
-                    .unwrap_or_default();
+                let body = self.note_body.clone().unwrap_or_default();
                 engine.annotations_tagged("create", positional, &body, &self.tags, target_type)
             }
             "delete-annotation" => engine.annotations("delete", positional, ""),

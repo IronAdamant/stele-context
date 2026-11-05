@@ -1273,7 +1273,7 @@ impl Engine {
                     .map(|row| crate::store::int_field(row, "token_count"))
                     .sum();
                 let file_size = meta.as_ref().map(|item| item.len()).unwrap_or(size);
-                let file_mtime = mtime as f64 / 1_000_000_000.0;
+                let file_mtime = py_stat_time(mtime);
                 let mut entry = vec![
                     ("path".to_string(), Value::string(&path)),
                     ("chunks".to_string(), Value::Array(chunk_rows)),
@@ -1325,10 +1325,7 @@ impl Engine {
                     entry.push((
                         "trust".to_string(),
                         Value::object(vec![
-                            (
-                                "file_mtime",
-                                Value::Float(meta_mtime(&meta) as f64 / 1_000_000_000.0),
-                            ),
+                            ("file_mtime", Value::Float(py_stat_time(meta_mtime(&meta)))),
                             ("file_size", Value::Int(meta.len() as i64)),
                             ("indexed_cache_outdated", Value::Bool(true)),
                         ]),
@@ -2418,6 +2415,14 @@ fn object_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
         .iter()
         .find(|(name, _)| name == key)
         .map(|(_, item)| item)
+}
+
+/// CPython's `st_mtime`: `sec + nsec * 1e-9` in double precision, which
+/// differs in the last digits from `ns / 1e9`.
+fn py_stat_time(ns: i64) -> f64 {
+    let sec = ns.div_euclid(1_000_000_000);
+    let nsec = ns.rem_euclid(1_000_000_000);
+    sec as f64 + nsec as f64 * 1e-9
 }
 
 fn entry_text(entry: &[(String, Value)], key: &str) -> String {

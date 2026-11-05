@@ -644,7 +644,7 @@ def main() -> int:
             diffs += 1
         rc_r, out_r = cli(
             rs_store,
-            ["annotate", "--content", "two", "--tags", "q", "x", "--json", "src/calc.py"],
+            ["annotate", "--type", "document", "--content", "two", "--tags", "q", "x", "--json", "src/calc.py"],
         )
         rc_p, out_p = py_cli(
             py_store,
