@@ -18,3 +18,10 @@ path = "src/main.rs"
 [[bin]]
 name = "stele-context-mcp"
 path = "src/bin/stele-context-mcp.rs"
+
+# One codegen unit with link-time optimization: a smaller binary whose hot
+# paths sit on fewer pages, which is what process start and the
+# benchmark gate's CLI rows measure.
+[profile.release]
+lto = "fat"
+codegen-units = 1
