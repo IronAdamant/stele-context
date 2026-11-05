@@ -393,6 +393,13 @@ fn parity(binary: &str, python: &str) -> Option<usize> {
             );
             diffs += 1;
         }
+        if !skip && rust.last_error != python_server.last_error {
+            println!(
+                "parity diff {name} isError: rust {} python {}",
+                rust.last_error, python_server.last_error
+            );
+            diffs += 1;
+        }
         if !seen_chunk && name == "get_context" {
             let cid = first_chunk(&left);
             if !cid.is_empty() {
@@ -524,11 +531,22 @@ fn parity(binary: &str, python: &str) -> Option<usize> {
         let mut right_n = walk(&right, &root_s, &py_s, "");
         blank_graph(&mut left_n);
         blank_graph(&mut right_n);
-        let (left_n, right_n) = timestamps_ok(&left_n, &right_n, &mut Vec::new());
-        if !py_eq(&left_n, &right_n) {
+        let (mut left_n, mut right_n) = timestamps_ok(&left_n, &right_n, &mut Vec::new());
+        let (note, skip) = documented(name, &mut left_n, &mut right_n);
+        if !note.is_empty() {
+            println!("documented probe {name}: {note}");
+        }
+        if !skip && !py_eq(&left_n, &right_n) {
             println!(
                 "parity diff probe {name}: {}",
                 diff_text(first_diff(&left_n, &right_n, "$"))
+            );
+            diffs += 1;
+        }
+        if rust.last_error != python_server.last_error {
+            println!(
+                "parity diff probe {name} isError: rust {} python {}",
+                rust.last_error, python_server.last_error
             );
             diffs += 1;
         }
@@ -645,7 +663,7 @@ fn parity(binary: &str, python: &str) -> Option<usize> {
     }
     let (rc_r, out_r) = cli(
         &rs_s,
-        &words("annotate --content two --tags q x --json src/calc.py"),
+        &words("annotate --type document --content two --tags q x --json src/calc.py"),
     );
     let (rc_p, out_p) = py_cli(
         &py_s,
@@ -708,6 +726,22 @@ fn parity(binary: &str, python: &str) -> Option<usize> {
         for (name, arguments) in alias_calls {
             let left = tool(&mut rust_b, name, arguments.clone());
             let right = tool(&mut python_b, name, arguments);
+            if name == "bulk_annotate" {
+                let mut left_n = left.clone();
+                let mut right_n = right.clone();
+                let (note, skip) = documented(name, &mut left_n, &mut right_n);
+                if skip && rust_b.last_error && python_b.last_error {
+                    println!("documented {name}: {note}");
+                } else {
+                    println!(
+                        "parity diff {name} alias: rust {} python {}",
+                        py_str(&left),
+                        py_str(&right)
+                    );
+                    diffs += 1;
+                }
+                continue;
+            }
             let err = if right.is_dict() {
                 right.get("error").cloned().unwrap_or(Py::None)
             } else {
@@ -857,6 +891,8 @@ struct Server {
     lines: Receiver<Result<String, String>>,
     n: i64,
     closed: bool,
+    /// `isError` of the last tools/call result.
+    last_error: bool,
 }
 
 impl Server {
@@ -882,6 +918,7 @@ impl Server {
             lines: rx,
             n: 0,
             closed: false,
+            last_error: false,
         }
     }
 
@@ -942,6 +979,7 @@ impl Server {
         if !result.is_dict() {
             panic!("AttributeError: result is not an object: {}", repr(&result));
         }
+        self.last_error = result.get("isError").is_some_and(truthy);
         let content = match result.get("content") {
             Some(value) if truthy(value) => value.clone(),
             _ => Py::List(Vec::new()),
@@ -1103,8 +1141,9 @@ fn walk(value: &Py, root: &str, other_root: &str, key: &str) -> Py {
                 .iter()
                 .map(|item| walk(item, root, other_root, key))
                 .collect();
-            // `unchanged` order follows PYTHONHASHSEED. Other lists keep their order.
-            if key == "unchanged" {
+            // `unchanged`, `modified` and `removed` follow 1.5.2's set order
+            // (PYTHONHASHSEED). Other lists keep their order.
+            if matches!(key, "unchanged" | "modified" | "removed") {
                 let mut keyed: Vec<(String, Py)> = rows
                     .into_iter()
                     .map(|row| (dumps(&row, true), row))
@@ -1307,14 +1346,44 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
             }
         }
     }
-    if (name == "store_embedding" || name == "bulk_annotate") && right.is_dict() {
-        let err = right.get("error").map(py_str).unwrap_or_default();
-        if err.contains("unexpected keyword") || err.contains("missing") {
-            notes.push("1.5.2 rejects the alias argument; rust accepts it".to_string());
+    let left_err = left.get("error").map(py_str).unwrap_or_default();
+    let right_err = right.get("error").map(py_str).unwrap_or_default();
+    if name == "store_embedding" && right_err.contains("unexpected keyword argument 'embedding'") {
+        notes.push("1.5.2 rejects the alias argument; rust accepts it".to_string());
+        skip = true;
+    } else if let Some(field) = type_error_field(&right_err) {
+        // MIGRATION.md: the same calls are rejected, with an error that
+        // names the tool, the field and the arguments to retry with instead
+        // of Python's TypeError.
+        let only_error = |side: &Py| match side {
+            Py::Dict(pairs) => pairs.iter().all(|(key, _)| key == "error" || key == "hint"),
+            _ => false,
+        };
+        if only_error(left)
+            && only_error(right)
+            && left_err.starts_with(&format!("{name}: "))
+            && left_err.contains(&field)
+        {
+            notes.push("argument error names the field and the valid arguments".to_string());
             skip = true;
         }
     }
     (notes.join("; "), skip)
+}
+
+/// The argument a Python `TypeError` from binding names, if it is one.
+fn type_error_field(text: &str) -> Option<String> {
+    for marker in [
+        "unexpected keyword argument '",
+        "argument: '",
+        "arguments: '",
+    ] {
+        if let Some(at) = text.find(marker) {
+            let rest = &text[at + marker.len()..];
+            return rest.split('\'').next().map(str::to_string);
+        }
+    }
+    None
 }
 
 fn first_diff(left: &Py, right: &Py, path: &str) -> Option<(String, Py, Py)> {
@@ -1923,4 +1992,492 @@ impl Loads<'_> {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Verify-5 items: one probe per fix, against the same oracle.
+// ---------------------------------------------------------------------------
+
+/// Writes the verify-5 style trees (kauri, wattle, wattle_s) with PyMuPDF,
+/// which the oracle environment already has for 1.5.2's PDF chunker.
+const FIXTURE_PY: &str = r##"
+import os, random, sys
+import pymupdf
+B = sys.argv[1]
+def w(p, s):
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", newline="\n") as fh:
+        fh.write(s)
+def pdf(p, pages):
+    d = pymupdf.open()
+    for t in pages:
+        pg = d.new_page(); y = 60
+        if t is None:
+            continue
+        for line in t.split("\n"):
+            if y > 800:
+                pg = d.new_page(); y = 60
+            pg.insert_text((60, y), line, fontsize=10); y += 12
+    os.makedirs(os.path.dirname(p), exist_ok=True); d.save(p); d.close()
+random.seed(51105)
+V = "lantern marrow pylon sorrel tundra umber wicket yarrow ochre heron cinder plinth rook saffron tallow nimbus".split()
+def para(n, k=9):
+    return "\n".join(" ".join(random.choice(V) for _ in range(k)) for _ in range(n))
+K = B + "/kauri"
+w(K + "/pkgs/core/ledger.py", '"""Ledger primitives."""\nimport itertools\nfrom typing import Iterable\n\n\nclass TallowLedger:\n    """Holds pylon entries."""\n\n    def __init__(self, entries: Iterable[int] = ()):\n        self.entries = list(entries)\n\n    def total(self) -> int:\n        return sum(self.entries)\n\n    @staticmethod\n    def heron_mark(v):\n        return v * 7\n\n\ndef cinder_sum(*xs):\n    return sum(itertools.chain(xs))\n')
+w(K + "/pkgs/core/__init__.py", "")
+w(K + "/pkgs/core/plinth.py", "from .ledger import TallowLedger, cinder_sum\n\n\ndef plinth_report(xs):\n    lg = TallowLedger(xs)\n    return cinder_sum(lg.total(), TallowLedger.heron_mark(2))\n")
+w(K + "/pkgs/web/wicket.js", "const { umberFormat } = require('./umber');\nfunction WicketGate(cfg) { this.cfg = cfg; }\nWicketGate.prototype.open = function () { return umberFormat(this.cfg); };\nmodule.exports.yarrowRoute = yarrowRoute;\nfunction yarrowRoute(p) { return '/y/' + p; }\n")
+w(K + "/pkgs/web/umber.ts", "export function umberFormat(x: unknown): string { return String(x); }\nexport class RookBoard { move(n: number) { return n + 1; } }\n")
+w(K + "/svc/marrow.go", 'package svc\n\nimport "fmt"\n\ntype MarrowStore struct{ n int }\n\nfunc LanternPing() { fmt.Println("lantern") }\n')
+w(K + "/svc/saffron.rs", "pub struct SaffronQueue { items: Vec<u32> }\npub fn rook_count(q: &SaffronQueue) -> usize { q.items.len() }\n")
+w(K + "/svc/Pylon.java", "package svc;\npublic class PylonTower {\n    public int ochreHeight() { return 42; }\n}\n")
+w(K + "/notes/yarrow.md", "# Yarrow notes\n\n" + para(6) + "\n\n## Heron\n\n" + para(4) + "\n")
+w(K + "/notes/tundra.txt", para(12) + "\nsaffron yarrow tundra sorrel heron heron heron cinder rook\n")
+w(K + "/notes/void.md", "")
+pdf(K + "/papers/p1_blank_first.pdf", [None, "plinth " + para(3), "rook " + para(2)])
+pdf(K + "/papers/p3_two_blank_mid.pdf", ["nimbus " + para(3), None, None, "lantern " + para(3)])
+pdf(K + "/papers/p4_all_blank.pdf", [None, None])
+W = B + "/wattle"
+w(W + "/.stele-context.toml", 'chunk_size = 80\nmax_chunk_size = 260\nskip_dirs = ["thirdparty"]\n')
+w(W + "/app/heron.py", "class HeronNest:\n    def perch(self):\n        return 'tallow'\n\n\n" + "\n".join("def filler_%d():\n    return %d\n" % (i, i) for i in range(18)))
+w(W + "/thirdparty/skip.py", "def must_skip(): pass\n")
+S = B + "/wattle_s"
+w(S + "/.stele-context.toml", '[stele-context]\nchunk_size = 80\nmax_chunk_size = 260\nskip_dirs = ["thirdparty"]\n')
+w(S + "/app/heron.py", "class HeronNest:\n    def perch(self):\n        return 'tallow'\n")
+w(S + "/app/rook.js", "export function rookGambit(b) { return b; }\n")
+w(S + "/thirdparty/skip.py", "def must_skip(): pass\n")
+print("ok")
+"##;
+
+#[derive(Default)]
+struct Harvest {
+    cids: Vec<String>,
+}
+
+enum Step {
+    Call(&'static str, Box<dyn Fn(&Harvest) -> Py>),
+    /// Runs on both sides but is checked by the scenario's own rule.
+    Own(&'static str, Box<dyn Fn(&Harvest) -> Py>),
+    Edit(fn(&Path)),
+}
+
+fn call(name: &'static str, build: impl Fn(&Harvest) -> Py + 'static) -> Step {
+    Step::Call(name, Box::new(build))
+}
+
+fn fixed(name: &'static str, json: &'static str) -> Step {
+    call(name, move |_| args(json))
+}
+
+/// `[round(((i * k) % 13) / 12 - 0.4, 4) for i in range(n)]`.
+fn vector(n: usize, k: usize) -> Py {
+    Py::List(
+        (0..n)
+            .map(|i| {
+                let value = ((i * k) % 13) as f64 / 12.0 - 0.4;
+                Py::Float((value * 10_000.0).round() / 10_000.0)
+            })
+            .collect(),
+    )
+}
+
+fn cid(h: &Harvest, index: usize) -> String {
+    h.cids
+        .get(index)
+        .cloned()
+        .unwrap_or_else(|| "NO-CID".to_string())
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    let _ = fs::remove_dir_all(to);
+    fs::create_dir_all(to).unwrap_or_else(|err| panic!("mkdir {}: {err}", to.display()));
+    for entry in fs::read_dir(from).unwrap_or_else(|err| panic!("read {}: {err}", from.display())) {
+        let entry = entry.expect("dir entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).expect("copy fixture file");
+        }
+    }
+}
+
+struct Outcome {
+    value: Py,
+    is_error: bool,
+}
+
+/// Run `steps` against one server on a fresh copy of `tree` at `root`.
+fn run_steps(
+    serve: &[String],
+    tree: &Path,
+    root: &Path,
+    git: bool,
+    steps: &[Step],
+) -> Vec<Option<Outcome>> {
+    copy_tree(tree, root);
+    if git {
+        fs::create_dir_all(root.join(".git")).expect("marker");
+    }
+    let mut server = Server::start(serve, root);
+    server.call(
+        "initialize",
+        args(r#"{"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "verify5", "version": "0"}}"#),
+    );
+    server.notify("notifications/initialized");
+    let mut harvest = Harvest::default();
+    let mut out = Vec::new();
+    for step in steps {
+        match step {
+            Step::Edit(edit) => {
+                edit(root);
+                thread::sleep(Duration::from_millis(1100));
+                out.push(None);
+            }
+            Step::Call(name, build) | Step::Own(name, build) => {
+                let value = tool(&mut server, name, build(&harvest));
+                if *name == "get_context" && harvest.cids.is_empty() {
+                    harvest.cids = all_chunk_ids(&value);
+                }
+                out.push(Some(Outcome {
+                    value,
+                    is_error: server.last_error,
+                }));
+            }
+        }
+    }
+    server.close();
+    out
+}
+
+fn all_chunk_ids(value: &Py) -> Vec<String> {
+    let mut ids = Vec::new();
+    for key in ["unchanged", "changed", "new"] {
+        if let Some(Py::List(docs)) = value.get(key) {
+            for doc in docs {
+                if let Some(Py::List(chunks)) = doc.get("chunks") {
+                    for chunk in chunks {
+                        if let Some(Py::Str(id)) = chunk.get("chunk_id") {
+                            ids.push(id.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// HNSW levels and connection counts are random in 1.5.2 too; the SQLite
+/// size fields are the accepted JSON-store difference.
+fn blank_random(value: &mut Py) {
+    match value {
+        Py::Dict(pairs) => {
+            for (key, item) in pairs.iter_mut() {
+                if matches!(
+                    key.as_str(),
+                    "max_level"
+                        | "avg_connections"
+                        | "database_size_bytes"
+                        | "page_count"
+                        | "wal_size_bytes"
+                ) {
+                    *item = s("random");
+                }
+            }
+            for (_, item) in pairs.iter_mut() {
+                blank_random(item);
+            }
+        }
+        Py::List(items) => items.iter_mut().for_each(blank_random),
+        _ => {}
+    }
+}
+
+/// Compare one scenario. Returns the number of undocumented differences.
+#[allow(clippy::too_many_arguments)]
+fn compare_scenario(
+    label: &str,
+    binary: &str,
+    python: &str,
+    tree: &Path,
+    git: bool,
+    steps: &[Step],
+    extra_check: impl Fn(&[Option<Outcome>], &[Option<Outcome>]) -> usize,
+) -> usize {
+    let work = TempDir::new("stele-v5-").expect("mkdtemp");
+    let root = work.path().join(label);
+    let root_s = root.display().to_string();
+    let store = |side: &str| {
+        work.path()
+            .join(format!("{side}-store"))
+            .display()
+            .to_string()
+    };
+    let py_store = store("py");
+    let rs_store = store("rs");
+    let py_serve = vec![
+        python.to_string(),
+        "-m".to_string(),
+        "stele_context.cli".to_string(),
+        "--storage-dir".to_string(),
+        py_store.clone(),
+        "serve-mcp".to_string(),
+    ];
+    let rs_serve = vec![
+        binary.to_string(),
+        "--storage-dir".to_string(),
+        rs_store.clone(),
+        "serve-mcp".to_string(),
+    ];
+    let py = run_steps(&py_serve, tree, &root, git, steps);
+    let rs = run_steps(&rs_serve, tree, &root, git, steps);
+    let mut diffs = 0usize;
+    for (index, ((left, right), step)) in rs.iter().zip(&py).zip(steps).enumerate() {
+        let (Some(left), Some(right), Step::Call(name, _)) = (left, right, step) else {
+            continue;
+        };
+        let mut left_n = walk(&left.value, &root_s, &rs_store, "");
+        let mut right_n = walk(&right.value, &root_s, &py_store, "");
+        blank_random(&mut left_n);
+        blank_random(&mut right_n);
+        let mut bad = Vec::new();
+        let (mut left_n, mut right_n) = timestamps_ok(&left_n, &right_n, &mut bad);
+        let (note, skip) = documented(name, &mut left_n, &mut right_n);
+        if !note.is_empty() {
+            println!("documented {label}#{index} {name}: {note}");
+        }
+        if !bad.is_empty() {
+            println!(
+                "parity diff {label}#{index} {name} timestamp type: {}",
+                repr_list(&bad)
+            );
+            diffs += 1;
+        }
+        if !skip && !py_eq(&left_n, &right_n) {
+            println!(
+                "parity diff {label}#{index} {name}: {}",
+                diff_text(first_diff(&left_n, &right_n, "$"))
+            );
+            diffs += 1;
+        }
+        if !skip && left.is_error != right.is_error {
+            println!(
+                "parity diff {label}#{index} {name} isError: rust {} python {}",
+                left.is_error, right.is_error
+            );
+            diffs += 1;
+        }
+    }
+    diffs + extra_check(&rs, &py)
+}
+
+fn int_at(outcomes: &[Option<Outcome>], index: usize, path: &[&str]) -> i64 {
+    let mut value = outcomes[index]
+        .as_ref()
+        .map(|o| o.value.clone())
+        .unwrap_or(Py::None);
+    for key in path {
+        value = value.get(key).cloned().unwrap_or(Py::None);
+    }
+    match value {
+        Py::Int(digits) => digits.parse().unwrap_or(-1),
+        _ => -1,
+    }
+}
+
+fn remove_tundra(root: &Path) {
+    fs::remove_file(root.join("notes").join("tundra.txt")).expect("remove tundra.txt");
+}
+
+#[test]
+fn verify5_items_match_python_152() {
+    let binary = env!("CARGO_BIN_EXE_stele-context");
+    let python = match find_oracle() {
+        Ok(python) => python,
+        Err(OracleError::Version(found)) => {
+            panic!("need PyPI stele-context {ORACLE_VERSION}, found {found}")
+        }
+        Err(OracleError::Missing(why)) => panic!("{why}"),
+    };
+    let trees = TempDir::new("stele-v5-fx-").expect("mkdtemp");
+    let made = Command::new(&python)
+        .arg("-c")
+        .arg(FIXTURE_PY)
+        .arg(trees.path())
+        .output()
+        .expect("run the fixture writer");
+    assert!(
+        made.status.success(),
+        "fixture writer failed (needs pymupdf>=1.23,<2 next to stele-context 1.5.2): {}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    let kauri = trees.path().join("kauri");
+    let mut diffs = 0usize;
+
+    // kauri with a .git marker: items 1-11, 15, 17.
+    let steps: Vec<Step> = vec![
+        fixed("index", r#"{"paths": ["."]}"#),
+        fixed(
+            "get_context",
+            r#"{"document_paths": ["papers/p1_blank_first.pdf", "papers/p3_two_blank_mid.pdf", "papers/p4_all_blank.pdf", "pkgs/core/ledger.py", "notes/yarrow.md"], "session_id": "k1"}"#,
+        ),
+        fixed("map", "{}"),
+        fixed(
+            "search",
+            r#"{"query": "heron tallow", "search_mode": "keyword"}"#,
+        ),
+        fixed("agent_grep", r#"{"pattern": "heron"}"#),
+        fixed(
+            "agent_grep",
+            r#"{"pattern": "sorrel", "path_prefix": "svc"}"#,
+        ),
+        fixed("llm_embed", r#"{"text": "ochre plinth"}"#),
+        fixed(
+            "register_dynamic_symbols",
+            r#"{"agent_id": "k-m", "symbols": [{"name": "mm_mid_dyn", "kind": "function", "document_path": "svc/saffron.rs"}, {"name": "TallowLedger", "kind": "class", "document_path": "pkgs/web/umber.ts"}, {"kind": "function"}, {"name": "bad_role", "role": "caller"}]}"#,
+        ),
+        fixed("find_references", r#"{"symbol": "mm_mid_dyn"}"#),
+        fixed("doctor", "{}"),
+        call("bulk_store_summaries", |h| {
+            obj(vec![(
+                "summaries",
+                obj(vec![(&cid(h, 0), s("plinth page"))]),
+            )])
+        }),
+        call("bulk_store_embeddings", |h| {
+            obj(vec![(
+                "embeddings",
+                obj(vec![
+                    (&cid(h, 1), vector(64, 3)),
+                    (&cid(h, 2), Py::List(Vec::new())),
+                ]),
+            )])
+        }),
+        fixed("stats", "{}"),
+        call("store_embedding", |h| {
+            obj(vec![
+                ("chunk_id", s(&cid(h, 3))),
+                ("vector", vector(128, 9)),
+            ])
+        }),
+        fixed("stats", "{}"),
+        fixed("doctor", "{}"),
+        fixed("enrichment_plan", "{}"),
+        fixed(
+            "query",
+            r#"{"query": "wicket yarrow route", "search_mode": "keyword", "top_k": 5}"#,
+        ),
+        fixed(
+            "llm_embed",
+            r#"{"text": "pylon tundra", "chunk_id": "kite-mem"}"#,
+        ),
+        Step::Edit(remove_tundra),
+        fixed("detect_changes", "{}"),
+        fixed("stats", "{}"),
+        fixed(
+            "search",
+            r#"{"query": "sorrel heron", "search_mode": "keyword", "top_k": 6}"#,
+        ),
+        fixed(
+            "get_context",
+            r#"{"document_paths": ["pkgs/core/ledger.py"]}"#,
+        ),
+        fixed("stats", "{}"),
+        call("store_embedding", |h| {
+            obj(vec![
+                ("chunk_id", s(&cid(h, 4))),
+                ("embedding", vector(64, 11)),
+            ])
+        }),
+        Step::Own("stats", Box::new(|_| args("{}"))),
+    ];
+    diffs += compare_scenario(
+        "kauri_g",
+        binary,
+        &python,
+        &kauri,
+        true,
+        &steps,
+        |rs, py| {
+            // Accepted alias: store_embedding's `embedding` writes like `vector`,
+            // so insert_count moves by one, as the `vector` call before it did.
+            let path = ["index", "insert_count"];
+            let rs_delta = int_at(rs, 26, &path) - int_at(rs, 24, &path);
+            let py_delta = int_at(py, 26, &path) - int_at(py, 24, &path);
+            let vector_delta = int_at(rs, 14, &path) - int_at(rs, 12, &path);
+            if rs_delta != 1 || py_delta != 0 || vector_delta < 1 {
+                println!(
+                "parity diff alias insert_count: rust +{rs_delta} python +{py_delta} vector +{vector_delta}"
+            );
+                1
+            } else {
+                println!("documented alias insert_count: rust +1 like a vector write, python +0 (rejects the alias)");
+                0
+            }
+        },
+    );
+
+    // No marker: item 12.
+    let steps: Vec<Step> = vec![
+        fixed("index", r#"{"paths": ["."]}"#),
+        fixed("map", r#"{"path_prefix": ""}"#),
+        fixed("doctor", "{}"),
+        fixed("detect_changes", "{}"),
+    ];
+    diffs += compare_scenario("kauri", binary, &python, &kauri, false, &steps, |_, _| 0);
+
+    // Sectionless TOML (item 13) and locks without git (item 14).
+    for (label, tree) in [("wattle", "wattle"), ("wattle_s", "wattle_s")] {
+        let steps: Vec<Step> = vec![
+            fixed("index", r#"{"paths": ["."]}"#),
+            fixed("stats", "{}"),
+            fixed("find_definition", r#"{"symbol": "must_skip"}"#),
+            fixed("map", "{}"),
+        ];
+        diffs += compare_scenario(
+            label,
+            binary,
+            &python,
+            &trees.path().join(tree),
+            false,
+            &steps,
+            |_, _| 0,
+        );
+    }
+
+    // CLI annotate needs --type and --content (item 17).
+    let work = TempDir::new("stele-v5-cli-").expect("mkdtemp");
+    copy_tree(&trees.path().join("wattle_s"), &work.path().join("t"));
+    let root = work.path().join("t");
+    let run = |argv: Vec<String>| run_cli(&argv, &root).0;
+    let rs_store = work.path().join("rs").display().to_string();
+    let py_store = work.path().join("py").display().to_string();
+    let rs_code = run(vec![
+        binary.to_string(),
+        "--storage-dir".into(),
+        rs_store,
+        "annotate".into(),
+        "app/heron.py".into(),
+        "hello".into(),
+    ]);
+    let py_code = run(vec![
+        python.clone(),
+        "-m".into(),
+        "stele_context.cli".into(),
+        "--storage-dir".into(),
+        py_store,
+        "annotate".into(),
+        "app/heron.py".into(),
+        "hello".into(),
+    ]);
+    if rs_code != py_code {
+        println!(
+            "parity diff cli annotate without --type/--content: rust {rs_code} python {py_code}"
+        );
+        diffs += 1;
+    }
+    println!("verify5 undocumented diffs: {diffs}");
+    assert_eq!(diffs, 0, "verify5 undocumented diffs: {diffs}");
 }
