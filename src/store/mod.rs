@@ -264,6 +264,19 @@ impl Store {
 
     /// Keyword search does not read signatures. Load the side file on the
     /// first hybrid query or save, and keep a hex signature if the file is absent.
+    pub fn signature_rows(&self) -> Vec<[f32; 128]> {
+        let loaded = read_sigs(&self.dir.join("signatures.bin"), self.state.chunks.len());
+        if loaded.len() == self.state.chunks.len() {
+            loaded
+        } else {
+            self.state
+                .chunks
+                .iter()
+                .map(|chunk| decode_hex_sig(&chunk.signature))
+                .collect()
+        }
+    }
+
     pub fn ensure_sigs(&mut self) {
         if self.state.sigs.len() == self.state.chunks.len() {
             return;

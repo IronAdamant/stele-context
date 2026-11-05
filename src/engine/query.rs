@@ -1344,12 +1344,7 @@ impl Engine {
         if !found {
             return Err(format!("unknown chunk '{chunk_id}'"));
         }
-        let vector = crate::chunk::signature(summary)
-            .iter()
-            .map(|value| *value as f32)
-            .collect();
-        self.hnsw.remove(chunk_id);
-        self.hnsw.insert(chunk_id, vector);
+        self.hnsw_ready.set(false);
         self.note_vector_replace();
         self.store.save("summary", &Value::string(chunk_id))?;
         Ok(Value::object(vec![

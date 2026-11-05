@@ -8,6 +8,7 @@ use crate::VERSION;
 use std::fs;
 use std::path::Path;
 pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
+    crate::engine::prefetch_python();
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(err) => {
@@ -106,7 +107,7 @@ pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
         ("chunk_count", Value::Int(parsed.chunks)),
         ("index_health", parsed.index_health(&storage)),
         ("db_health", parsed.db_health(&storage)),
-        ("search_quality", parsed.search_quality()),
+        ("search_quality", parsed.search_quality(&storage)),
         (
             "environment",
             Value::object(vec![
@@ -139,7 +140,6 @@ struct ParsedStore {
     tokens: i64,
     tier2: i64,
     latest: f64,
-    signatures: Vec<Vec<f32>>,
     error: Option<String>,
     paths: Vec<String>,
 }
@@ -152,7 +152,6 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         tokens: 0,
         tier2: 0,
         latest: 0.0,
-        signatures: Vec::new(),
         error: None,
         paths: Vec::new(),
     };
@@ -185,17 +184,11 @@ fn read_snapshot(path: &Path) -> ParsedStore {
     };
     let mut tokens = 0i64;
     let mut tier2 = 0i64;
-    let mut signatures = Vec::new();
     for chunk in chunk_rows {
         tokens += int_field(chunk, "tokens");
         if field(chunk, "summary").is_some_and(|item| !matches!(item, Value::Null)) {
             tier2 += 1;
         }
-        let hex = match field(chunk, "signature") {
-            Some(Value::String(text)) => text.as_str(),
-            _ => "",
-        };
-        signatures.push(crate::store::decode_hex_sig(hex).to_vec());
     }
     let mut paths = Vec::new();
     let mut latest = 0.0f64;
@@ -217,7 +210,6 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         tokens,
         tier2,
         latest,
-        signatures,
         error: None,
         paths,
     }
@@ -325,7 +317,7 @@ impl ParsedStore {
         ])
     }
 
-    fn search_quality(&self) -> Value {
+    fn search_quality(&self, storage: &Path) -> Value {
         let coverage = if self.chunks == 0 {
             0.0
         } else {
@@ -342,7 +334,10 @@ impl ParsedStore {
             ("total_chunks", Value::Int(self.chunks)),
             ("tier2_chunks", Value::Int(self.tier2)),
             ("tier2_coverage_percent", Value::Float(coverage)),
-            ("hnsw_span", Value::Float(hnsw_span(&self.signatures))),
+            (
+                "hnsw_span",
+                Value::Float(hnsw_span(storage, self.chunks as usize)),
+            ),
             ("advice", advice.map(Value::string).unwrap_or(Value::Null)),
         ])
     }
@@ -365,10 +360,22 @@ fn file_len(path: &Path) -> u64 {
     fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
 }
 
-fn hnsw_span(signatures: &[Vec<f32>]) -> f64 {
+fn hnsw_span(storage: &Path, count: usize) -> f64 {
+    let bytes = match std::fs::read(storage.join("store").join("signatures.bin")) {
+        Ok(bytes) if bytes.len() >= count * 128 * 4 && count > 0 => bytes,
+        _ => return 0.0,
+    };
     let mut graph = crate::search::Hnsw::new();
-    for (index, vector) in signatures.iter().enumerate() {
-        graph.insert(&index.to_string(), vector.clone());
+    for index in 0..count {
+        let start = index * 128 * 4;
+        let mut vector = Vec::with_capacity(128);
+        for lane in 0..128 {
+            let offset = start + lane * 4;
+            let mut buf = [0u8; 4];
+            buf.copy_from_slice(&bytes[offset..offset + 4]);
+            vector.push(f32::from_le_bytes(buf));
+        }
+        graph.insert(&index.to_string(), vector);
     }
     graph.probe_span()
 }

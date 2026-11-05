@@ -440,8 +440,7 @@ impl Engine {
                 }
                 self.store.state.sigs[index] = sig;
             }
-            self.hnsw.remove(id);
-            self.hnsw.insert(id, vector);
+            self.hnsw_ready.set(false);
             self.note_vector_replace();
             stored += 1;
         }
@@ -494,12 +493,7 @@ impl Engine {
                 errors.push(Value::string(id.clone()));
                 continue;
             }
-            let vector = crate::chunk::signature(summary)
-                .iter()
-                .map(|value| *value as f32)
-                .collect();
-            self.hnsw.remove(id);
-            self.hnsw.insert(id, vector);
+            self.hnsw_ready.set(false);
             stored += 1;
         }
         if self.store.state.chunks.len() > 1 {

@@ -11,7 +11,6 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub fn run() -> i32 {
-    crate::engine::prefetch_python();
     let args: Vec<String> = env::args_os().skip(1).map(lossy).collect();
     dispatch(&args).emit()
 }

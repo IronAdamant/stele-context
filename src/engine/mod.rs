@@ -27,7 +27,8 @@ pub struct Engine {
     store: Store,
     bm25: Bm25,
     bm25_ready: bool,
-    hnsw: crate::search::Hnsw,
+    hnsw: std::cell::RefCell<crate::search::Hnsw>,
+    hnsw_ready: std::cell::Cell<bool>,
     chunk_size: usize,
     max_chunk_size: usize,
     respect_gitignore: bool,
@@ -103,7 +104,8 @@ impl Engine {
             store,
             bm25: Bm25::new(),
             bm25_ready: false,
-            hnsw: crate::search::Hnsw::new(),
+            hnsw: std::cell::RefCell::new(crate::search::Hnsw::new()),
+            hnsw_ready: std::cell::Cell::new(false),
             chunk_size: loaded.chunk_size.unwrap_or(256).max(1) as usize,
             max_chunk_size: loaded.max_chunk_size.unwrap_or(4096).max(1) as usize,
             respect_gitignore: loaded.respect_gitignore.unwrap_or(true),
@@ -120,7 +122,6 @@ impl Engine {
         })
         .map(|mut engine| {
             if !engine.documents_only {
-                engine.rebuild_hnsw();
                 // 1.5.2 reloads the graph with insert_count = len(nodes).
                 engine.store.state.inserts = engine.store.state.chunks.len() as u64;
             }
@@ -348,7 +349,7 @@ impl Engine {
             if self.documents_only {
                 self.store.reload_full()?;
                 self.documents_only = false;
-                self.rebuild_hnsw();
+                self.hnsw_ready.set(false);
             }
             unchanged.clear();
         }
@@ -545,8 +546,20 @@ impl Engine {
                 "index",
                 Value::object(vec![
                     ("node_count", Value::Int(chunks)),
-                    ("max_level", Value::Int(self.hnsw.max_level())),
-                    ("avg_connections", Value::Float(self.hnsw.avg_connections())),
+                    (
+                        "max_level",
+                        Value::Int({
+                            self.ensure_hnsw();
+                            self.hnsw.borrow().max_level()
+                        }),
+                    ),
+                    (
+                        "avg_connections",
+                        Value::Float({
+                            self.ensure_hnsw();
+                            self.hnsw.borrow().avg_connections()
+                        }),
+                    ),
                     ("insert_count", Value::Int(self.store.state.inserts as i64)),
                     ("chunk_count", Value::Int(chunks)),
                 ]),
@@ -1364,19 +1377,9 @@ impl Engine {
 
     fn drop_path(&mut self, rel: &str) {
         self.store.state.documents.retain(|doc| doc.path != rel);
-        let gone: Vec<String> = self
-            .store
-            .state
-            .chunks
-            .iter()
-            .filter(|chunk| chunk.path == rel)
-            .map(|chunk| chunk.id.clone())
-            .collect();
         self.store.state.chunks.retain(|chunk| chunk.path != rel);
         self.store.state.symbols.retain(|sym| sym.path != rel);
-        for id in gone {
-            self.hnsw.remove(&id);
-        }
+        self.hnsw_ready.set(false);
     }
 
     fn rebuild_bm25(&mut self) {
@@ -1827,36 +1830,35 @@ impl Engine {
         }
     }
 
-    fn rebuild_hnsw(&mut self) {
-        self.hnsw.clear();
-        self.store.ensure_sigs();
-        let pairs: Vec<(String, Vec<f32>)> = self
-            .store
-            .state
-            .chunks
-            .iter()
-            .enumerate()
-            .map(|(index, chunk)| {
-                let vector = if chunk.embedding.len() == 128 {
-                    chunk.embedding.clone()
-                } else {
-                    self.store
-                        .state
-                        .sigs
-                        .get(index)
-                        .map(|sig| sig.to_vec())
-                        .unwrap_or_else(|| vec![0.0; 128])
-                };
-                (chunk.id.clone(), vector)
-            })
-            .collect();
-        for (id, vector) in pairs {
-            self.hnsw.insert(&id, vector);
+    fn ensure_hnsw(&self) {
+        if self.hnsw_ready.get() {
+            return;
         }
+        let mut graph = crate::search::Hnsw::new();
+        let rows = self.store.signature_rows();
+        for (index, chunk) in self.store.state.chunks.iter().enumerate() {
+            let vector = if chunk.embedding.len() == 128 {
+                chunk.embedding.clone()
+            } else if let Some(summary) = chunk.summary.as_deref() {
+                crate::chunk::signature(summary)
+                    .iter()
+                    .map(|value| *value as f32)
+                    .collect()
+            } else {
+                rows.get(index)
+                    .cloned()
+                    .unwrap_or_else(|| [0.0; 128])
+                    .to_vec()
+            };
+            graph.insert(&chunk.id, vector);
+        }
+        *self.hnsw.borrow_mut() = graph;
+        self.hnsw_ready.set(true);
     }
 
     fn hnsw_span(&self) -> f64 {
-        self.hnsw.probe_span()
+        self.ensure_hnsw();
+        self.hnsw.borrow().probe_span()
     }
 
     fn take_symbol_id(&mut self) -> i64 {
@@ -1923,11 +1925,7 @@ impl Engine {
                 chunk_index: piece.index,
             });
         }
-        let vector: Vec<f32> = chunk::signature(&piece.content)
-            .iter()
-            .map(|value| *value as f32)
-            .collect();
-        self.hnsw.insert(&id, vector);
+        self.hnsw_ready.set(false);
         self.store.state.chunks.push(Chunk {
             id,
             path: rel.to_string(),
