@@ -4,7 +4,7 @@ use crate::jsonutil::{as_array, id_is, object_get};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -26,6 +26,14 @@ pub(crate) fn base_env() -> HashMap<String, String> {
     env
 }
 
+/// One finished child: wall time from spawn to exit, and both pipes in full.
+pub(crate) struct Captured {
+    pub wall_ms: f64,
+    pub status: ExitStatus,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
 pub(crate) fn run_command(
     argv: &[String],
     cwd: &Path,
@@ -36,6 +44,26 @@ pub(crate) fn run_command(
     if !delay.is_zero() {
         thread::sleep(delay);
     }
+    let done = capture(argv, cwd, env, None)?
+        .ok_or_else(|| format!("{}: pipe reader stopped", argv[0]))?;
+    Ok(Sample {
+        wall_ms: started.elapsed().as_secs_f64() * 1000.0,
+        out_bytes: done.stdout.len(),
+        rc: done.status.code().unwrap_or(1),
+        stdout_tail: tail(&done.stdout, 1500),
+        stderr_tail: tail(&done.stderr, 1500),
+    })
+}
+
+/// Runs `argv` with stdin closed and both pipes read to the end. With a
+/// `timeout` the child is killed once it passes, and the result is `None`.
+pub(crate) fn capture(
+    argv: &[String],
+    cwd: &Path,
+    env: &HashMap<String, String>,
+    timeout: Option<Duration>,
+) -> Result<Option<Captured>, String> {
+    let started = Instant::now();
     let mut child = Command::new(&argv[0])
         .args(&argv[1..])
         .current_dir(cwd)
@@ -48,20 +76,42 @@ pub(crate) fn run_command(
         .map_err(|err| format!("spawn {}: {err}", argv[0]))?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let out_handle = thread::spawn(move || read_pipe(stdout));
-    let err_handle = thread::spawn(move || read_pipe(stderr));
+    let (tx, rx) = mpsc::channel::<(bool, Vec<u8>)>();
+    let tx_err = tx.clone();
+    thread::spawn(move || {
+        let _ = tx.send((true, read_pipe(stdout)));
+    });
+    thread::spawn(move || {
+        let _ = tx_err.send((false, read_pipe(stderr)));
+    });
+    let mut out = None;
+    let mut err = None;
+    while out.is_none() || err.is_none() {
+        let next = match timeout {
+            Some(limit) => rx
+                .recv_timeout(limit.saturating_sub(started.elapsed()))
+                .ok(),
+            None => rx.recv().ok(),
+        };
+        match next {
+            Some((true, bytes)) => out = Some(bytes),
+            Some((false, bytes)) => err = Some(bytes),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(None);
+            }
+        }
+    }
     let status = child
         .wait()
         .map_err(|err| format!("wait {}: {err}", argv[0]))?;
-    let out = out_handle.join().unwrap_or_default();
-    let err = err_handle.join().unwrap_or_default();
-    Ok(Sample {
+    Ok(Some(Captured {
         wall_ms: started.elapsed().as_secs_f64() * 1000.0,
-        out_bytes: out.len(),
-        rc: status.code().unwrap_or(1),
-        stdout_tail: tail(&out, 1500),
-        stderr_tail: tail(&err, 1500),
-    })
+        status,
+        stdout: out.unwrap_or_default(),
+        stderr: err.unwrap_or_default(),
+    }))
 }
 
 pub(crate) fn run_ok(

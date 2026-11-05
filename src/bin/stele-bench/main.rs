@@ -1,16 +1,20 @@
 //! Host-side benchmark tool. It is not part of the release archives.
 //! `floor` checks a binary against the recorded Python 1.5.1 medians.
 //! `gate` compares two commits on one machine.
+//! `versus` times a binary against PyPI stele-context 1.5.2 on one corpus.
 
 mod floor;
 mod gate;
 mod jsonutil;
 mod proc;
+mod python;
 mod stats;
+mod versus;
 
 use floor::FloorArgs;
 use std::env;
 use std::path::PathBuf;
+use versus::VersusArgs;
 
 fn main() {
     let code = match dispatch() {
@@ -31,6 +35,7 @@ fn dispatch() -> Result<i32, String> {
     match command.as_str() {
         "floor" => floor::run(parse_floor(&mut args)?),
         "gate" => run_gate(&mut args),
+        "versus" => versus::run(parse_versus(&mut args)?),
         "-h" | "--help" | "help" => {
             println!("{}", usage());
             Ok(0)
@@ -110,6 +115,35 @@ fn parse_floor(args: &mut impl Iterator<Item = String>) -> Result<FloorArgs, Str
     })
 }
 
+fn parse_versus(args: &mut impl Iterator<Item = String>) -> Result<VersusArgs, String> {
+    let mut binary = None;
+    let mut runs = 3i64;
+    while let Some(arg) = args.next() {
+        let (flag, inline) = match arg.split_once('=') {
+            Some((flag, value)) if flag.starts_with("--") => {
+                (flag.to_string(), Some(value.to_string()))
+            }
+            _ => (arg, None),
+        };
+        let mut value = |name: &str| match &inline {
+            Some(value) => Ok(value.clone()),
+            None => take(args, name),
+        };
+        match flag.as_str() {
+            "--binary" => binary = Some(PathBuf::from(value("--binary")?)),
+            "--runs" => {
+                runs = value("--runs")?
+                    .trim()
+                    .parse()
+                    .map_err(|_| "--runs needs an integer")?
+            }
+            other => return Err(format!("unknown flag '{other}'")),
+        }
+    }
+    let binary = binary.ok_or_else(|| "--binary is required".to_string())?;
+    Ok(VersusArgs { binary, runs })
+}
+
 fn take(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
     args.next().ok_or_else(|| format!("{flag} needs a value"))
 }
@@ -118,9 +152,13 @@ fn usage() -> String {
     "\
 stele-bench floor --binary PATH [--group b1] [--runs N] [--check-floor]
 stele-bench gate [--runs N] [--base SHA] [--head SHA] [--allow-short]
+stele-bench versus --binary PATH [--runs N]
 
 floor compares one binary with bench/baseline/summary.json.
 gate builds two commits and fails when the head is slower beyond noise.
+versus times the binary and PyPI stele-context 1.5.2 on parity/fixtures
+(median of N runs, default 3) and fails unless Rust is faster on every row.
+The Python is STELE_PARITY_PYTHON, else python3 or python.
 "
     .to_string()
 }
