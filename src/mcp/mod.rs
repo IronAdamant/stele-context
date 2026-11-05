@@ -141,7 +141,7 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
             continue;
         }
         let Ok(value) = json::parse(&line) else {
-            let _ = writeln!(stdout, "{}", error_line(Value::Null, -32700, "parse error"));
+            send(&mut stdout, error_line(Value::Null, -32700, "parse error"));
             continue;
         };
         let id = field(&value, "id").cloned().unwrap_or(Value::Null);
@@ -161,9 +161,10 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
         if surface.refresh(&catalogue) {
             filtered = None;
             if initialized {
-                let _ = writeln!(
-                    stdout,
-                    "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}}"
+                send(
+                    &mut stdout,
+                    "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}"
+                        .to_string(),
                 );
             }
         }
@@ -186,12 +187,13 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
                 } else {
                     filtered.get_or_insert_with(|| filtered_tools_json(selection))
                 };
-                let _ = writeln!(
-                    stdout,
-                    "{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{listed}}}",
-                    id_json = json::to_string(&id),
+                send(
+                    &mut stdout,
+                    format!(
+                        "{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{listed}}}",
+                        id_json = json::to_string(&id),
+                    ),
                 );
-                let _ = stdout.flush();
                 continue;
             }
             "tools/call" => {
@@ -224,26 +226,31 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
             }
             "ping" => Value::object(vec![]),
             _ => {
-                let _ = writeln!(stdout, "{}", error_line(id, -32601, "method not found"));
-                let _ = stdout.flush();
+                send(&mut stdout, error_line(id, -32601, "method not found"));
                 continue;
             }
         };
-        let _ = writeln!(
-            stdout,
-            "{}",
+        send(
+            &mut stdout,
             json::to_string(&Value::object(vec![
                 ("jsonrpc", Value::string("2.0")),
                 ("id", id),
                 ("result", result),
-            ]))
+            ])),
         );
-        let _ = stdout.flush();
     }
     Response {
         code: 0,
         stdout: Vec::new(),
     }
+}
+
+/// One JSON-RPC message, newline-terminated, in a single write: the client
+/// gets the whole line in one read instead of a head, a body and a tail.
+fn send(stdout: &mut io::Stdout, mut line: String) {
+    line.push('\n');
+    let _ = stdout.write_all(line.as_bytes());
+    let _ = stdout.flush();
 }
 
 fn initialize(params: &Value) -> Value {

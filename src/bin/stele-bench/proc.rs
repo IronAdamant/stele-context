@@ -180,7 +180,8 @@ fn mcp_session(
         .ok_or_else(|| "mcp stdin closed".to_string())?;
     let (tx, rx) = mpsc::channel::<String>();
     thread::spawn(move || {
-        let reader = BufReader::new(stdout);
+        // A 64 KiB buffer, as MCP clients read: a long reply is one read.
+        let reader = BufReader::with_capacity(1 << 16, stdout);
         for line in reader.lines() {
             let Ok(line) = line else { break };
             if tx.send(line).is_err() {
