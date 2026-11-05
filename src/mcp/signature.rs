@@ -1,35 +1,23 @@
-//! Argument binding of the 1.5.2 tool callables.
+//! Argument checks for the MCP and HTTP tool calls.
 //!
-//! 1.5.2's stdio and HTTP servers call `tool_map[name](**arguments)`. Python
-//! binds the keywords, and a name the function does not take, or a required
-//! parameter that is missing, raises `TypeError` before the tool runs. The
-//! table below is `inspect.signature` of every full-mode callable in the PyPI
-//! 1.5.2 wheel. The messages follow CPython 3.13 (`ceval.c`
-//! `initialize_locals` and `suggestions.c`), including the
-//! "Did you mean" suggestion for a misspelt keyword.
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    /// Positional-or-keyword.
-    P,
-    /// Keyword-only (after `*`).
-    K,
-}
-
-use Kind::{K, P};
+//! The table is the parameter list of every full-mode tool in 1.5.2 (from
+//! `inspect.signature` of the PyPI wheel's callables), so 2.0 accepts and
+//! rejects the same argument names. 1.5.2 let Python raise `TypeError` with
+//! the method's internal name (`_IndexMixin.llm_embed() missing 1 required
+//! positional argument: 'chunk_id'`). 2.0 answers the same calls with a
+//! short error that names the tool, the field, what it expects, and the
+//! arguments to retry with, plus a "Did you mean" for a near miss.
 
 struct Sig {
     tool: &'static str,
-    qual: &'static str,
-    /// Bound method: `self` is the first parameter of the code object.
-    method: bool,
-    /// The callable takes `**kwargs`.
+    /// The tool takes any extra keyword (`**kwargs`).
     var_kw: bool,
-    params: &'static [(&'static str, Kind, bool)],
+    /// (name, required, expected type).
+    params: &'static [(&'static str, bool, &'static str)],
 }
 
-/// 1.5.2 `WRITE_TOOLS`. The server injects its agent id into these when the
-/// call has no `agent_id` and the callable takes one.
+/// 1.5.2 `WRITE_TOOLS`. The server fills in its own `agent_id` for these
+/// when the call has none and the tool takes one.
 const WRITE_TOOLS: &[&str] = &[
     "annotations",
     "batch",
@@ -49,574 +37,482 @@ const WRITE_TOOLS: &[&str] = &[
 const SIGS: &[Sig] = &[
     Sig {
         tool: "acquire_document_lock",
-        qual: "_LockMixin.acquire_document_lock",
-        method: true,
         var_kw: false,
         params: &[
-            ("document_path", P, true),
-            ("agent_id", P, true),
-            ("ttl", P, false),
-            ("force", P, false),
+            ("document_path", true, "string"),
+            ("agent_id", true, "string"),
+            ("ttl", false, "number"),
+            ("force", false, "boolean"),
         ],
     },
     Sig {
         tool: "agent_grep",
-        qual: "_SearchMixin.agent_grep",
-        method: true,
         var_kw: false,
         params: &[
-            ("pattern", P, true),
-            ("regex", P, false),
-            ("document_path", P, false),
-            ("classify", P, false),
-            ("include_scope", P, false),
-            ("group_by", P, false),
-            ("max_tokens", P, false),
-            ("deduplicate", P, false),
-            ("context_lines", P, false),
-            ("session_id", P, false),
-            ("working_tree", P, false),
+            ("pattern", true, "string"),
+            ("regex", false, "boolean"),
+            ("document_path", false, "string"),
+            ("classify", false, "boolean"),
+            ("include_scope", false, "boolean"),
+            ("group_by", false, "string"),
+            ("max_tokens", false, "integer"),
+            ("deduplicate", false, "boolean"),
+            ("context_lines", false, "integer"),
+            ("session_id", false, "string"),
+            ("working_tree", false, "boolean"),
         ],
     },
     Sig {
         tool: "annotate",
-        qual: "_IndexMixin.annotate",
-        method: true,
         var_kw: false,
         params: &[
-            ("target", P, true),
-            ("target_type", P, true),
-            ("content", P, true),
-            ("tags", P, false),
+            ("target", true, "string"),
+            ("target_type", true, "string"),
+            ("content", true, "string"),
+            ("tags", false, "list of strings"),
         ],
     },
     Sig {
         tool: "annotations",
-        qual: "_IndexMixin.annotations",
-        method: true,
         var_kw: false,
         params: &[
-            ("action", P, true),
-            ("target", P, false),
-            ("target_type", P, false),
-            ("content", P, false),
-            ("tags", P, false),
-            ("annotation_id", P, false),
-            ("query", P, false),
-            ("items", P, false),
+            ("action", true, "string"),
+            ("target", false, "string"),
+            ("target_type", false, "string"),
+            ("content", false, "string"),
+            ("tags", false, "list of strings"),
+            ("annotation_id", false, "integer"),
+            ("query", false, "string"),
+            ("items", false, "list of objects"),
         ],
     },
     Sig {
         tool: "batch",
-        qual: "Stele.batch",
-        method: true,
         var_kw: false,
-        params: &[("operations", P, true)],
+        params: &[("operations", true, "list of objects")],
     },
     Sig {
         tool: "bulk_annotate",
-        qual: "_IndexMixin.bulk_annotate",
-        method: true,
         var_kw: false,
-        params: &[("annotations", P, true)],
+        params: &[("annotations", true, "list of objects")],
     },
     Sig {
         tool: "bulk_store_chunk_agent_notes",
-        qual: "_IndexMixin.bulk_store_chunk_agent_notes",
-        method: true,
         var_kw: false,
-        params: &[("notes", P, true)],
+        params: &[("notes", true, "object of chunk_id to string")],
     },
     Sig {
         tool: "bulk_store_embeddings",
-        qual: "_IndexMixin.bulk_store_embeddings",
-        method: true,
         var_kw: false,
-        params: &[("embeddings", P, true)],
+        params: &[("embeddings", true, "object of chunk_id to number list")],
     },
     Sig {
         tool: "bulk_store_summaries",
-        qual: "_IndexMixin.bulk_store_summaries",
-        method: true,
         var_kw: false,
-        params: &[("summaries", P, true)],
+        params: &[("summaries", true, "object of chunk_id to string")],
     },
     Sig {
         tool: "clean_bytecache",
-        qual: "_InfoMixin.clean_bytecache",
-        method: true,
         var_kw: false,
         params: &[],
     },
     Sig {
         tool: "coupling",
-        qual: "_SymbolMixin.coupling",
-        method: true,
         var_kw: false,
         params: &[
-            ("document_path", P, true),
-            ("significance_threshold", P, false),
-            ("exclude_symbols", P, false),
-            ("mode", P, false),
+            ("document_path", true, "string"),
+            ("significance_threshold", false, "number"),
+            ("exclude_symbols", false, "list of strings"),
+            ("mode", false, "string"),
         ],
     },
     Sig {
         tool: "delete_annotation",
-        qual: "_IndexMixin.delete_annotation",
-        method: true,
         var_kw: false,
-        params: &[("annotation_id", P, true)],
+        params: &[("annotation_id", true, "integer")],
     },
     Sig {
         tool: "detect_changes",
-        qual: "_IndexMixin.detect_changes_and_update",
-        method: true,
         var_kw: false,
         params: &[
-            ("session_id", P, false),
-            ("document_paths", P, false),
-            ("reason", P, false),
-            ("agent_id", P, false),
-            ("scan_new", K, false),
-            ("limit", K, false),
+            ("session_id", false, "string"),
+            ("document_paths", false, "list of strings"),
+            ("reason", false, "string"),
+            ("agent_id", false, "string"),
+            ("scan_new", false, "boolean"),
+            ("limit", false, "integer"),
         ],
     },
     Sig {
         tool: "detect_modality",
-        qual: "build_tool_map.<locals>._detect_modality",
-        method: false,
         var_kw: true,
-        params: &[("path", P, false)],
+        params: &[("path", false, "string")],
     },
     Sig {
         tool: "doctor",
-        qual: "_InfoMixin.doctor_snapshot",
-        method: true,
         var_kw: false,
         params: &[],
     },
     Sig {
         tool: "document_lock",
-        qual: "_LockMixin.document_lock",
-        method: true,
         var_kw: false,
         params: &[
-            ("action", P, true),
-            ("document_path", P, false),
-            ("agent_id", P, false),
-            ("ttl", P, false),
-            ("force", P, false),
-            ("limit", P, false),
+            ("action", true, "string"),
+            ("document_path", false, "string"),
+            ("agent_id", false, "string"),
+            ("ttl", false, "number"),
+            ("force", false, "boolean"),
+            ("limit", false, "integer"),
         ],
     },
     Sig {
         tool: "enrichment_plan",
-        qual: "_InfoMixin.enrichment_plan",
-        method: true,
         var_kw: false,
-        params: &[("top_n", P, false), ("min_tokens", P, false)],
+        params: &[
+            ("top_n", false, "integer"),
+            ("min_tokens", false, "integer"),
+        ],
     },
     Sig {
         tool: "environment_check",
-        qual: "_InfoMixin.check_environment",
-        method: true,
         var_kw: false,
         params: &[],
     },
     Sig {
         tool: "find_definition",
-        qual: "_SymbolMixin.find_definition",
-        method: true,
         var_kw: false,
-        params: &[("symbol", P, true)],
+        params: &[("symbol", true, "string")],
     },
     Sig {
         tool: "find_references",
-        qual: "_SymbolMixin.find_references",
-        method: true,
         var_kw: false,
-        params: &[("symbol", P, true)],
+        params: &[("symbol", true, "string")],
     },
     Sig {
         tool: "get_annotations",
-        qual: "_IndexMixin.get_annotations",
-        method: true,
         var_kw: false,
         params: &[
-            ("target", P, false),
-            ("target_type", P, false),
-            ("tags", P, false),
+            ("target", false, "string"),
+            ("target_type", false, "string"),
+            ("tags", false, "list of strings"),
         ],
     },
     Sig {
         tool: "get_chunk_history",
-        qual: "_InfoMixin.get_chunk_history",
-        method: true,
         var_kw: false,
         params: &[
-            ("chunk_id", P, false),
-            ("document_path", P, false),
-            ("limit", P, false),
+            ("chunk_id", false, "string"),
+            ("document_path", false, "string"),
+            ("limit", false, "integer"),
         ],
     },
     Sig {
         tool: "get_conflicts",
-        qual: "_LockMixin.get_conflicts",
-        method: true,
         var_kw: false,
         params: &[
-            ("document_path", P, false),
-            ("agent_id", P, false),
-            ("limit", P, false),
+            ("document_path", false, "string"),
+            ("agent_id", false, "string"),
+            ("limit", false, "integer"),
         ],
     },
     Sig {
         tool: "get_context",
-        qual: "_SearchMixin.get_context",
-        method: true,
         var_kw: false,
         params: &[
-            ("document_paths", P, true),
-            ("session_id", K, false),
-            ("include_trust", K, false),
-            ("max_chunk_content_tokens", K, false),
-            ("include_diff", K, false),
-            ("max_diff_tokens", K, false),
+            ("document_paths", true, "list of strings"),
+            ("session_id", false, "string"),
+            ("include_trust", false, "boolean"),
+            ("max_chunk_content_tokens", false, "integer"),
+            ("include_diff", false, "boolean"),
+            ("max_diff_tokens", false, "integer"),
         ],
     },
     Sig {
         tool: "get_document_lock_status",
-        qual: "_LockMixin.get_document_lock_status",
-        method: true,
         var_kw: false,
-        params: &[("document_path", P, true)],
+        params: &[("document_path", true, "string")],
     },
     Sig {
         tool: "get_dynamic_symbols",
-        qual: "_SymbolMixin.get_dynamic_symbols",
-        method: true,
         var_kw: false,
-        params: &[("agent_id", P, false)],
+        params: &[("agent_id", false, "string")],
     },
     Sig {
         tool: "get_notifications",
-        qual: "_LockMixin.get_notifications",
-        method: true,
         var_kw: false,
         params: &[
-            ("since", P, false),
-            ("exclude_self", P, false),
-            ("limit", P, false),
+            ("since", false, "number"),
+            ("exclude_self", false, "string"),
+            ("limit", false, "integer"),
         ],
     },
     Sig {
         tool: "get_relevant_kv",
-        qual: "Stele.get_relevant_kv",
-        method: true,
         var_kw: false,
         params: &[
-            ("session_id", P, true),
-            ("query", P, true),
-            ("top_k", P, false),
+            ("session_id", true, "string"),
+            ("query", true, "string"),
+            ("top_k", false, "integer"),
         ],
     },
     Sig {
         tool: "get_search_history",
-        qual: "_SearchMixin.get_search_history",
-        method: true,
         var_kw: false,
-        params: &[("session_id", P, true)],
+        params: &[("session_id", true, "string")],
     },
     Sig {
         tool: "get_session_read_files",
-        qual: "_SearchMixin.get_session_read_files",
-        method: true,
         var_kw: false,
-        params: &[("session_id", P, true)],
+        params: &[("session_id", true, "string")],
     },
     Sig {
         tool: "get_supported_formats",
-        qual: "build_tool_map.<locals>._get_supported_formats",
-        method: false,
         var_kw: true,
         params: &[],
     },
     Sig {
         tool: "history",
-        qual: "_InfoMixin.get_history",
-        method: true,
         var_kw: false,
-        params: &[("limit", P, false), ("document_path", P, false)],
+        params: &[
+            ("limit", false, "integer"),
+            ("document_path", false, "string"),
+        ],
     },
     Sig {
         tool: "impact_radius",
-        qual: "_SymbolMixin.impact_radius",
-        method: true,
         var_kw: false,
         params: &[
-            ("chunk_id", P, false),
-            ("depth", P, false),
-            ("document_path", P, false),
-            ("symbol", P, false),
-            ("compact", K, false),
-            ("include_content", K, false),
-            ("path_filter", K, false),
-            ("summary_mode", K, false),
-            ("top_n_files", K, false),
-            ("significance_threshold", K, false),
-            ("exclude_symbols", K, false),
-            ("direction", K, false),
+            ("chunk_id", false, "string"),
+            ("depth", false, "integer"),
+            ("document_path", false, "string"),
+            ("symbol", false, "string"),
+            ("compact", false, "boolean"),
+            ("include_content", false, "boolean"),
+            ("path_filter", false, "string"),
+            ("summary_mode", false, "boolean"),
+            ("top_n_files", false, "integer"),
+            ("significance_threshold", false, "number"),
+            ("exclude_symbols", false, "list of strings"),
+            ("direction", false, "string"),
         ],
     },
     Sig {
         tool: "index",
-        qual: "_IndexMixin.index_documents",
-        method: true,
         var_kw: false,
         params: &[
-            ("paths", P, true),
-            ("force_reindex", P, false),
-            ("agent_id", P, false),
-            ("expected_versions", P, false),
-            ("summaries", P, false),
+            ("paths", true, "list of strings"),
+            ("force_reindex", false, "boolean"),
+            ("agent_id", false, "string"),
+            ("expected_versions", false, "object"),
+            ("summaries", false, "object"),
         ],
     },
     Sig {
         tool: "list_agents",
-        qual: "_LockMixin.list_agents",
-        method: true,
         var_kw: false,
-        params: &[("active_only", P, false)],
+        params: &[("active_only", false, "boolean")],
     },
     Sig {
         tool: "list_sessions",
-        qual: "_InfoMixin.list_sessions",
-        method: true,
         var_kw: false,
-        params: &[("agent_id", P, false)],
+        params: &[("agent_id", false, "string")],
     },
     Sig {
         tool: "llm_embed",
-        qual: "_IndexMixin.llm_embed",
-        method: true,
         var_kw: false,
         params: &[
-            ("text", P, true),
-            ("chunk_id", P, true),
-            ("fingerprint_values", P, false),
-            ("agent_id", P, false),
+            ("text", true, "string"),
+            ("chunk_id", true, "string"),
+            ("fingerprint_values", false, "list of numbers"),
+            ("agent_id", false, "string"),
         ],
     },
     Sig {
         tool: "map",
-        qual: "_InfoMixin.get_map",
-        method: true,
         var_kw: false,
         params: &[
-            ("compact", K, false),
-            ("max_documents", K, false),
-            ("max_annotation_chars", K, false),
-            ("path_prefix", K, false),
+            ("compact", false, "boolean"),
+            ("max_documents", false, "integer"),
+            ("max_annotation_chars", false, "integer"),
+            ("path_prefix", false, "string"),
         ],
     },
     Sig {
         tool: "project_brief",
-        qual: "_InfoMixin.get_project_brief",
-        method: true,
         var_kw: false,
-        params: &[("top_n", P, false)],
+        params: &[("top_n", false, "integer")],
     },
     Sig {
         tool: "prune_chunks",
-        qual: "Stele.prune_chunks",
-        method: true,
         var_kw: false,
-        params: &[("session_id", P, true), ("max_tokens", P, true)],
+        params: &[
+            ("session_id", true, "string"),
+            ("max_tokens", true, "integer"),
+        ],
     },
     Sig {
         tool: "prune_history",
-        qual: "_IndexMixin.prune_history",
-        method: true,
         var_kw: false,
-        params: &[("max_age_seconds", P, false), ("max_entries", P, false)],
+        params: &[
+            ("max_age_seconds", false, "number"),
+            ("max_entries", false, "integer"),
+        ],
     },
     Sig {
         tool: "query",
-        qual: "Stele.query",
-        method: true,
         var_kw: false,
         params: &[
-            ("query", P, true),
-            ("top_k", P, false),
-            ("path_prefix", P, false),
-            ("working_tree", P, false),
-            ("session_id", P, false),
-            ("search_mode", P, false),
-            ("compact", P, false),
-            ("max_result_tokens", P, false),
+            ("query", true, "string"),
+            ("top_k", false, "integer"),
+            ("path_prefix", false, "string"),
+            ("working_tree", false, "boolean"),
+            ("session_id", false, "string"),
+            ("search_mode", false, "string"),
+            ("compact", false, "boolean"),
+            ("max_result_tokens", false, "integer"),
         ],
     },
     Sig {
         tool: "reap_expired_locks",
-        qual: "_LockMixin.reap_expired_locks",
-        method: true,
         var_kw: false,
         params: &[],
     },
     Sig {
         tool: "rebuild_symbols",
-        qual: "_SymbolMixin.rebuild_symbol_graph",
-        method: true,
         var_kw: false,
         params: &[],
     },
     Sig {
         tool: "refresh_document_lock",
-        qual: "_LockMixin.refresh_document_lock",
-        method: true,
         var_kw: false,
         params: &[
-            ("document_path", P, true),
-            ("agent_id", P, true),
-            ("ttl", P, false),
+            ("document_path", true, "string"),
+            ("agent_id", true, "string"),
+            ("ttl", false, "number"),
         ],
     },
     Sig {
         tool: "register_dynamic_symbols",
-        qual: "_SymbolMixin.register_dynamic_symbols",
-        method: true,
         var_kw: false,
-        params: &[("symbols", P, true), ("agent_id", P, true)],
+        params: &[
+            ("symbols", true, "list of objects"),
+            ("agent_id", true, "string"),
+        ],
     },
     Sig {
         tool: "release_agent_locks",
-        qual: "_LockMixin.release_agent_locks",
-        method: true,
         var_kw: false,
-        params: &[("agent_id", P, true)],
+        params: &[("agent_id", true, "string")],
     },
     Sig {
         tool: "release_document_lock",
-        qual: "_LockMixin.release_document_lock",
-        method: true,
         var_kw: false,
-        params: &[("document_path", P, true), ("agent_id", P, true)],
+        params: &[
+            ("document_path", true, "string"),
+            ("agent_id", true, "string"),
+        ],
     },
     Sig {
         tool: "remove",
-        qual: "_IndexMixin.remove_document",
-        method: true,
         var_kw: false,
-        params: &[("document_path", P, true), ("agent_id", P, false)],
+        params: &[
+            ("document_path", true, "string"),
+            ("agent_id", false, "string"),
+        ],
     },
     Sig {
         tool: "remove_dynamic_symbols",
-        qual: "_SymbolMixin.remove_dynamic_symbols",
-        method: true,
         var_kw: false,
-        params: &[("agent_id", P, true)],
+        params: &[("agent_id", true, "string")],
     },
     Sig {
         tool: "rollback",
-        qual: "Stele.rollback",
-        method: true,
         var_kw: false,
-        params: &[("session_id", P, true), ("target_turn", P, true)],
+        params: &[
+            ("session_id", true, "string"),
+            ("target_turn", true, "integer"),
+        ],
     },
     Sig {
         tool: "save_kv_state",
-        qual: "Stele.save_kv_state",
-        method: true,
         var_kw: false,
         params: &[
-            ("session_id", P, true),
-            ("kv_data", P, true),
-            ("chunk_ids", P, false),
-            ("agent_id", P, false),
+            ("session_id", true, "string"),
+            ("kv_data", true, "object"),
+            ("chunk_ids", false, "list of strings"),
+            ("agent_id", false, "string"),
         ],
     },
     Sig {
         tool: "search",
-        qual: "_SearchMixin.search",
-        method: true,
         var_kw: false,
         params: &[
-            ("query", P, true),
-            ("top_k", P, false),
-            ("search_mode", K, false),
-            ("max_result_tokens", K, false),
-            ("compact", K, false),
-            ("return_response_meta", K, false),
-            ("path_prefix", K, false),
-            ("working_tree", K, false),
-            ("session_id", K, false),
+            ("query", true, "string"),
+            ("top_k", false, "integer"),
+            ("search_mode", false, "string"),
+            ("max_result_tokens", false, "integer"),
+            ("compact", false, "boolean"),
+            ("return_response_meta", false, "boolean"),
+            ("path_prefix", false, "string"),
+            ("working_tree", false, "boolean"),
+            ("session_id", false, "string"),
         ],
     },
     Sig {
         tool: "search_annotations",
-        qual: "_IndexMixin.search_annotations",
-        method: true,
         var_kw: false,
-        params: &[("query", P, true), ("target_type", P, false)],
+        params: &[("query", true, "string"), ("target_type", false, "string")],
     },
     Sig {
         tool: "search_text",
-        qual: "_SearchMixin.search_text",
-        method: true,
         var_kw: false,
         params: &[
-            ("pattern", P, true),
-            ("regex", P, false),
-            ("document_path", P, false),
-            ("limit", P, false),
-            ("session_id", P, false),
-            ("working_tree", P, false),
+            ("pattern", true, "string"),
+            ("regex", false, "boolean"),
+            ("document_path", false, "string"),
+            ("limit", false, "integer"),
+            ("session_id", false, "string"),
+            ("working_tree", false, "boolean"),
         ],
     },
     Sig {
         tool: "stale_chunks",
-        qual: "Stele.stale_chunks",
-        method: true,
         var_kw: false,
-        params: &[("threshold", P, false), ("max_age_seconds", P, false)],
+        params: &[
+            ("threshold", false, "number"),
+            ("max_age_seconds", false, "number"),
+        ],
     },
     Sig {
         tool: "stats",
-        qual: "_InfoMixin.get_stats",
-        method: true,
         var_kw: false,
-        params: &[("compact", K, false)],
+        params: &[("compact", false, "boolean")],
     },
     Sig {
         tool: "store_chunk_agent_notes",
-        qual: "_IndexMixin.store_chunk_agent_notes",
-        method: true,
         var_kw: false,
-        params: &[("chunk_id", P, true), ("notes", P, true)],
+        params: &[("chunk_id", true, "string"), ("notes", true, "string")],
     },
     Sig {
         tool: "store_embedding",
-        qual: "_IndexMixin.store_embedding",
-        method: true,
         var_kw: false,
-        params: &[("chunk_id", P, true), ("vector", P, true)],
+        params: &[
+            ("chunk_id", true, "string"),
+            ("vector", true, "list of numbers"),
+        ],
     },
     Sig {
         tool: "store_semantic_summary",
-        qual: "_IndexMixin.store_semantic_summary",
-        method: true,
         var_kw: false,
-        params: &[("chunk_id", P, true), ("summary", P, true)],
+        params: &[("chunk_id", true, "string"), ("summary", true, "string")],
     },
     Sig {
         tool: "update_annotation",
-        qual: "_IndexMixin.update_annotation",
-        method: true,
         var_kw: false,
         params: &[
-            ("annotation_id", P, true),
-            ("content", P, false),
-            ("tags", P, false),
+            ("annotation_id", true, "integer"),
+            ("content", false, "string"),
+            ("tags", false, "list of strings"),
         ],
     },
 ];
@@ -633,9 +529,9 @@ pub(crate) fn injects_agent(tool: &str) -> bool {
             .unwrap_or(false)
 }
 
-/// Bind `keys` (the argument names, in call order) the way Python binds
-/// `func(**arguments)`. `Err` is the `TypeError` text. `alias` names a key
-/// that is accepted on top of the 1.5.2 signature. `inject` is set where the
+/// Check `keys` (the argument names, in call order) against the tool's
+/// parameters. `alias` is an extra accepted name (`store_embedding`'s
+/// `embedding`, which stands in for `vector`). `inject` is set where the
 /// server adds its own `agent_id` (stdio and HTTP, not `batch`).
 pub(crate) fn bind(
     tool: &str,
@@ -648,13 +544,8 @@ pub(crate) fn bind(
     };
     let mut bound: Vec<&str> = Vec::new();
     for key in keys {
-        if row.method && *key == "self" {
-            return Err(format!(
-                "{}() got multiple values for argument 'self'",
-                row.qual
-            ));
-        }
         if alias == Some(*key) {
+            bound.push(if *key == "embedding" { "vector" } else { key });
             continue;
         }
         if row.params.iter().any(|(name, _, _)| name == key) {
@@ -664,61 +555,74 @@ pub(crate) fn bind(
         if row.var_kw {
             continue;
         }
-        let mut candidates: Vec<&str> = Vec::new();
-        if row.method {
-            candidates.push("self");
-        }
-        candidates.extend(row.params.iter().map(|(name, _, _)| *name));
-        return Err(match suggestion(&candidates, key) {
-            Some(hint) => format!(
-                "{}() got an unexpected keyword argument '{}'. Did you mean '{}'?",
-                row.qual, key, hint
-            ),
-            None => format!(
-                "{}() got an unexpected keyword argument '{}'",
-                row.qual, key
-            ),
-        });
+        let names: Vec<&str> = row.params.iter().map(|(name, _, _)| *name).collect();
+        let near = suggestion(&names, key)
+            .map(|hint| format!(" Did you mean '{hint}'?"))
+            .unwrap_or_default();
+        return Err(format!(
+            "{tool}: unknown argument '{key}'.{near} Valid arguments: {}.",
+            argument_list(row)
+        ));
     }
     if inject && injects_agent(tool) && !bound.contains(&"agent_id") {
         bound.push("agent_id");
     }
-    for (kind, label) in [(P, "positional"), (K, "keyword-only")] {
-        let missing: Vec<&str> = row
-            .params
-            .iter()
-            .filter(|(name, which, required)| {
-                *which == kind && *required && !bound.contains(name) && alias_fills(alias, name)
-            })
-            .map(|(name, _, _)| *name)
-            .collect();
-        if !missing.is_empty() {
-            return Err(format!(
-                "{}() missing {} required {} argument{}: {}",
-                row.qual,
-                missing.len(),
-                label,
-                if missing.len() == 1 { "" } else { "s" },
-                name_list(&missing)
-            ));
-        }
+    let missing: Vec<&(&str, bool, &str)> = row
+        .params
+        .iter()
+        .filter(|(name, required, _)| *required && !bound.contains(name))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    let names: Vec<&str> = missing.iter().map(|(name, _, _)| *name).collect();
+    let kinds: Vec<String> = missing
+        .iter()
+        .map(|(name, _, kind)| {
+            if missing.len() == 1 {
+                (*kind).to_string()
+            } else {
+                format!("{name}: {kind}")
+            }
+        })
+        .collect();
+    let required: Vec<&str> = row
+        .params
+        .iter()
+        .filter(|(_, required, _)| *required)
+        .map(|(name, _, _)| *name)
+        .collect();
+    let optional: Vec<&str> = row
+        .params
+        .iter()
+        .filter(|(_, required, _)| !*required)
+        .map(|(name, _, _)| *name)
+        .collect();
+    let mut message = format!(
+        "{tool}: {} {} required ({}). Required: {}.",
+        names.join(" and "),
+        if names.len() == 1 { "is" } else { "are" },
+        kinds.join(", "),
+        required.join(", ")
+    );
+    if !optional.is_empty() {
+        message.push_str(&format!(" Optional: {}.", optional.join(", ")));
+    }
+    Err(message)
 }
 
-/// The accepted `store_embedding` alias stands in for `vector`.
-fn alias_fills(alias: Option<&str>, name: &str) -> bool {
-    !(alias == Some("embedding") && name == "vector")
-}
-
-fn name_list(names: &[&str]) -> String {
-    let quoted: Vec<String> = names.iter().map(|name| format!("'{name}'")).collect();
-    match quoted.len() {
-        0 => String::new(),
-        1 => quoted[0].clone(),
-        2 => format!("{} and {}", quoted[0], quoted[1]),
-        n => format!("{}, and {}", quoted[..n - 1].join(", "), quoted[n - 1]),
-    }
+fn argument_list(row: &Sig) -> String {
+    row.params
+        .iter()
+        .map(|(name, required, _)| {
+            if *required {
+                format!("{name} (required)")
+            } else {
+                (*name).to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 const MOVE_COST: usize = 2;
@@ -739,7 +643,7 @@ fn substitution_cost(a: u8, b: u8) -> usize {
     }
 }
 
-/// `levenshtein_distance` from CPython `Python/suggestions.c`.
+/// CPython's `suggestions.c` edit distance (the one behind "Did you mean").
 fn levenshtein(a: &[u8], b: &[u8], max_cost: usize) -> usize {
     let mut a = a;
     let mut b = b;
@@ -786,7 +690,7 @@ fn levenshtein(a: &[u8], b: &[u8], max_cost: usize) -> usize {
     result
 }
 
-/// `_Py_CalculateSuggestions` over the parameter names.
+/// The closest parameter name, if it is within a third of the characters.
 fn suggestion<'a>(candidates: &[&'a str], name: &str) -> Option<&'a str> {
     let mut best: Option<&'a str> = None;
     let mut best_distance = usize::MAX;
@@ -812,19 +716,24 @@ fn suggestion<'a>(candidates: &[&'a str], name: &str) -> Option<&'a str> {
 mod tests {
     use super::*;
 
-    /// (tool, argument names). Each one is also called on the 1.5.2 tool map
-    /// and the TypeError text must be the same.
+    /// (tool, argument names). The same names are bound against the 1.5.2
+    /// callables: 2.0 must accept exactly what 1.5.2 accepts, and reject
+    /// the rest with a message that names the tool.
     const CASES: &[(&str, &[&str])] = &[
         ("llm_embed", &["text"]),
+        ("llm_embed", &["text", "chunk_id"]),
         ("llm_embed", &["text", "fingerprint_values"]),
         ("llm_embed", &[]),
         ("agent_grep", &["pattern", "path_prefix"]),
+        ("agent_grep", &["pattern", "context_lines", "session_id"]),
         ("query", &["text"]),
         ("query", &["querry"]),
+        ("query", &["query", "top_k", "path_prefix", "compact"]),
         ("search", &["query", "serch_mode"]),
         ("get_relevant_kv", &[]),
         ("get_context", &["path"]),
-        ("store_embedding", &["chunk_id", "embedding"]),
+        ("get_context", &["document_paths", "session_id"]),
+        ("store_embedding", &["chunk_id", "vector"]),
         ("store_embedding", &["chunk_id"]),
         ("bulk_annotate", &["items"]),
         ("find_definition", &["self"]),
@@ -833,31 +742,24 @@ mod tests {
         ("index", &["paths", "path"]),
         ("rollback", &[]),
         ("annotate", &["target"]),
+        ("doctor", &[]),
     ];
 
     #[test]
-    fn type_errors_match_python_152() {
+    fn accepts_and_rejects_the_same_calls_as_python_152() {
         let script = r#"
-import json, sys, tempfile
+import inspect, json, sys, tempfile
 from stele_context.engine import Stele
 from stele_context.tool_registry import build_tool_map, get_modality_flags
 d = tempfile.mkdtemp()
 tm = build_tool_map(Stele(storage_dir=d, project_root=d), get_modality_flags(), mode="full")
 out = []
 for tool, keys in json.loads(sys.stdin.read()):
-    # Values never reach the body: binding fails first, or the call is skipped.
     try:
-        import inspect
         inspect.signature(tm[tool]).bind(**{k: None for k in keys})
-        out.append(None)
-        continue
+        out.append(True)
     except TypeError:
-        pass
-    try:
-        tm[tool](**{k: None for k in keys})
-        out.append(None)
-    except TypeError as exc:
-        out.append(str(exc))
+        out.append(False)
 print(json.dumps(out))
 "#;
         let cases: Vec<crate::json::Value> = CASES
@@ -901,39 +803,40 @@ print(json.dumps(out))
             panic!("list")
         };
         for ((tool, keys), python) in CASES.iter().zip(rows) {
-            // The accepted alias is the one place the binding differs.
-            let alias = if *tool == "store_embedding" && keys.contains(&"embedding") {
-                Some("embedding")
-            } else {
-                None
-            };
-            let ours = bind(tool, keys, alias, false).err();
-            let theirs = match python {
-                crate::json::Value::String(text) => Some(text),
-                _ => None,
-            };
-            if alias.is_some() {
-                assert!(ours.is_none(), "{tool} {keys:?}: alias must bind");
-                assert!(
-                    theirs
-                        .as_deref()
-                        .unwrap_or("")
-                        .contains("unexpected keyword argument 'embedding'"),
-                    "{tool}: 1.5.2 rejects the alias"
-                );
-                continue;
+            let accepted = matches!(python, crate::json::Value::Bool(true));
+            let ours = bind(tool, keys, None, false);
+            assert_eq!(ours.is_ok(), accepted, "{tool} {keys:?}: {ours:?}");
+            if let Err(message) = ours {
+                assert!(message.starts_with(&format!("{tool}: ")), "{message}");
             }
-            assert_eq!(ours, theirs, "{tool} {keys:?}");
         }
     }
 
     #[test]
-    fn server_injects_agent_id_for_write_tools() {
-        assert!(bind("register_dynamic_symbols", &["symbols"], None, true).is_ok());
+    fn errors_name_the_field_and_the_retry() {
         assert_eq!(
-            bind("register_dynamic_symbols", &["symbols"], None, false).unwrap_err(),
-            "_SymbolMixin.register_dynamic_symbols() missing 1 required positional argument: 'agent_id'"
+            bind("llm_embed", &["text"], None, true).unwrap_err(),
+            "llm_embed: chunk_id is required (string). Required: text, chunk_id. Optional: fingerprint_values, agent_id."
         );
+        let unknown = bind("agent_grep", &["pattern", "path_prefix"], None, true).unwrap_err();
+        assert!(unknown.starts_with("agent_grep: unknown argument 'path_prefix'."));
+        assert!(unknown.contains("Valid arguments: pattern (required), regex, document_path"));
+        assert_eq!(
+            bind("query", &["querry"], None, true).unwrap_err(),
+            "query: unknown argument 'querry'. Did you mean 'query'? Valid arguments: query (required), top_k, path_prefix, working_tree, session_id, search_mode, compact, max_result_tokens."
+        );
+        // The accepted alias stands in for `vector`.
+        assert!(bind(
+            "store_embedding",
+            &["chunk_id", "embedding"],
+            Some("embedding"),
+            true
+        )
+        .is_ok());
+        assert!(bind("register_dynamic_symbols", &["symbols"], None, true).is_ok());
+        assert!(bind("register_dynamic_symbols", &["symbols"], None, false)
+            .unwrap_err()
+            .starts_with("register_dynamic_symbols: agent_id is required"));
         assert!(!injects_agent("annotations"));
     }
 }
