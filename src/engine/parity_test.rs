@@ -6,18 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn python_bin() -> &'static str {
-    fn imports(bin: &str) -> bool {
-        Command::new(bin)
-            .args(["-c", "import pymupdf"])
-            .output()
-            .map(|out| out.status.success())
-            .unwrap_or(false)
-    }
-    if imports("python3") {
-        "python3"
-    } else {
-        "python"
-    }
+    crate::oracle::reference()
 }
 
 #[test]

@@ -320,14 +320,14 @@ import json, sys
 from stele_context.llm_embedding import embed
 print(json.dumps(embed(sys.stdin.read())))
 "#;
-        let out = Command::new("python3")
+        let mut child = Command::new(crate::oracle::reference())
             .arg("-c")
             .arg(script)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn();
-        let Ok(mut child) = out else { return };
+            .spawn()
+            .expect("python");
         use std::io::Write;
         child
             .stdin
@@ -336,9 +336,12 @@ print(json.dumps(embed(sys.stdin.read())))
             .write_all(text.as_bytes())
             .unwrap();
         let done = child.wait_with_output().unwrap();
-        if !done.status.success() {
-            return;
-        }
+        assert!(
+            done.status.success(),
+            "python embed failed
+{}",
+            String::from_utf8_lossy(&done.stderr)
+        );
         let value = crate::json::parse(&String::from_utf8_lossy(&done.stdout)).unwrap();
         let crate::json::Value::Array(rows) = value else {
             panic!("vec")

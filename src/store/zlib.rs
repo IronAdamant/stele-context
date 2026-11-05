@@ -643,13 +643,13 @@ mod tests {
         let compressed = compress(sample);
         let plain = crate::media::zlib_decode(&compressed);
         assert_eq!(plain.as_deref(), Some(sample));
-        let mut child = std::process::Command::new("python3")
+        let mut child = std::process::Command::new(crate::oracle::plain())
             .arg("-c")
             .arg("import sys,zlib; sys.stdout.buffer.write(zlib.compress(sys.stdin.buffer.read()))")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
-            .expect("python3");
+            .expect("python");
         {
             use std::io::Write;
             child.stdin.as_mut().unwrap().write_all(sample).unwrap();

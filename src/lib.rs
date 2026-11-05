@@ -14,6 +14,8 @@ pub mod lang;
 pub mod locks;
 pub mod mcp;
 pub mod media;
+#[cfg(test)]
+pub(crate) mod oracle;
 pub mod pyre;
 pub mod root;
 pub mod search;

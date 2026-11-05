@@ -496,10 +496,6 @@ con.commit()
     }
 
     fn python() -> &'static str {
-        if Command::new("python3").arg("--version").output().is_ok() {
-            "python3"
-        } else {
-            "python"
-        }
+        crate::oracle::plain()
     }
 }
