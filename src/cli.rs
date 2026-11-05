@@ -74,6 +74,9 @@ struct Parsed {
     top_n: Option<usize>,
     min_tokens: Option<usize>,
     max_tokens: Option<i64>,
+    max_result_tokens: Option<i64>,
+    context_lines: Option<i64>,
+    meta: bool,
     group_by: Option<String>,
     no_index: bool,
     tags: Vec<String>,
@@ -294,72 +297,22 @@ impl Parsed {
             }
             "migrate" => engine.migrate(),
             "search" => {
+                // 1.5.2 `cmd_search`: --compact, --max-result-tokens or
+                // --meta return {results, meta}.
                 if self.working_tree {
                     engine.index_working_tree();
                 }
-                let mut value = engine.search(positional, &self.search_mode, self.top_k);
-                if let Some(prefix) = &self.path_prefix {
-                    if let crate::json::Value::Array(rows) = &mut value {
-                        rows.retain(|row| {
-                            crate::store::string_field(row, "document_path").starts_with(prefix)
-                        });
-                    }
-                }
-                if self.compact == Some(true) {
-                    if let crate::json::Value::Array(rows) = &mut value {
-                        let total = rows.len() as i64;
-                        let mut used = 0i64;
-                        for row in rows.iter_mut() {
-                            let crate::json::Value::Object(pairs) = row else {
-                                continue;
-                            };
-                            let content = pairs.iter().find(|(key, _)| key == "content").and_then(
-                                |(_, item)| match item {
-                                    crate::json::Value::String(text) => Some(text.clone()),
-                                    _ => None,
-                                },
-                            );
-                            let Some(content) = content else {
-                                continue;
-                            };
-                            let preview = if content.chars().count() > 400 {
-                                let mut text: String = content.chars().take(400).collect();
-                                text.push('\u{2026}');
-                                text
-                            } else {
-                                content.clone()
-                            };
-                            used += (crate::chunk::estimate_tokens(&preview) + 32) as i64;
-                            pairs.retain(|(key, _)| key != "content");
-                            pairs.push((
-                                "content_preview".to_string(),
-                                crate::json::Value::string(preview),
-                            ));
-                            pairs.push((
-                                "content_token_estimate".to_string(),
-                                crate::json::Value::Int(
-                                    crate::chunk::estimate_tokens(&content) as i64
-                                ),
-                            ));
-                        }
-                        value = crate::json::Value::object(vec![
-                            (
-                                "results",
-                                std::mem::replace(&mut value, crate::json::Value::Null),
-                            ),
-                            (
-                                "meta",
-                                crate::json::Value::object(vec![
-                                    ("estimated_tokens_used", crate::json::Value::Int(used)),
-                                    ("returned", crate::json::Value::Int(total)),
-                                    ("total_results", crate::json::Value::Int(total)),
-                                    ("truncated", crate::json::Value::Bool(false)),
-                                ]),
-                            ),
-                        ]);
-                    }
-                }
-                Ok(value)
+                let compact = self.compact == Some(true);
+                let want_meta = self.meta || compact || self.max_result_tokens.is_some();
+                Ok(engine.search_full(
+                    positional,
+                    &self.search_mode,
+                    self.top_k,
+                    self.path_prefix.as_deref(),
+                    compact,
+                    self.max_result_tokens,
+                    want_meta,
+                ))
             }
             "search-text" => engine.text_search(
                 positional,
@@ -378,20 +331,34 @@ impl Parsed {
                 self.group_by.as_deref().unwrap_or("file"),
                 self.max_tokens.unwrap_or(4000),
                 true,
-                0,
+                self.context_lines.unwrap_or(0),
                 self.session.as_deref(),
                 self.working_tree,
             ),
-            "query" => {
-                if self.working_tree {
-                    engine.index_working_tree();
-                }
-                engine.query(positional)
-            }
+            "query" => engine.query_full(
+                positional,
+                self.top_k,
+                self.path_prefix.as_deref(),
+                self.working_tree,
+                self.session.as_deref(),
+                &self.search_mode,
+                self.compact.unwrap_or(true),
+                self.max_result_tokens,
+            ),
             "find-definition" => Ok(engine.find_definition(positional)),
             "find-references" => Ok(engine.find_references(positional)),
-            "impact-radius" => Ok(engine.impact(self.symbol.as_deref().unwrap_or(positional))),
-            "coupling" => Ok(engine.coupling(positional)),
+            "impact-radius" => Ok(engine.impact_radius(
+                self.symbol.as_deref().unwrap_or(positional),
+                self.document.as_deref(),
+                self.chunk_id.as_deref(),
+                self.depth.unwrap_or(2),
+                self.summary_mode,
+            )),
+            "coupling" => Ok(engine.coupling_mode(
+                positional,
+                self.mode.as_deref().unwrap_or("edges"),
+                self.significance.unwrap_or(0.0),
+            )),
             "get-context" => engine.get_context(positional, self.session.as_deref()),
             "init" => init_marker(&engine.cwd),
             "annotate" => {
@@ -481,6 +448,9 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         top_n: None,
         min_tokens: None,
         max_tokens: None,
+        max_result_tokens: None,
+        context_lines: None,
+        meta: false,
         group_by: None,
         no_index: false,
         tags: Vec::new(),
@@ -539,7 +509,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                 "--confirm" => parsed.confirm = true,
                 "--compact" => parsed.compact = Some(true),
                 "--no-compact" => parsed.compact = Some(false),
-                "--meta" => {}
+                "--meta" => parsed.meta = true,
                 "--no-classify" => {}
                 "--no-scope" => {}
                 "--no-dedup" => {}
@@ -618,6 +588,12 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                         .map_err(|_| format!("{arg} needs an integer"))?;
                     if arg == "--max-tokens" {
                         parsed.max_tokens = Some(value);
+                    }
+                    if arg == "--max-result-tokens" {
+                        parsed.max_result_tokens = Some(value);
+                    }
+                    if arg == "--context-lines" {
+                        parsed.context_lines = Some(value);
                     }
                     if arg == "--min-tokens" {
                         parsed.min_tokens = Some(value as usize);
