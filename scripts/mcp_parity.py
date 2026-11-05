@@ -287,19 +287,7 @@ def documented(name, left, right):
                 for key in SQLITE_FIELDS:
                     health.pop(key, None)
         notes.append("sqlite pragma and database file fields")
-        for side in (left, right):
-            side.pop("python", None)
-        notes.append("python is null; the binary does not start an interpreter")
-    if name == "stats" and isinstance(left, dict) and isinstance(right, dict):
-        storage = left.get("storage") if isinstance(left.get("storage"), dict) else None
-        other = right.get("storage") if isinstance(right.get("storage"), dict) else None
-        if isinstance(storage, dict) and isinstance(other, dict):
-            storage.pop("kv_cache_size_bytes", None)
-            other.pop("kv_cache_size_bytes", None)
-            notes.append("kv_cache_size_bytes is zlib files on 1.5.2")
-        index = left.get("index") if isinstance(left.get("index"), dict) else None
-        other_index = right.get("index") if isinstance(right.get("index"), dict) else None
-        # insert_count is compared. It is the HNSW insert counter.
+    # stats.kv_cache_size_bytes and index.insert_count are compared.
     if name == "get_supported_formats" and isinstance(left, dict) and isinstance(right, dict):
         lf = left.get("formats") if isinstance(left.get("formats"), dict) else {}
         rf = right.get("formats") if isinstance(right.get("formats"), dict) else {}
