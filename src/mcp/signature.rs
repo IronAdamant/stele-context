@@ -2,7 +2,9 @@
 //!
 //! The table is the parameter list of every full-mode tool in 1.5.2 (from
 //! `inspect.signature` of the PyPI wheel's callables), so 2.0 accepts and
-//! rejects the same argument names. 1.5.2 let Python raise `TypeError` with
+//! rejects the same argument names. Rows marked 2.2 add the `full` and
+//! `limit` switches of the compact defaults (MIGRATION.md). `catalog`
+//! builds the tools/list schemas from this table. 1.5.2 let Python raise `TypeError` with
 //! the method's internal name (`_IndexMixin.llm_embed() missing 1 required
 //! positional argument: 'chunk_id'`). 2.0 answers the same calls with a
 //! short error that names the tool, the field, what it expects, and the
@@ -141,6 +143,8 @@ const SIGS: &[Sig] = &[
             ("agent_id", false, "string"),
             ("scan_new", false, "boolean"),
             ("limit", false, "integer"),
+            // 2.2 (MIGRATION.md).
+            ("full", false, "boolean"),
         ],
     },
     Sig {
@@ -181,7 +185,12 @@ const SIGS: &[Sig] = &[
     Sig {
         tool: "find_definition",
         var_kw: false,
-        params: &[("symbol", true, "string")],
+        // 2.2: `full` and `limit` (MIGRATION.md).
+        params: &[
+            ("symbol", true, "string"),
+            ("full", false, "boolean"),
+            ("limit", false, "integer"),
+        ],
     },
     Sig {
         tool: "find_references",
@@ -244,6 +253,8 @@ const SIGS: &[Sig] = &[
             ("since", false, "number"),
             ("exclude_self", false, "string"),
             ("limit", false, "integer"),
+            // 2.2 (MIGRATION.md).
+            ("full", false, "boolean"),
         ],
     },
     Sig {
@@ -276,6 +287,8 @@ const SIGS: &[Sig] = &[
         params: &[
             ("limit", false, "integer"),
             ("document_path", false, "string"),
+            // 2.2 (MIGRATION.md).
+            ("full", false, "boolean"),
         ],
     },
     Sig {
@@ -305,6 +318,8 @@ const SIGS: &[Sig] = &[
             ("agent_id", false, "string"),
             ("expected_versions", false, "object"),
             ("summaries", false, "object"),
+            // 2.2 (MIGRATION.md).
+            ("full", false, "boolean"),
         ],
     },
     Sig {
@@ -519,6 +534,12 @@ const SIGS: &[Sig] = &[
 
 fn sig(tool: &str) -> Option<&'static Sig> {
     SIGS.iter().find(|row| row.tool == tool)
+}
+
+/// (name, required, type) of each argument the tool takes.
+#[cfg(test)]
+pub(crate) fn params(tool: &str) -> Option<&'static [(&'static str, bool, &'static str)]> {
+    sig(tool).map(|row| row.params)
 }
 
 /// The server fills `agent_id` for this tool when the caller leaves it out.

@@ -52,11 +52,13 @@ fn acquire(
         let view = shared.as_deref();
         live_holder(state, view, path, now)
     };
-    if let Some((holder, until)) = existing {
-        if holder != agent && !force {
+    if let Some((holder, until, auto)) = existing {
+        // An index-time lock is not a claim: it yields to an explicit
+        // acquire, the indexing agent's own included, with no conflict.
+        if holder != agent && !auto && !force {
             return Ok(refused(shared.as_deref(), &holder, until));
         }
-        if holder != agent && force {
+        if holder != agent && !auto && force {
             record_conflict(state, &mut shared, path, &holder, agent, now);
         }
     }
@@ -89,7 +91,7 @@ fn refresh(
         live_holder(state, view, path, now)
     };
     match existing {
-        Some((holder, _)) if holder == agent => {
+        Some((holder, _, _)) if holder == agent => {
             write_lock(state, shared, path, agent, now + TTL);
             Ok(Value::object(vec![
                 ("refreshed", Value::Bool(true)),
@@ -113,6 +115,7 @@ fn write_lock(state: &mut State, shared: Option<&mut Shared>, path: &str, agent:
         path: path.to_string(),
         agent: agent.to_string(),
         until,
+        auto: false,
     });
     if let Some(shared) = shared {
         shared.locks.retain(|lock| lock.path != path);
@@ -120,6 +123,7 @@ fn write_lock(state: &mut State, shared: Option<&mut Shared>, path: &str, agent:
             path: path.to_string(),
             agent: agent.to_string(),
             until,
+            auto: false,
         });
     }
 }
@@ -188,14 +192,14 @@ fn release(
     }
     let holder = {
         let view = shared.as_deref();
-        live_holder(state, view, path, now).map(|(name, _)| name)
+        live_holder(state, view, path, now)
     };
     match holder {
         None => Value::object(vec![
             ("released", Value::Bool(false)),
             ("reason", Value::string("not_locked")),
         ]),
-        Some(holder) if holder != agent => Value::object(vec![
+        Some((holder, _, auto)) if holder != agent && !auto => Value::object(vec![
             ("released", Value::Bool(false)),
             ("reason", Value::string("not_owner")),
         ]),
@@ -212,7 +216,7 @@ fn release(
 fn status(state: &State, shared: Option<&Shared>, path: &str, now: i64, _cwd: &Path) -> Value {
     match live_holder(state, shared, path, now) {
         None => Value::object(vec![("locked", Value::Bool(false))]),
-        Some((holder, until)) => {
+        Some((holder, until, auto)) => {
             let worktree = shared
                 .and_then(|shared| {
                     shared.agents.iter().find_map(|row| {
@@ -224,13 +228,18 @@ fn status(state: &State, shared: Option<&Shared>, path: &str, now: i64, _cwd: &P
                     })
                 })
                 .unwrap_or(Value::Null);
-            Value::object(vec![
+            let mut pairs = vec![
                 ("locked", Value::Bool(true)),
                 ("locked_by", Value::string(holder)),
                 ("locked_at", Value::Float((until - TTL) as f64)),
                 ("expires_at", Value::Float(until as f64)),
                 ("worktree", worktree),
-            ])
+            ];
+            if auto {
+                // Tell the agent it can take the file: `acquire` succeeds.
+                pairs.push(("auto", Value::Bool(true)));
+            }
+            Value::object(pairs)
         }
     }
 }
@@ -317,12 +326,14 @@ fn refused(shared: Option<&Shared>, holder: &str, until: i64) -> Value {
     ])
 }
 
+/// The live holder of `path`: agent, expiry, and whether it is an
+/// index-time lock.
 fn live_holder(
     state: &State,
     shared: Option<&Shared>,
     path: &str,
     now: i64,
-) -> Option<(String, i64)> {
+) -> Option<(String, i64, bool)> {
     // The coordination file is the holder for every worktree. A snapshot
     // copy can still name the agent who lost a force-steal.
     if let Some(shared) = shared {
@@ -332,7 +343,7 @@ fn live_holder(
         .locks
         .iter()
         .find(|lock| lock.path == path && lock.until > now)
-        .map(|lock| (lock.agent.clone(), lock.until))
+        .map(|lock| (lock.agent.clone(), lock.until, lock.auto))
 }
 
 #[cfg(test)]
@@ -374,6 +385,80 @@ mod tests {
         let status = apply(&mut state, &root, "status", "a.py", "", 1_020, false).unwrap();
         assert!(json::to_string(&status).contains("agent-b"));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 2.2: an index-time lock never blocks an explicit acquire (the
+    /// indexing agent's own or another's) and never replaces an explicit
+    /// lock; an explicit lock still refuses other agents.
+    #[test]
+    fn index_locks_yield_and_never_replace_explicit_locks() {
+        for git in [false, true] {
+            let root =
+                std::env::temp_dir().join(format!("stele-lock-auto-{}-{git}", std::process::id()));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(&root).unwrap();
+            if git {
+                fs::create_dir_all(root.join(".git")).unwrap();
+            }
+            let mut state = State::default();
+            let paths = vec!["a.py".to_string(), "b.py".to_string()];
+            // The server indexes both files for its own agent id.
+            super::hold_auto(&mut state.locks, &paths, "stele-context-mcp-1", 1_000);
+            super::hold_shared(&root, &paths, "stele-context-mcp-1", 1_000);
+            let status = json::to_string(
+                &apply(&mut state, &root, "status", "a.py", "", 1_001, false).unwrap(),
+            );
+            assert!(status.contains("\"auto\":true"), "{status}");
+            // The agent behind that server claims a.py under its own id.
+            let mine = json::to_string(
+                &apply(
+                    &mut state, &root, "acquire", "a.py", "agent-a", 1_002, false,
+                )
+                .unwrap(),
+            );
+            assert!(mine.contains("\"acquired\":true"), "git={git} {mine}");
+            // Another agent takes b.py from the index lock too.
+            let theirs = json::to_string(
+                &apply(
+                    &mut state, &root, "acquire", "b.py", "agent-b", 1_003, false,
+                )
+                .unwrap(),
+            );
+            assert!(theirs.contains("\"acquired\":true"), "git={git} {theirs}");
+            // No conflict is logged for taking an index lock.
+            let log = json::to_string(
+                &apply(&mut state, &root, "conflicts", "", "", 1_003, false).unwrap(),
+            );
+            assert!(log.contains("\"conflicts\":[]"), "{log}");
+            // Re-indexing keeps both explicit locks.
+            super::hold_auto(&mut state.locks, &paths, "stele-context-mcp-1", 1_004);
+            super::hold_shared(&root, &paths, "stele-context-mcp-1", 1_004);
+            let held = json::to_string(
+                &apply(&mut state, &root, "status", "a.py", "", 1_005, false).unwrap(),
+            );
+            assert!(
+                held.contains("\"locked_by\":\"agent-a\""),
+                "git={git} {held}"
+            );
+            assert!(!held.contains("auto"), "{held}");
+            // An explicit lock still refuses another agent, and its owner
+            // can refresh it.
+            let refused = json::to_string(
+                &apply(
+                    &mut state, &root, "acquire", "a.py", "agent-b", 1_006, false,
+                )
+                .unwrap(),
+            );
+            assert!(refused.contains("\"acquired\":false"), "{refused}");
+            let again = json::to_string(
+                &apply(
+                    &mut state, &root, "acquire", "a.py", "agent-a", 1_007, false,
+                )
+                .unwrap(),
+            );
+            assert!(again.contains("\"acquired\":true"), "{again}");
+            let _ = fs::remove_dir_all(&root);
+        }
     }
 
     #[test]
@@ -471,11 +556,11 @@ impl Shared {
         })
     }
 
-    fn live(&self, path: &str, now: i64) -> Option<(String, i64)> {
+    fn live(&self, path: &str, now: i64) -> Option<(String, i64, bool)> {
         self.locks
             .iter()
             .find(|lock| lock.path == path && lock.until > now)
-            .map(|lock| (lock.agent.clone(), lock.until))
+            .map(|lock| (lock.agent.clone(), lock.until, lock.auto))
     }
 
     fn save(&self) {
@@ -486,11 +571,15 @@ impl Shared {
                     self.locks
                         .iter()
                         .map(|lock| {
-                            Value::object(vec![
+                            let mut pairs = vec![
                                 ("path", Value::string(&lock.path)),
                                 ("agent", Value::string(&lock.agent)),
                                 ("until", Value::Int(lock.until)),
-                            ])
+                            ];
+                            if lock.auto {
+                                pairs.push(("auto", Value::Bool(true)));
+                            }
+                            Value::object(pairs)
                         })
                         .collect(),
                 ),
@@ -524,6 +613,7 @@ fn lock_from(value: &Value) -> crate::store::Lock {
         path: text_field(value, "path"),
         agent: text_field(value, "agent"),
         until: int_field(value, "until"),
+        auto: matches!(field(value, "auto"), Some(Value::Bool(true))),
     }
 }
 
@@ -551,20 +641,44 @@ fn int_field(value: &Value, key: &str) -> i64 {
     }
 }
 
-pub fn hold_shared(start: &Path, path: &str, agent: &str, now: i64) {
+/// Index-time locks on `paths` for `agent`, in one read and one write of
+/// the coordination file. A live explicit lock is left alone.
+pub fn hold_shared(start: &Path, paths: &[String], agent: &str, now: i64) {
+    if paths.is_empty() {
+        return;
+    }
     let Some(dir) = coordination_dir(start) else {
         return;
     };
     let Some(mut shared) = Shared::load(&dir) else {
         return;
     };
-    shared.locks.retain(|lock| lock.path != path);
-    shared.locks.push(crate::store::Lock {
-        path: path.to_string(),
-        agent: agent.to_string(),
-        until: now + TTL,
-    });
+    hold_auto(&mut shared.locks, paths, agent, now);
     shared.save();
+}
+
+/// Put an index-time lock on each path that has no live explicit lock.
+pub fn hold_auto(locks: &mut Vec<crate::store::Lock>, paths: &[String], agent: &str, now: i64) {
+    let claimed: std::collections::HashSet<String> = locks
+        .iter()
+        .filter(|lock| lock.until > now && !lock.auto)
+        .map(|lock| lock.path.clone())
+        .collect();
+    let fresh: std::collections::HashSet<&String> = paths
+        .iter()
+        .filter(|path| !claimed.contains(*path))
+        .collect();
+    locks.retain(|lock| !fresh.contains(&lock.path));
+    for path in paths {
+        if fresh.contains(path) {
+            locks.push(crate::store::Lock {
+                path: path.clone(),
+                agent: agent.to_string(),
+                until: now + TTL,
+                auto: true,
+            });
+        }
+    }
 }
 
 pub fn register_agent(start: &Path, agent: &str, worktree: &str) {

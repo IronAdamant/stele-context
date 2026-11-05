@@ -162,6 +162,28 @@ impl Engine {
         &self.server_agent
     }
 
+    /// Between tool calls a server lets go of the store, so another agent's
+    /// server or the CLI can use it.
+    pub fn release_store(&mut self) {
+        self.store.unlock();
+    }
+
+    /// Take the store back for a tool call. When another process wrote it
+    /// meanwhile, reload it and drop what was derived from the old state.
+    pub fn reacquire_store(&mut self) -> Result<(), String> {
+        if !self.store.relock()? {
+            return Ok(());
+        }
+        self.store.reload_full()?;
+        self.documents_only = false;
+        self.bm25 = Bm25::new();
+        self.bm25_ready = false;
+        self.bm25_excluded.clear();
+        self.hnsw_ready.set(false);
+        self.graph_cache.set(None);
+        Ok(())
+    }
+
     pub fn remember_server_agent(&mut self, id: &str) {
         self.server_agent = id.to_string();
     }
@@ -254,15 +276,12 @@ impl Engine {
                 && !fresh.is_empty()
                 && crate::locks::coordination_dir(&self.cwd).is_none()
             {
-                let until = now_secs() + crate::locks::TTL;
-                for path in &fresh {
-                    self.store.state.locks.retain(|lock| &lock.path != path);
-                    self.store.state.locks.push(crate::store::Lock {
-                        path: path.clone(),
-                        agent: self.server_agent.clone(),
-                        until,
-                    });
-                }
+                crate::locks::hold_auto(
+                    &mut self.store.state.locks,
+                    &fresh,
+                    &self.server_agent,
+                    now_secs(),
+                );
             }
             self.store.save(
                 "index",
@@ -279,11 +298,7 @@ impl Engine {
             }
             crate::locks::note_indexed(&self.cwd, &fresh, &self.server_agent);
             if !self.server_agent.is_empty() {
-                let now = now_secs();
-                let agent = self.server_agent.clone();
-                for path in &fresh {
-                    crate::locks::hold_shared(&self.cwd, path, &agent, now);
-                }
+                crate::locks::hold_shared(&self.cwd, &fresh, &self.server_agent, now_secs());
             }
         }
         Ok(Value::object(vec![
@@ -1220,6 +1235,35 @@ impl Engine {
     }
 
     pub fn history(&self) -> Result<Value, String> {
+        self.history_with(usize::MAX, None)
+    }
+
+    /// 1.5.2 `get_history(limit, document_path)`: newest first, at most
+    /// `limit` rows. With a path, only runs that name it, each summary cut
+    /// down to that file's entries plus `totals`.
+    pub fn history_with(&self, limit: usize, document_path: Option<&str>) -> Result<Value, String> {
+        let Value::Array(rows) = self.history_rows()? else {
+            return Ok(Value::Array(Vec::new()));
+        };
+        let wanted = document_path.map(|path| self.doc_path(path));
+        let mut out = Vec::new();
+        for row in rows {
+            if out.len() >= limit {
+                break;
+            }
+            match &wanted {
+                None => out.push(row),
+                Some(path) => {
+                    if let Some(row) = history_for(row, path) {
+                        out.push(row);
+                    }
+                }
+            }
+        }
+        Ok(Value::Array(out))
+    }
+
+    fn history_rows(&self) -> Result<Value, String> {
         let logged = if self.store.state.change_log.is_empty() {
             crate::store::ChangeRow::load_file(&self.storage)
         } else {
@@ -1554,6 +1598,51 @@ impl Engine {
         self.bm25_excluded.clear();
         self.rebuild_bm25();
     }
+}
+
+/// 1.5.2 `_summary_mentions_document` and `_compact_summary_for_document`.
+fn history_for(row: Value, path: &str) -> Option<Value> {
+    let Value::Object(mut pairs) = row else {
+        return None;
+    };
+    let slot = pairs.iter().position(|(key, _)| key == "summary")?;
+    let Value::Object(summary) = &pairs[slot].1 else {
+        return None;
+    };
+    let names = |entry: &Value| match entry {
+        Value::String(text) => text == path,
+        Value::Object(_) => crate::store::string_field(entry, "path") == path,
+        _ => false,
+    };
+    let mut kept = Vec::new();
+    let mut totals = Vec::new();
+    let mut mentioned = false;
+    for key in ["unchanged", "removed", "modified", "new"] {
+        let Some((_, Value::Array(entries))) = summary.iter().find(|(name, _)| name == key) else {
+            continue;
+        };
+        totals.push((key.to_string(), Value::Int(entries.len() as i64)));
+        let matched: Vec<Value> = entries
+            .iter()
+            .filter(|entry| names(entry))
+            .cloned()
+            .collect();
+        if !matched.is_empty() {
+            mentioned = true;
+            kept.push((key.to_string(), Value::Array(matched)));
+        }
+    }
+    if !mentioned {
+        return None;
+    }
+    for (key, value) in summary {
+        if !["unchanged", "removed", "modified", "new", "totals"].contains(&key.as_str()) {
+            kept.push((key.clone(), value.clone()));
+        }
+    }
+    kept.push(("totals".to_string(), Value::Object(totals)));
+    pairs[slot].1 = Value::Object(kept);
+    Some(Value::Object(pairs))
 }
 
 fn busy_ratio(failures: u64, operations: u64) -> f64 {

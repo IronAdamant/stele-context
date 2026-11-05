@@ -371,7 +371,7 @@ fn parity(binary: &str, python: &str) -> Option<usize> {
     while !pending.is_empty() {
         let (name, arguments) = pending.remove(0);
         invoked.insert(name.clone());
-        let left = tool(&mut rust, &name, arguments.clone());
+        let left = tool(&mut rust, &name, rust_args(&name, arguments.clone()));
         let right = tool(&mut python_server, &name, arguments);
         let mut bad = Vec::new();
         let mut left_n = walk(&left, &root_s, &rs_s, "");
@@ -526,7 +526,7 @@ fn parity(binary: &str, python: &str) -> Option<usize> {
         ));
     }
     for (name, arguments) in probes {
-        let left = tool(&mut rust, name, arguments.clone());
+        let left = tool(&mut rust, name, rust_args(name, arguments.clone()));
         let right = tool(&mut python_server, name, arguments);
         let mut left_n = walk(&left, &root_s, &rs_s, "");
         let mut right_n = walk(&right, &root_s, &py_s, "");
@@ -725,7 +725,7 @@ fn parity(binary: &str, python: &str) -> Option<usize> {
             ),
         ];
         for (name, arguments) in alias_calls {
-            let left = tool(&mut rust_b, name, arguments.clone());
+            let left = tool(&mut rust_b, name, rust_args(name, arguments.clone()));
             let right = tool(&mut python_b, name, arguments);
             if name == "bulk_annotate" {
                 let mut left_n = left.clone();
@@ -1082,6 +1082,51 @@ fn pump_lines(mut pipe: impl Read, tx: Sender<Result<String, String>>) {
     }
 }
 
+/// The 1.5.2 output of a tool whose 2.2 default is compact (MIGRATION.md):
+/// ask the Rust server for `full`, or pass 1.5.2's default, so the two
+/// sides run the same function. Calls inside `batch` get the same.
+fn rust_args(name: &str, arguments: Py) -> Py {
+    let Py::Dict(mut pairs) = arguments else {
+        return arguments;
+    };
+    let mut default = |key: &str, value: Py| {
+        if lookup(&pairs, key).is_none() {
+            pairs.push((key.to_string(), value));
+        }
+    };
+    match name {
+        "find_definition" | "index" | "detect_changes" | "history" => {
+            default("full", Py::Bool(true));
+        }
+        "get_notifications" => {
+            default("full", Py::Bool(true));
+            default("limit", int(100));
+        }
+        "search" => default("compact", Py::Bool(false)),
+        "search_text" => default("limit", int(50)),
+        "agent_grep" => default("max_tokens", int(4000)),
+        "map" => default("max_documents", int(0)),
+        "batch" => {
+            if let Some((_, Py::List(operations))) =
+                pairs.iter_mut().find(|(key, _)| key == "operations")
+            {
+                for operation in operations.iter_mut() {
+                    let method = match operation.get("method") {
+                        Some(Py::Str(text)) => text.clone(),
+                        _ => continue,
+                    };
+                    if let Some(params) = operation.get_mut("params") {
+                        let inner = std::mem::replace(params, Py::None);
+                        *params = rust_args(&method, inner);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    Py::Dict(pairs)
+}
+
 fn tool(server: &mut Server, name: &str, arguments: Py) -> Py {
     server.call(
         "tools/call",
@@ -1305,6 +1350,60 @@ fn first_chunk(value: &Py) -> String {
 fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
     let mut notes: Vec<String> = Vec::new();
     let mut skip = false;
+    // rust_args asks map for max_documents=0 (every document); 1.5.2 with
+    // no cap has no documents_omitted.
+    if name == "map" && matches!(right.get("documents_omitted"), None | Some(Py::None)) {
+        for side in [&mut *left, &mut *right] {
+            if let Py::Dict(pairs) = side {
+                pairs.retain(|(key, _)| key != "documents_omitted");
+            }
+        }
+    }
+    // MIGRATION.md 2.2: a match grouped by file does not repeat the file.
+    if name == "agent_grep" {
+        if let Some(Py::List(groups)) = left.get_mut("groups") {
+            for group in groups.iter_mut() {
+                let key = group.get("key").cloned();
+                if let (Some(Py::Str(key)), Some(Py::List(matches))) =
+                    (key, group.get_mut("matches"))
+                {
+                    for row in matches.iter_mut() {
+                        if let Py::Dict(fields) = row {
+                            if matches!(lookup(fields, "file"), None | Some(Py::None)) {
+                                set_item(fields, "file".to_string(), Py::Str(key.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // MIGRATION.md 2.2: index-time locks yield to an explicit acquire, and
+    // status marks them. 1.5.2 refuses another agent until the index lock
+    // expires; every later lock call in the scenario follows from that.
+    if LOCK_TOOLS.contains(&name) {
+        if matches!(left.get("auto"), Some(Py::Bool(true))) {
+            for side in [&mut *left, &mut *right] {
+                if let Py::Dict(pairs) = side {
+                    pairs.retain(|(key, _)| key != "auto");
+                }
+            }
+            notes.push("status marks the index-time lock".to_string());
+        }
+        let python_holder = right.get("locked_by").map(py_str).unwrap_or_default();
+        let rust_holder = left.get("locked_by").map(py_str).unwrap_or_default();
+        let python_refused = matches!(right.get("acquired"), Some(Py::Bool(false)))
+            || matches!(right.get("reason"), Some(Py::Str(reason)) if reason == "not_owner")
+            || python_holder == "AGENT";
+        let rust_took = ["acquired", "refreshed", "released"]
+            .iter()
+            .any(|key| matches!(left.get(key), Some(Py::Bool(true))))
+            || (!rust_holder.is_empty() && rust_holder != "AGENT");
+        if python_refused && rust_took && (python_holder.is_empty() || python_holder == "AGENT") {
+            notes.push("index-time lock yields to an explicit acquire".to_string());
+            skip = true;
+        }
+    }
     if name == "doctor" && left.is_dict() && right.is_dict() {
         for side in [&mut *left, &mut *right] {
             if let Some(Py::Dict(health)) = side.get_mut("db_health") {
@@ -1369,6 +1468,15 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
     }
     (notes.join("; "), skip)
 }
+
+/// Lock calls whose 1.5.2 answer follows from an index-time lock.
+const LOCK_TOOLS: &[&str] = &[
+    "acquire_document_lock",
+    "refresh_document_lock",
+    "get_document_lock_status",
+    "release_document_lock",
+    "document_lock",
+];
 
 /// The argument a Python `TypeError` from binding names, if it is one.
 fn type_error_field(text: &str) -> Option<String> {
@@ -2127,6 +2235,8 @@ fn run_steps(
     server.notify("notifications/initialized");
     let mut harvest = Harvest::default();
     let mut out = Vec::new();
+    // The Python oracle runs as `python -m stele_context.cli`.
+    let rust_side = !serve.iter().any(|arg| arg == "-m");
     for step in steps {
         match step {
             Step::Edit(edit) => {
@@ -2135,7 +2245,13 @@ fn run_steps(
                 out.push(None);
             }
             Step::Call(name, build) | Step::Own(name, build) => {
-                let value = tool(&mut server, name, build(&harvest));
+                let arguments = build(&harvest);
+                let arguments = if rust_side {
+                    rust_args(name, arguments)
+                } else {
+                    arguments
+                };
+                let value = tool(&mut server, name, arguments);
                 if *name == "get_context" && harvest.cids.is_empty() {
                     harvest.cids = all_chunk_ids(&value);
                 }

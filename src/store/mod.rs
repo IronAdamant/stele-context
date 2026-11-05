@@ -86,6 +86,10 @@ pub struct Lock {
     pub path: String,
     pub agent: String,
     pub until: i64,
+    /// Written by `index` for the server's agent, not asked for by anyone.
+    /// It yields to any explicit `acquire` and never replaces an explicit
+    /// lock.
+    pub auto: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -226,7 +230,15 @@ pub struct State {
 pub struct Store {
     dir: PathBuf,
     pub state: State,
-    _lock: File,
+    /// Exclusive while held. A one-shot CLI holds it until it exits; a
+    /// server holds it for one tool call at a time (`unlock` / `relock`),
+    /// so a second agent's server and the CLI are not shut out.
+    lock: File,
+    locked: bool,
+    /// mtime and size of `snapshot.json` as this process last read or
+    /// wrote it. A different stamp under the lock means another process
+    /// wrote the store.
+    stamp: Option<(Option<std::time::SystemTime>, u64)>,
 }
 
 impl Store {
@@ -241,12 +253,35 @@ impl Store {
             .open(&lock_path)
             .map_err(|err| format!("open lock: {err}"))?;
         lock.lock().map_err(|err| format!("lock store: {err}"))?;
+        let stamp = snapshot_stamp(&dir);
         let state = load_snapshot(&dir.join("snapshot.json")).unwrap_or_default();
         Ok(Store {
             dir,
             state,
-            _lock: lock,
+            lock,
+            locked: true,
+            stamp,
         })
+    }
+
+    /// Let other processes use the store until `relock`.
+    pub fn unlock(&mut self) {
+        if self.locked {
+            let _ = self.lock.unlock();
+            self.locked = false;
+        }
+    }
+
+    /// Take the store back. True when another process wrote the snapshot
+    /// since this one last read or wrote it.
+    pub fn relock(&mut self) -> Result<bool, String> {
+        if !self.locked {
+            self.lock
+                .lock()
+                .map_err(|err| format!("lock store: {err}"))?;
+            self.locked = true;
+        }
+        Ok(snapshot_stamp(&self.dir) != self.stamp)
     }
 
     /// Document rows only. `detect` uses this while mtime and size still match,
@@ -262,16 +297,20 @@ impl Store {
             .open(&lock_path)
             .map_err(|err| format!("open lock: {err}"))?;
         lock.lock().map_err(|err| format!("lock store: {err}"))?;
+        let stamp = snapshot_stamp(&dir);
         let state = load_documents_only(&dir.join("snapshot.json"))
             .unwrap_or_else(|| load_snapshot(&dir.join("snapshot.json")).unwrap_or_default());
         Ok(Store {
             dir,
             state,
-            _lock: lock,
+            lock,
+            locked: true,
+            stamp,
         })
     }
 
     pub fn reload_full(&mut self) -> Result<(), String> {
+        self.stamp = snapshot_stamp(&self.dir);
         self.state = load_snapshot(&self.dir.join("snapshot.json")).unwrap_or_default();
         Ok(())
     }
@@ -323,6 +362,7 @@ impl Store {
             // from the source files, so this write is not fsynced.
         }
         fs::rename(&tmp, &final_path).map_err(|err| format!("rename snapshot: {err}"))?;
+        self.stamp = snapshot_stamp(&self.dir);
         let mut line = json::to_string(&Value::object(vec![
             ("seq", Value::Int(self.state.seq as i64)),
             ("op", Value::string(op)),
@@ -437,6 +477,11 @@ impl State {
             ),
         ])
     }
+}
+
+fn snapshot_stamp(dir: &Path) -> Option<(Option<std::time::SystemTime>, u64)> {
+    let meta = fs::metadata(dir.join("snapshot.json")).ok()?;
+    Some((meta.modified().ok(), meta.len()))
 }
 
 fn load_snapshot(path: &Path) -> Option<State> {
@@ -787,17 +832,22 @@ impl Conflict {
 
 impl Lock {
     fn to_json(&self) -> Value {
-        Value::object(vec![
+        let mut pairs = vec![
             ("path", Value::string(&self.path)),
             ("agent", Value::string(&self.agent)),
             ("until", Value::Int(self.until)),
-        ])
+        ];
+        if self.auto {
+            pairs.push(("auto", Value::Bool(true)));
+        }
+        Value::object(pairs)
     }
     fn from_json(value: &Value) -> Lock {
         Lock {
             path: string_field(value, "path"),
             agent: string_field(value, "agent"),
             until: int_field(value, "until"),
+            auto: matches!(field(value, "auto"), Some(Value::Bool(true))),
         }
     }
 }
