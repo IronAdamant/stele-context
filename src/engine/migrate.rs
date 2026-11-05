@@ -183,7 +183,6 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
             agent: sql_text(&row, "agent_id"),
             attached: Vec::new(),
             kv_state: Vec::new(),
-            search_rows: Vec::new(),
         });
     }
     for row in opened.table("document_conflicts").unwrap_or_default() {

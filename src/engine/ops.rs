@@ -442,7 +442,7 @@ impl Engine {
             // The agent signature: the graph and hybrid search use it, of any
             // length, in place of the chunk's own signature.
             self.store.state.chunks[index].embedding = vector.clone();
-            self.hnsw_ready.set(false);
+            self.graph_replace(id);
             self.note_vector_replace();
             stored += 1;
         }
@@ -499,7 +499,7 @@ impl Engine {
                 errors.push(Value::string(id.clone()));
                 continue;
             }
-            self.hnsw_ready.set(false);
+            self.graph_replace(id);
             stored += 1;
         }
         if self.store.state.chunks.len() > 1 {
@@ -555,15 +555,17 @@ impl Engine {
         checked: i64,
         matched: i64,
     ) {
-        let slot = self.session_slot(session);
-        slot.searches.push(pattern.to_string());
-        slot.search_rows.push(SearchRow {
-            pattern: pattern.to_string(),
-            tool: tool.to_string(),
-            files_checked: checked,
-            files_with_matches: matched,
-            at: now_secs(),
-        });
+        // 1.5.2 writes session_searches only; no session row is created.
+        self.store.state.search_log.push((
+            session.to_string(),
+            SearchRow {
+                pattern: pattern.to_string(),
+                tool: tool.to_string(),
+                files_checked: checked,
+                files_with_matches: matched,
+                at: super::now_f64(),
+            },
+        ));
     }
 
     pub fn store_paths(&self) -> Vec<String> {
@@ -769,31 +771,6 @@ impl Engine {
         let indexed = self.index(&paths, false).ok();
         let _ = indexed;
         paths
-    }
-
-    fn session_slot(&mut self, id: &str) -> &mut crate::store::Session {
-        if !self.store.state.sessions.iter().any(|item| item.id == id) {
-            self.store.state.sessions.push(crate::store::Session {
-                id: id.to_string(),
-                searches: Vec::new(),
-                reads: Vec::new(),
-                kv: Vec::new(),
-                created_at: super::now_us(),
-                updated_at: super::now_us(),
-                turn: 0,
-                tokens: 0,
-                agent: String::new(),
-                attached: Vec::new(),
-                kv_state: Vec::new(),
-                search_rows: Vec::new(),
-            });
-        }
-        self.store
-            .state
-            .sessions
-            .iter_mut()
-            .find(|item| item.id == id)
-            .unwrap()
     }
 }
 

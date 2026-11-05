@@ -141,6 +141,7 @@ const TIME_KEYS: &[&str] = &[
     "latest_indexed_at",
     "seconds_since_last_index",
     "read_at",
+    "searched_at",
     "timestamp",
 ];
 
@@ -2382,6 +2383,15 @@ fn verify5_items_match_python_152() {
             "get_context",
             r#"{"document_paths": ["pkgs/core/ledger.py"]}"#,
         ),
+        fixed(
+            "agent_grep",
+            r#"{"pattern": "TallowLedger", "session_id": "k1"}"#,
+        ),
+        fixed(
+            "search_text",
+            r#"{"pattern": "lantern", "document_path": "svc/marrow.go", "session_id": "k1"}"#,
+        ),
+        fixed("get_search_history", r#"{"session_id": "k1"}"#),
         fixed("stats", "{}"),
         call("store_embedding", |h| {
             obj(vec![
@@ -2402,8 +2412,8 @@ fn verify5_items_match_python_152() {
             // Accepted alias: store_embedding's `embedding` writes like `vector`,
             // so insert_count moves by one, as the `vector` call before it did.
             let path = ["index", "insert_count"];
-            let rs_delta = int_at(rs, 26, &path) - int_at(rs, 24, &path);
-            let py_delta = int_at(py, 26, &path) - int_at(py, 24, &path);
+            let rs_delta = int_at(rs, 29, &path) - int_at(rs, 27, &path);
+            let py_delta = int_at(py, 29, &path) - int_at(py, 27, &path);
             let vector_delta = int_at(rs, 14, &path) - int_at(rs, 12, &path);
             if rs_delta != 1 || py_delta != 0 || vector_delta < 1 {
                 println!(

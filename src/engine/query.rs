@@ -282,6 +282,9 @@ impl Engine {
         if working_tree {
             self.index_working_tree();
         }
+        // 1.5.2 normalizes document_path like any other document path.
+        let normalized = document.map(|path| self.doc_path(path));
+        let document = normalized.as_deref();
         let mut rows = Vec::new();
         let limit = limit.max(1);
         // 1.5.2: `ORDER BY document_path, start_pos` (byte order).
@@ -351,7 +354,13 @@ impl Engine {
             .map(|row| crate::store::int_field(row, "match_count"))
             .sum();
         if let Some(session) = session {
-            let checked = self.store.state.documents.len() as i64;
+            // 1.5.2: files_checked is the one document when given, else the
+            // matched documents.
+            let checked = if document.is_some() {
+                1
+            } else {
+                files.len() as i64
+            };
             let matched = files.len() as i64;
             self.record_search_row(session, pattern, "search_text", checked, matched);
             let files_owned = files.clone();
@@ -1667,21 +1676,44 @@ impl Engine {
         ])
     }
 
+    /// 1.5.2 `get_search_history`: one row per recorded agent_grep or
+    /// search_text call, oldest first.
     pub fn search_history(&self, session: &str) -> Value {
-        let rows = self
+        let mut rows: Vec<Value> = self
             .store
             .state
-            .sessions
+            .search_log
             .iter()
-            .find(|item| item.id == session)
-            .map(|item| item.searches.clone())
-            .unwrap_or_default();
+            .filter(|(id, _)| id == session)
+            .map(|(_, row)| {
+                Value::object(vec![
+                    ("pattern", Value::string(&row.pattern)),
+                    ("tool", Value::string(&row.tool)),
+                    ("files_checked", Value::Int(row.files_checked)),
+                    ("files_with_matches", Value::Int(row.files_with_matches)),
+                    ("searched_at", Value::Float(row.at)),
+                ])
+            })
+            .collect();
+        if rows.is_empty() {
+            // Snapshots written before 2.0.1 kept the patterns on the session.
+            if let Some(item) = self
+                .store
+                .state
+                .sessions
+                .iter()
+                .find(|item| item.id == session)
+            {
+                rows = item
+                    .searches
+                    .iter()
+                    .map(|pattern| Value::object(vec![("pattern", Value::string(pattern))]))
+                    .collect();
+            }
+        }
         Value::object(vec![
             ("session_id", Value::string(session)),
-            (
-                "searches",
-                Value::Array(rows.into_iter().map(Value::String).collect()),
-            ),
+            ("searches", Value::Array(rows)),
         ])
     }
 
@@ -1745,7 +1777,7 @@ impl Engine {
         if !found {
             return Err(format!("unknown chunk '{chunk_id}'"));
         }
-        self.hnsw_ready.set(false);
+        self.graph_replace(chunk_id);
         self.note_vector_replace();
         self.store.save("summary", &Value::string(chunk_id))?;
         Ok(Value::object(vec![
@@ -2000,7 +2032,6 @@ impl Engine {
                 agent: String::new(),
                 attached: Vec::new(),
                 kv_state: Vec::new(),
-                search_rows: Vec::new(),
             });
         }
         self.store

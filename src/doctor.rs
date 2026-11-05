@@ -142,6 +142,8 @@ struct ParsedStore {
     latest: f64,
     error: Option<String>,
     paths: Vec<String>,
+    /// Chunk ids with their agent vectors (empty when none), in store order.
+    vectors: Vec<(String, Vec<f32>)>,
 }
 
 fn read_snapshot(path: &Path) -> ParsedStore {
@@ -154,6 +156,7 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         latest: 0.0,
         error: None,
         paths: Vec::new(),
+        vectors: Vec::new(),
     };
     if !path.is_file() {
         return empty;
@@ -184,7 +187,24 @@ fn read_snapshot(path: &Path) -> ParsedStore {
     };
     let mut tokens = 0i64;
     let mut tier2 = 0i64;
+    let mut vectors = Vec::with_capacity(chunk_rows.len());
     for chunk in chunk_rows {
+        let lanes: Vec<f32> = match field(chunk, "embedding") {
+            Some(Value::Array(rows)) => rows
+                .iter()
+                .map(|lane| match lane {
+                    Value::Float(number) => *number as f32,
+                    Value::Int(number) => *number as f32,
+                    _ => 0.0,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let id = match field(chunk, "id") {
+            Some(Value::String(text)) => text.clone(),
+            _ => String::new(),
+        };
+        vectors.push((id, lanes));
         tokens += int_field(chunk, "tokens");
         // Tier 2 is a summary or a stored embedding (1.5.2 agent_signature).
         let summary = field(chunk, "summary").is_some_and(|item| !matches!(item, Value::Null));
@@ -218,6 +238,7 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         latest,
         error: None,
         paths,
+        vectors,
     }
 }
 
@@ -340,10 +361,7 @@ impl ParsedStore {
             ("total_chunks", Value::Int(self.chunks)),
             ("tier2_chunks", Value::Int(self.tier2)),
             ("tier2_coverage_percent", Value::Float(coverage)),
-            (
-                "hnsw_span",
-                Value::Float(hnsw_span(storage, self.chunks as usize)),
-            ),
+            ("hnsw_span", Value::Float(hnsw_span(storage, &self.vectors))),
             ("advice", advice.map(Value::string).unwrap_or(Value::Null)),
         ])
     }
@@ -366,22 +384,41 @@ fn file_len(path: &Path) -> u64 {
     fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
 }
 
-fn hnsw_span(storage: &Path, count: usize) -> f64 {
-    let bytes = match std::fs::read(storage.join("store").join("signatures.bin")) {
-        Ok(bytes) if bytes.len() >= count * 128 * 4 && count > 0 => bytes,
-        _ => return 0.0,
-    };
+/// The engine's cached graph numbers when they match this snapshot, else a
+/// graph built from the agent vectors and `signatures.bin`.
+fn hnsw_span(storage: &Path, vectors: &[(String, Vec<f32>)]) -> f64 {
+    let fingerprint = crate::engine::graph_fingerprint_of(
+        vectors
+            .iter()
+            .map(|(id, lanes)| (id.as_str(), lanes.as_slice())),
+    );
+    let cache = storage.join("store").join("hnsw_stats.json");
+    if let Some((_, _, span)) = crate::engine::read_graph_stats(&cache, &fingerprint) {
+        return span;
+    }
+    let count = vectors.len();
+    let bytes = std::fs::read(storage.join("store").join("signatures.bin")).unwrap_or_default();
+    if count == 0 {
+        return 0.0;
+    }
     let mut graph = crate::search::Hnsw::new();
-    for index in 0..count {
-        let start = index * 128 * 4;
-        let mut vector = Vec::with_capacity(128);
-        for lane in 0..128 {
-            let offset = start + lane * 4;
-            let mut buf = [0u8; 4];
-            buf.copy_from_slice(&bytes[offset..offset + 4]);
-            vector.push(f32::from_le_bytes(buf));
-        }
-        graph.insert(&index.to_string(), vector);
+    for (index, (id, lanes)) in vectors.iter().enumerate() {
+        let vector = if !lanes.is_empty() {
+            lanes.clone()
+        } else if bytes.len() >= (index + 1) * 128 * 4 {
+            let start = index * 128 * 4;
+            (0..128)
+                .map(|lane| {
+                    let offset = start + lane * 4;
+                    let mut buf = [0u8; 4];
+                    buf.copy_from_slice(&bytes[offset..offset + 4]);
+                    f32::from_le_bytes(buf)
+                })
+                .collect()
+        } else {
+            vec![0.0; 128]
+        };
+        graph.insert(id, vector);
     }
     graph.probe_span()
 }

@@ -119,7 +119,6 @@ pub struct Session {
     pub attached: Vec<(String, i64, f64)>,
     /// JSON payload saved with each chunk, keyed by chunk id and turn.
     pub kv_state: Vec<(String, i64, String)>,
-    pub search_rows: Vec<SearchRow>,
 }
 
 #[derive(Clone, Debug)]
@@ -128,7 +127,8 @@ pub struct SearchRow {
     pub tool: String,
     pub files_checked: i64,
     pub files_with_matches: i64,
-    pub at: i64,
+    /// Seconds since the epoch, fractional (1.5.2 `searched_at`).
+    pub at: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -215,6 +215,9 @@ pub struct State {
     pub next_symbol_id: i64,
     /// Parallel to `chunks`. Not part of the JSON snapshot; `signatures.bin`.
     pub sigs: Vec<[f32; 128]>,
+    /// agent_grep / search_text runs per session id (1.5.2
+    /// `session_searches`). Recording one does not create a session.
+    pub search_log: Vec<(String, SearchRow)>,
     /// Documents-only load: the snapshot may hold a `memory:` chunk, which
     /// has no document row. Not serialised.
     pub memory_hint: bool,
@@ -414,6 +417,24 @@ impl State {
                 "chunk_history",
                 Value::Array(self.chunk_history.iter().map(ChunkHist::to_json).collect()),
             ),
+            (
+                "search_log",
+                Value::Array(
+                    self.search_log
+                        .iter()
+                        .map(|(session, row)| {
+                            Value::object(vec![
+                                ("session_id", Value::string(session)),
+                                ("pattern", Value::string(&row.pattern)),
+                                ("tool", Value::string(&row.tool)),
+                                ("files_checked", Value::Int(row.files_checked)),
+                                ("files_with_matches", Value::Int(row.files_with_matches)),
+                                ("searched_at", Value::Float(row.at)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
         ])
     }
 }
@@ -568,6 +589,24 @@ impl State {
             inserts: int_field(value, "inserts") as u64,
             next_symbol_id: int_field(value, "next_symbol_id"),
             sigs: Vec::new(),
+            search_log: array(value, "search_log")
+                .map(|item| {
+                    (
+                        string_field(item, "session_id"),
+                        SearchRow {
+                            pattern: string_field(item, "pattern"),
+                            tool: string_field(item, "tool"),
+                            files_checked: int_field(item, "files_checked"),
+                            files_with_matches: int_field(item, "files_with_matches"),
+                            at: match field(item, "searched_at") {
+                                Some(Value::Float(at)) => *at,
+                                Some(Value::Int(at)) => *at as f64,
+                                _ => 0.0,
+                            },
+                        },
+                    )
+                })
+                .collect(),
             memory_hint: false,
         }
     }
@@ -858,7 +897,6 @@ impl Session {
             agent: string_field(value, "agent"),
             attached,
             kv_state,
-            search_rows: Vec::new(),
         }
     }
 }

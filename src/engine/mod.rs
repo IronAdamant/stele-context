@@ -35,6 +35,8 @@ pub struct Engine {
     bm25_excluded: HashSet<String>,
     hnsw: std::cell::RefCell<crate::search::Hnsw>,
     hnsw_ready: std::cell::Cell<bool>,
+    /// The graph numbers for the current store, once known.
+    graph_cache: std::cell::Cell<Option<(i64, f64, f64)>>,
     chunk_size: usize,
     max_chunk_size: usize,
     respect_gitignore: bool,
@@ -122,6 +124,7 @@ impl Engine {
             bm25_excluded: HashSet::new(),
             hnsw: std::cell::RefCell::new(crate::search::Hnsw::new()),
             hnsw_ready: std::cell::Cell::new(false),
+            graph_cache: std::cell::Cell::new(None),
             chunk_size: loaded.chunk_size.unwrap_or(256).max(1) as usize,
             max_chunk_size: loaded.max_chunk_size.unwrap_or(4096).max(1) as usize,
             respect_gitignore: loaded.respect_gitignore.unwrap_or(true),
@@ -322,7 +325,6 @@ impl Engine {
                 agent: agent.clone(),
                 attached: Vec::new(),
                 kv_state: Vec::new(),
-                search_rows: Vec::new(),
             });
         }
         let files = collect(
@@ -394,6 +396,7 @@ impl Engine {
                 self.store.reload_full()?;
                 self.documents_only = false;
                 self.hnsw_ready.set(false);
+                self.graph_cache.set(None);
             }
             unchanged.clear();
         }
@@ -524,7 +527,10 @@ impl Engine {
         if !removed.is_empty() {
             crate::locks::note_change(&self.cwd, &removed, &agent, "removed");
         }
-        if !removed.is_empty() || !modified.is_empty() {
+        // A memory chunk is reported but stays stored, so it alone changes
+        // nothing that needs rebuilding or saving.
+        let dropped = removed.iter().any(|path| !memory.contains(path));
+        if dropped || !modified.is_empty() {
             self.rebuild_bm25();
             self.store.save("detect", &Value::object(vec![]))?;
         }
@@ -605,20 +611,8 @@ impl Engine {
                 "index",
                 Value::object(vec![
                     ("node_count", Value::Int(chunks)),
-                    (
-                        "max_level",
-                        Value::Int({
-                            self.ensure_hnsw();
-                            self.hnsw.borrow().max_level()
-                        }),
-                    ),
-                    (
-                        "avg_connections",
-                        Value::Float({
-                            self.ensure_hnsw();
-                            self.hnsw.borrow().avg_connections()
-                        }),
-                    ),
+                    ("max_level", Value::Int(self.graph_stats().0)),
+                    ("avg_connections", Value::Float(self.graph_stats().1)),
                     ("insert_count", Value::Int(self.store.state.inserts as i64)),
                     ("chunk_count", Value::Int(chunks)),
                 ]),
@@ -1482,6 +1476,7 @@ impl Engine {
         self.store.state.chunks.retain(|chunk| chunk.path != rel);
         self.store.state.symbols.retain(|sym| sym.path != rel);
         self.hnsw_ready.set(false);
+        self.graph_cache.set(None);
     }
 
     fn rebuild_bm25(&mut self) {
@@ -1992,9 +1987,86 @@ impl Engine {
         self.hnsw_ready.set(true);
     }
 
-    fn hnsw_span(&self) -> f64 {
+    /// `(max_level, avg_connections, hnsw_span)` of the graph. 1.5.2 keeps
+    /// its graph on disk and reloads it; 2.0 keeps these three numbers in
+    /// `store/hnsw_stats.json` under a fingerprint of the chunk ids and
+    /// agent vectors, so a new process does not rebuild the graph to report
+    /// them. A changed store rebuilds once and rewrites the file.
+    fn graph_stats(&self) -> (i64, f64, f64) {
+        if let Some(stats) = self.graph_cache.get() {
+            return stats;
+        }
+        let fingerprint = self.graph_fingerprint();
+        let path = self.storage.join("store").join("hnsw_stats.json");
+        if !self.hnsw_ready.get() {
+            if let Some(stats) = read_graph_stats(&path, &fingerprint) {
+                self.graph_cache.set(Some(stats));
+                return stats;
+            }
+        }
         self.ensure_hnsw();
-        self.hnsw.borrow().probe_span()
+        let graph = self.hnsw.borrow();
+        let stats = (
+            graph.max_level(),
+            graph.avg_connections(),
+            graph.probe_span(),
+        );
+        drop(graph);
+        let body = crate::json::to_string(&Value::object(vec![
+            ("fingerprint", Value::string(&fingerprint)),
+            ("max_level", Value::Int(stats.0)),
+            ("avg_connections", Value::Float(stats.1)),
+            ("hnsw_span", Value::Float(stats.2)),
+        ]));
+        let _ = fs::write(&path, body);
+        self.graph_cache.set(Some(stats));
+        stats
+    }
+
+    fn graph_fingerprint(&self) -> String {
+        graph_fingerprint_of(
+            self.store
+                .state
+                .chunks
+                .iter()
+                .map(|chunk| (chunk.id.as_str(), chunk.embedding.as_slice())),
+        )
+    }
+
+    /// Keep a built graph current after one chunk's vector changes, the
+    /// way 1.5.2 calls remove_chunk then add_chunk.
+    pub(crate) fn graph_replace(&self, chunk_id: &str) {
+        self.graph_cache.set(None);
+        if !self.hnsw_ready.get() {
+            return;
+        }
+        let Some(index) = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .position(|chunk| chunk.id == chunk_id)
+        else {
+            return;
+        };
+        let chunk = &self.store.state.chunks[index];
+        let vector = if !chunk.embedding.is_empty() {
+            chunk.embedding.clone()
+        } else {
+            self.store
+                .signature_rows()
+                .get(index)
+                .copied()
+                .unwrap_or([0.0; 128])
+                .to_vec()
+        };
+        let mut graph = self.hnsw.borrow_mut();
+        graph.remove(chunk_id);
+        graph.insert(chunk_id, vector);
+    }
+
+    fn hnsw_span(&self) -> f64 {
+        self.graph_stats().2
     }
 
     fn take_symbol_id(&mut self) -> i64 {
@@ -2062,6 +2134,7 @@ impl Engine {
             });
         }
         self.hnsw_ready.set(false);
+        self.graph_cache.set(None);
         self.store.state.chunks.push(Chunk {
             id,
             path: rel.to_string(),
@@ -2147,4 +2220,44 @@ fn extension_of(path: &str) -> &str {
         .and_then(|name| name.rsplit_once('.'))
         .map(|(_, ext)| ext)
         .unwrap_or("")
+}
+
+/// FNV-1a over each chunk id and its agent vector, plus the chunk count.
+pub(crate) fn graph_fingerprint_of<'a>(rows: impl Iterator<Item = (&'a str, &'a [f32])>) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut count = 0usize;
+    let mut eat = |bytes: &[u8]| {
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    for (id, embedding) in rows {
+        count += 1;
+        eat(id.as_bytes());
+        eat(&[0xff]);
+        for lane in embedding {
+            eat(&lane.to_bits().to_le_bytes());
+        }
+        eat(&[0xfe]);
+    }
+    format!("{hash:016x}-{count}")
+}
+
+pub(crate) fn read_graph_stats(path: &Path, fingerprint: &str) -> Option<(i64, f64, f64)> {
+    let text = fs::read_to_string(path).ok()?;
+    let value = crate::json::parse(&text).ok()?;
+    if crate::store::string_field(&value, "fingerprint") != fingerprint {
+        return None;
+    }
+    let float = |key: &str| match plan_field(&value, key) {
+        Some(Value::Float(number)) => Some(*number),
+        Some(Value::Int(number)) => Some(*number as f64),
+        _ => None,
+    };
+    Some((
+        crate::store::int_field(&value, "max_level"),
+        float("avg_connections")?,
+        float("hnsw_span")?,
+    ))
 }
