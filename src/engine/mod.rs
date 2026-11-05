@@ -276,15 +276,12 @@ impl Engine {
                 && !fresh.is_empty()
                 && crate::locks::coordination_dir(&self.cwd).is_none()
             {
-                let until = now_secs() + crate::locks::TTL;
-                for path in &fresh {
-                    self.store.state.locks.retain(|lock| &lock.path != path);
-                    self.store.state.locks.push(crate::store::Lock {
-                        path: path.clone(),
-                        agent: self.server_agent.clone(),
-                        until,
-                    });
-                }
+                crate::locks::hold_auto(
+                    &mut self.store.state.locks,
+                    &fresh,
+                    &self.server_agent,
+                    now_secs(),
+                );
             }
             self.store.save(
                 "index",
@@ -301,11 +298,7 @@ impl Engine {
             }
             crate::locks::note_indexed(&self.cwd, &fresh, &self.server_agent);
             if !self.server_agent.is_empty() {
-                let now = now_secs();
-                let agent = self.server_agent.clone();
-                for path in &fresh {
-                    crate::locks::hold_shared(&self.cwd, path, &agent, now);
-                }
+                crate::locks::hold_shared(&self.cwd, &fresh, &self.server_agent, now_secs());
             }
         }
         Ok(Value::object(vec![
