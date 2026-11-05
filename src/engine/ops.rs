@@ -674,7 +674,9 @@ impl Engine {
             "doctor_snapshot" => "doctor",
             other => other,
         };
-        match crate::mcp::dispatch(self, name, params) {
+        // `batch` calls the engine method directly: Python binds the
+        // keywords, and the server does not inject its agent id.
+        match crate::mcp::call_bound(self, name, params, false) {
             Err(err) if err.starts_with("unknown tool") => Err(format!("Unknown method: {method}")),
             other => other,
         }

@@ -304,7 +304,7 @@ def documented(name, left, right):
         if isinstance(err, str) and "staleness_score" in err:
             notes.append("1.5.2 query errors; rust returns the read list")
             skip = True
-    if name in {"store_embedding", "bulk_annotate"} and isinstance(right, dict):
+    if name == "store_embedding" and isinstance(right, dict):
         err = str(right.get("error", ""))
         if "unexpected keyword" in err or "missing" in err:
             notes.append("1.5.2 rejects the alias argument; rust accepts it")
@@ -692,6 +692,13 @@ def main() -> int:
                 for name, args in alias_calls:
                     left = tool(rust_b, name, args)
                     right = tool(python_b, name, args)
+                    if name == "bulk_annotate":
+                        # Only `embedding` is an accepted alias. `items` is
+                        # rejected the way 1.5.2's callable rejects it.
+                        if left != right:
+                            print(f"parity diff {name} alias: rust {left} python {right}", flush=True)
+                            diffs += 1
+                        continue
                     err = right.get("error") if isinstance(right, dict) else right
                     err_s = json.dumps(err, default=str) if not isinstance(err, str) else err
                     rust_ran = isinstance(left, dict) and (

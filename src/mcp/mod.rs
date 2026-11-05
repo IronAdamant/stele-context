@@ -7,6 +7,8 @@ use crate::json::{self, Value};
 use crate::VERSION;
 use std::io::{self, BufRead, Write};
 
+mod signature;
+
 const HANDSHAKES: &[&str] = &["2026-07-28", "2025-11-25", "2025-06-18"];
 
 const LITE: &[&str] = &[
@@ -218,44 +220,86 @@ fn tools_list() -> Value {
 }
 
 fn attach_hint(name: &str, value: &mut Value) {
-    let Value::Object(pairs) = value else {
+    let Some(hint) = result_hint(name, value) else {
         return;
     };
-    if pairs.iter().any(|(key, _)| key == "hint") {
-        return;
+    if let Value::Object(pairs) = value {
+        pairs.push(("hint".to_string(), Value::string(hint)));
+    }
+}
+
+/// 1.5.2 `hint_for_tool_result`: a hint for a dict result that carries an
+/// error or found nothing. `None` when the result already has a hint.
+pub(crate) fn result_hint(name: &str, value: &Value) -> Option<&'static str> {
+    let Value::Object(pairs) = value else {
+        return None;
+    };
+    if pairs
+        .iter()
+        .any(|(key, item)| key == "hint" && truthy(item))
+    {
+        return None;
     }
     let err = pairs.iter().find_map(|(key, item)| {
-        if key == "error" {
-            Some(json::to_string(item).to_lowercase())
+        if key == "error" && truthy(item) {
+            Some(match item {
+                Value::String(text) => text.to_lowercase(),
+                other => json::to_string(other).to_lowercase(),
+            })
         } else {
             None
         }
     });
-    let hint = if let Some(err) = err.as_deref() {
-        healing_hint(name, err)
-    } else if name == "impact_radius"
+    if let Some(err) = err.as_deref() {
+        return healing_hint(name, err);
+    }
+    if name == "impact_radius"
         && pairs
             .iter()
             .any(|(key, item)| key == "affected_chunks" && matches!(item, Value::Int(0)))
     {
-        healing_hint(name, "0 affected")
-    } else if name == "coupling"
+        return healing_hint(name, "0 affected");
+    }
+    if name == "coupling"
         && pairs.iter().any(|(key, item)| {
             (key == "coupled_files" || key == "files")
                 && matches!(item, Value::Array(rows) if rows.is_empty())
                 || (key == "count" && matches!(item, Value::Int(0)))
         })
     {
-        healing_hint(name, "0 affected")
-    } else {
-        None
-    };
-    if let Some(hint) = hint {
-        pairs.push(("hint".to_string(), Value::string(hint)));
+        return healing_hint(name, "0 affected");
+    }
+    None
+}
+
+fn truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(bit) => *bit,
+        Value::Int(number) => *number != 0,
+        Value::Float(number) => *number != 0.0,
+        Value::String(text) => !text.is_empty(),
+        Value::Array(rows) => !rows.is_empty(),
+        Value::Object(pairs) => !pairs.is_empty(),
     }
 }
 
-fn healing_hint(name: &str, err: &str) -> Option<&'static str> {
+/// `TypeError` text when 1.5.2's callable would reject these arguments.
+pub(crate) fn bind_args(name: &str, args: &Value, inject: bool) -> Result<(), String> {
+    let keys: Vec<&str> = match args {
+        Value::Object(pairs) => pairs.iter().map(|(key, _)| key.as_str()).collect(),
+        _ => Vec::new(),
+    };
+    // Accepted difference: `store_embedding` also takes `embedding`.
+    let alias = if name == "store_embedding" && keys.contains(&"embedding") {
+        Some("embedding")
+    } else {
+        None
+    };
+    signature::bind(name, &keys, alias, inject)
+}
+
+pub(crate) fn healing_hint(name: &str, err: &str) -> Option<&'static str> {
     if err.contains("database is locked")
         || err.contains("busy")
         || err.contains("unable to open database file")
@@ -292,32 +336,61 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
     let args = field(params, "arguments")
         .cloned()
         .unwrap_or(Value::object(vec![]));
-    let (text, is_error) = match dispatch(engine, &name, &args) {
+    if !tool_known(&name) {
+        // 1.5.2: the name is not in this mode's tool map. Nothing runs and
+        // the operation log does not see the call.
+        let mut value = Value::object(vec![(
+            "error",
+            Value::string(format!("Unknown tool: {name}")),
+        )]);
+        attach_hint(&name, &mut value);
+        return tool_result(&json::to_string(&value), true);
+    }
+    let (text, is_error) = match call_bound(engine, &name, &args, true) {
         Ok(mut value) => {
             attach_hint(&name, &mut value);
-            (json::to_string(&value), false)
+            let errored = only_error(&value);
+            (json::to_string(&value), errored)
         }
         Err(message) => {
+            // 1.5.2 catches the exception, returns `{"error": str(exc)}` plus
+            // a self-healing hint, and marks the result an error.
             engine.note_failure();
-            if name == "llm_embed" {
-                // 1.5.2's own handler returns this object and marks the call an error.
-                let value = Value::object(vec![("error", Value::string(message))]);
-                (json::to_string(&value), true)
-            } else if name == "agent_grep" {
-                let value = Value::object(vec![("error", Value::string(message))]);
-                (json::to_string(&value), false)
-            } else {
-                let mut value = Value::object(vec![
-                    ("ok", Value::Bool(false)),
-                    ("error", Value::string(message)),
-                ]);
-                attach_hint(&name, &mut value);
-                (json::to_string(&value), false)
+            let mut pairs = vec![("error".to_string(), Value::string(&message))];
+            if let Some(hint) = healing_hint(&name, &message.to_lowercase()) {
+                pairs.push(("hint".to_string(), Value::string(hint)));
             }
+            (json::to_string(&Value::Object(pairs)), true)
         }
     };
     engine.note_operation();
-    let mut result = tool_text(&text);
+    tool_result(&text, is_error)
+}
+
+/// Bind the arguments the way 1.5.2's callable would, then run the tool.
+/// `inject` is true where the server fills in its own `agent_id`.
+pub(crate) fn call_bound(
+    engine: &mut Engine,
+    name: &str,
+    args: &Value,
+    inject: bool,
+) -> Result<Value, String> {
+    bind_args(name, args, inject)?;
+    dispatch(engine, name, args)
+}
+
+/// 1.5.2 marks a dict result an error when its only keys are `error` and
+/// `hint`.
+fn only_error(value: &Value) -> bool {
+    let Value::Object(pairs) = value else {
+        return false;
+    };
+    pairs.iter().any(|(key, _)| key == "error")
+        && pairs.iter().all(|(key, _)| key == "error" || key == "hint")
+}
+
+fn tool_result(text: &str, is_error: bool) -> Value {
+    let mut result = tool_text(text);
     if is_error {
         if let Value::Object(pairs) = &mut result {
             pairs.push(("isError".to_string(), Value::Bool(true)));
@@ -404,27 +477,19 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             session.as_deref(),
             flag(args, "working_tree"),
         ),
-        "agent_grep" => {
-            if field(args, "path_prefix").is_some() {
-                return Err(
-                    "_SearchMixin.agent_grep() got an unexpected keyword argument 'path_prefix'"
-                        .to_string(),
-                );
-            }
-            engine.grep_full(
-                &query,
-                flag(args, "regex"),
-                arg(args, "document_path").as_deref(),
-                !flag(args, "no_classify") && flag_default(args, "classify", true),
-                flag_default(args, "include_scope", true),
-                arg(args, "group_by").as_deref().unwrap_or("file"),
-                int_arg(args, "max_tokens").unwrap_or(4000),
-                flag_default(args, "deduplicate", true),
-                int_arg(args, "context_lines").unwrap_or(0),
-                session.as_deref(),
-                flag(args, "working_tree"),
-            )
-        }
+        "agent_grep" => engine.grep_full(
+            &query,
+            flag(args, "regex"),
+            arg(args, "document_path").as_deref(),
+            !flag(args, "no_classify") && flag_default(args, "classify", true),
+            flag_default(args, "include_scope", true),
+            arg(args, "group_by").as_deref().unwrap_or("file"),
+            int_arg(args, "max_tokens").unwrap_or(4000),
+            flag_default(args, "deduplicate", true),
+            int_arg(args, "context_lines").unwrap_or(0),
+            session.as_deref(),
+            flag(args, "working_tree"),
+        ),
         "query" => {
             if flag(args, "working_tree") || session.is_some() {
                 engine.index_working_tree();
@@ -592,7 +657,7 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
         }
         "register_dynamic_symbols" => {
             let rows = symbol_rows(args);
-            let agent = arg(args, "agent_id").unwrap_or_else(|| "default".to_string());
+            let agent = caller(engine, args);
             if rows.is_empty() {
                 return engine.register_dynamic(&symbol, "function", &path);
             }
@@ -617,7 +682,7 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             ]))
         }
         "remove_dynamic_symbols" => {
-            let agent = arg(args, "agent_id").unwrap_or_default();
+            let agent = caller(engine, args);
             if symbol.is_empty() && !agent.is_empty() {
                 let removed = engine.remove_agent_dynamic(&agent);
                 Ok(Value::object(vec![("removed", Value::Int(removed))]))
@@ -641,31 +706,11 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 ("video", ext_list(VIDEO_EXTS)),
             ]),
         )])),
-        "llm_embed" => {
-            if field(args, "text").is_none() && field(args, "chunk_id").is_none() {
-                return Err(
-                    "_IndexMixin.llm_embed() missing 2 required positional arguments: 'text' and 'chunk_id'"
-                        .to_string(),
-                );
-            }
-            if field(args, "chunk_id").is_none() {
-                return Err(
-                    "_IndexMixin.llm_embed() missing 1 required positional argument: 'chunk_id'"
-                        .to_string(),
-                );
-            }
-            if field(args, "text").is_none() {
-                return Err(
-                    "_IndexMixin.llm_embed() missing 1 required positional argument: 'text'"
-                        .to_string(),
-                );
-            }
-            engine.llm_embed(
-                &arg(args, "text").unwrap_or_default(),
-                &arg(args, "chunk_id").unwrap_or_default(),
-                float_list(args, "fingerprint_values"),
-            )
-        }
+        "llm_embed" => engine.llm_embed(
+            &arg(args, "text").unwrap_or_default(),
+            &arg(args, "chunk_id").unwrap_or_default(),
+            float_list(args, "fingerprint_values"),
+        ),
         "prune_history" => engine.prune_history(
             int_arg(args, "max_age_seconds"),
             int_arg(args, "max_entries"),
