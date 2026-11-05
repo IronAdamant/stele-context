@@ -1,24 +1,27 @@
 ## [2.0.1] - 2026-11-04
 
+Closes the gaps against the PyPI 1.5.2 package. [MIGRATION.md](MIGRATION.md) lists what still differs and why.
+
 ### Fixed
 
-- Standard MCP tools do the work (`prune_history`, `rollback`, `prune_chunks`, `list_sessions`, `rebuild_symbols`, `stale_chunks`, `get_dynamic_symbols`, `list_agents`, `get_notifications`, `environment_check`, `clean_bytecache`, `bulk_store_embeddings`, `bulk_store_chunk_agent_notes`, `get_chunk_history`, `batch`). Full mode routes the 18 old singleton names to those implementations.
-- `migrate` reads a 1.5 SQLite database (`document_path` and the other 1.5 tables) into the native store. Opening a storage directory that only has `stele_context.db` copies it. The original database is not modified. `doctor` reports that copy.
-- `.stele-context.toml` `chunk_size`, `skip_dirs`, and `respect_gitignore` are applied. `skip_dirs` is added to the default set. `chunk_size` is the chunker target.
-- CLI accepts the 1.5 flags, including `--compact`, `--path-prefix`, `--regex`, `--working-tree`, and `--confirm`. `search-text` stays a substring unless `--regex` is set.
-- MCP `inputSchema` / HTTP `parameters` list the properties the dispatcher reads. `paths`, `summaries`, `document_paths`, and `working_tree` are honoured.
-- PDF text is one chunk per page. Content streams that share a page are not extra pages. The chunk text keeps a trailing newline.
-- `merge_threshold`, `change_threshold`, `search_alpha`, and `max_history_entries` follow 1.5.2. `get_context` returns the 1.5 `{unchanged, changed, new}` object and includes `diff_since_cache` when the file on disk does not match the index. `llm_embed` without a fingerprint uses the 1.5.2 statistical fingerprint. `environment_check` flags stale `*.egg-info` against `pyproject.toml` (orphaned name and version versus the project). It does not walk `importlib.metadata`.
-- `index` returns the 1.5 `indexed` / `skipped` arrays. Keyword `search` returns the 1.5 list, including the proximity nudge. `find_definition` and `find_references` return the 1.5 payloads. Lite stdio `tools/list` stays the compact `{type:object}` schema (2522 bytes) so the tools/list benchmark matches 2.0.0. HTTP `GET /tools` and standard/full stdio still list properties.
-- `serve-mcp --storage-dir` is the store the server opens. `batch` runs every MCP tool, not a short list. Annotation `tags` are stored and returned, including after `migrate`. A lock held by another agent returns `locked_by`, `locked_at`, `expires_at`, and `worktree`. `serve-mcp` registers `stele-context-mcp-<pid>`. `get_notifications` is newest first. `list_sessions` timestamps are fractional seconds. `detect` counts a similar edit as `kv_restored`.
-- The benchmark gate times both binaries on the head checkout's `parity/fixtures`, so a new fixture file is not scored as a slowdown. PDF pages merge with the 1.5.2 rule (signature threshold and token cap), including a long page beside a short one. `map` reads `path_prefix`. `enrichment_plan` reads `top_n` and `min_tokens`. Annotation `get` and `search` return newest first, `search` filters `target_type`, and `create` echoes that type. CLI `annotate`, `delete-annotation`, and `update-annotation` are back. `llm_embed` without `chunk_id` errors. `rebuild_symbols` drops dynamic symbols, matching 1.5.2. Keyword proximity splits camelCase the way 1.5.2 does.
-- `scripts/mcp_parity.py` talks to unmodified PyPI 1.5.2 `serve-mcp`. It does not shim Python. `map` is called with `path_prefix` and `enrichment_plan` with `top_n` 5. `seconds_since_last_index` within 5 seconds is two process clocks. `kv_cache_size_bytes` stays a documented difference (zlib files versus UTF-8 payloads). Operation-log counters are compared, not dropped.
-- A PDF whose pages are all blank is one empty chunk (1 token, end position 0). `index.max_level`, `index.avg_connections`, and `search_quality.hnsw_span` come from the HNSW graph and vary the way 1.5.2 does. `doctor.python` is the interpreter version, read before the doctor call. `kv_cache_size_bytes` is the sum of zlib KV files. `llm_embed` without `chunk_id` returns 1.5.2's TypeError. Reloading a store sets `insert_count` to the node count.
-- Keyword BM25 skips empty chunk content. `map` `path_prefix` of `""` or `./` matches nothing, and `./src` matches `src`. Annotation tag filters match any tag. Blank PDF pages keep their page number and end position. Dynamic symbols keep a stable id, sort by name, and show up in `find_definition` and `symbol_row_count`. Embeddings accept any non-empty length. `detect_changes` classifies `kv_restored` and `kv_reprocessed` per chunk. `agent_grep` rejects `path_prefix`. `llm_embed` without `chunk_id` is an MCP error with the 1.5.2 TypeError text. `insert_count` follows the 1.5.2 HNSW counter (the first node is not counted). CLI `--tags` stores every tag. `indexed_at` is the stored index time. `doctor` does not start `python3`.
+- Standard and full MCP tools do the work (`prune_history`, `rollback`, `prune_chunks`, `list_sessions`, `rebuild_symbols`, `stale_chunks`, `get_dynamic_symbols`, `list_agents`, `get_notifications`, `environment_check`, `clean_bytecache`, `bulk_store_embeddings`, `bulk_store_chunk_agent_notes`, `get_chunk_history`, `batch`, and the 18 old singleton names).
+- `migrate` copies a 1.5 SQLite store into the native store without modifying it.
+- `.stele-context.toml` keys are applied, including top-level keys in a file without a `[stele-context]` table.
+- A folder with no `.git` or `.stele-context.toml` has no project root, as in 1.5.2: absolute paths, `project_root` null, no new-file scan. The working directory is resolved (`Path.cwd().resolve()`).
+- Tool arguments are accepted and rejected exactly as by the 1.5.2 functions; a rejected call gets an error that names the field and the arguments to retry with, and `isError: true`.
+- Search matches 1.5.2: BM25 over non-empty chunks, `symbol_boost` rows, the proximity nudge, `path_prefix` ranking, `compact` / `max_result_tokens` / `return_response_meta`. `query` takes all of its 1.5.2 arguments.
+- `agent_grep` counts every occurrence and collapses repeated excerpts (`also_in`); `search_text` walks chunks in 1.5.2's order and finds overlapping hits; `document_path` is normalized.
+- Dynamic symbols appear in `find_references` and in `symbol_rows`; `register_dynamic_symbols` honours `role`.
+- Tier 2 counts summaries, embeddings and `llm_embed` vectors; empty embedding vectors are rejected; `llm_embed` takes exactly 32 fingerprint values; memory chunks keep 1.5.2's fields and are reported by `detect_changes`.
+- `doctor` `map_preview.total_tokens` is the project total; `index.max_level`, `index.avg_connections`, `search_quality.hnsw_span`, `insert_count` and `kv_cache_size_bytes` come from a real graph and KV files, computed the 1.5.2 way. `doctor.python` is read from the host interpreter's files; no Python is started.
+- `get_search_history` returns 1.5.2's rows and keeps them across processes.
+- Index locks without git are kept in the store; walked files come back in 1.5.2's path order (case-insensitive on Windows); CLI `annotate` requires `--type` and `--content`; the CLI applies 1.5.2's flags on `search`, `query`, `impact-radius`, `coupling`, `agent-grep`.
+- Speed: the MCP server opens the store on the first tool call; the graph uses heaps and is updated in place on Tier-2 writes, and its numbers are cached across processes.
 
 ### Added
 
-- [MIGRATION.md](MIGRATION.md): 1.5.x Python (PyPI, `python-legacy`) to 2.x Rust. README links it.
+- [MIGRATION.md](MIGRATION.md): 1.5.x Python (PyPI, `python-legacy`) to 2.x Rust.
+- `tests/mcp_parity.rs` (replaces `scripts/mcp_parity.py`) and `stele-bench versus` (replaces `scripts/versus_152.py`), both in Rust. Python stays only as the 1.5.2 reference in tests.
 
 ## [Unreleased]
 
