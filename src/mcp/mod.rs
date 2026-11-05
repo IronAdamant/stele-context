@@ -88,10 +88,21 @@ pub fn serve() -> Response {
 pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    // The store opens on the first tools/call. initialize and tools/list
-    // answer without touching the disk, so a client's handshake is not
-    // held up by the snapshot read or the store lock.
+    // The store opens on a background thread while the client does its
+    // handshake: initialize and tools/list answer without touching the disk,
+    // and the first tools/call waits for the store only if it is not ready
+    // yet. The same thread then finds the host Python version that doctor
+    // reports (file reads along PATH, slow on Windows; nothing is started).
     let mut engine: Option<Engine> = None;
+    let (sender, opened) = std::sync::mpsc::channel::<Option<Engine>>();
+    let owned = storage.map(std::path::Path::to_path_buf);
+    let background = std::thread::Builder::new()
+        .name("store-open".to_string())
+        .spawn(move || {
+            let _ = sender.send(Engine::open(owned.as_deref()).ok());
+            let _ = crate::pyver::host_version();
+        })
+        .is_ok();
     let agent = format!("stele-context-mcp-{}", std::process::id());
     let mut registered = false;
     for line in stdin.lock().lines() {
@@ -128,7 +139,11 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
             }
             "tools/call" => {
                 if !registered {
-                    engine = Engine::open(storage).ok();
+                    engine = if background {
+                        opened.recv().ok().flatten()
+                    } else {
+                        Engine::open(storage).ok()
+                    };
                     if let Some(engine) = engine.as_mut() {
                         engine.remember_server_agent(&agent);
                         engine.register_server_agent();

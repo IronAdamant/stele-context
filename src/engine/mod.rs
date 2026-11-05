@@ -2009,9 +2009,16 @@ impl Engine {
         if let Some(stats) = self.graph_cache.get() {
             return stats;
         }
-        let fingerprint = self.graph_fingerprint();
+        // A small graph builds faster than a file round trip, so only a
+        // store with enough chunks to matter reads or writes the cache.
+        let cached = self.store.state.chunks.len() >= GRAPH_CACHE_MIN;
+        let fingerprint = if cached {
+            self.graph_fingerprint()
+        } else {
+            String::new()
+        };
         let path = self.storage.join("store").join("hnsw_stats.json");
-        if !self.hnsw_ready.get() {
+        if cached && !self.hnsw_ready.get() {
             if let Some(stats) = read_graph_stats(&path, &fingerprint) {
                 self.graph_cache.set(Some(stats));
                 return stats;
@@ -2025,13 +2032,15 @@ impl Engine {
             graph.probe_span(),
         );
         drop(graph);
-        let body = crate::json::to_string(&Value::object(vec![
-            ("fingerprint", Value::string(&fingerprint)),
-            ("max_level", Value::Int(stats.0)),
-            ("avg_connections", Value::Float(stats.1)),
-            ("hnsw_span", Value::Float(stats.2)),
-        ]));
-        let _ = fs::write(&path, body);
+        if cached {
+            let body = crate::json::to_string(&Value::object(vec![
+                ("fingerprint", Value::string(&fingerprint)),
+                ("max_level", Value::Int(stats.0)),
+                ("avg_connections", Value::Float(stats.1)),
+                ("hnsw_span", Value::Float(stats.2)),
+            ]));
+            let _ = fs::write(&path, body);
+        }
         self.graph_cache.set(Some(stats));
         stats
     }
@@ -2234,6 +2243,9 @@ fn extension_of(path: &str) -> &str {
         .map(|(_, ext)| ext)
         .unwrap_or("")
 }
+
+/// Chunk count from which the graph numbers are cached on disk.
+pub(crate) const GRAPH_CACHE_MIN: usize = 256;
 
 /// FNV-1a over each chunk id and its agent vector, plus the chunk count.
 pub(crate) fn graph_fingerprint_of<'a>(rows: impl Iterator<Item = (&'a str, &'a [f32])>) -> String {

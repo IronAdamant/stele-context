@@ -393,8 +393,10 @@ fn hnsw_span(storage: &Path, vectors: &[(String, Vec<f32>)]) -> f64 {
             .map(|(id, lanes)| (id.as_str(), lanes.as_slice())),
     );
     let cache = storage.join("store").join("hnsw_stats.json");
-    if let Some((_, _, span)) = crate::engine::read_graph_stats(&cache, &fingerprint) {
-        return span;
+    if vectors.len() >= crate::engine::GRAPH_CACHE_MIN {
+        if let Some((_, _, span)) = crate::engine::read_graph_stats(&cache, &fingerprint) {
+            return span;
+        }
     }
     let count = vectors.len();
     let bytes = std::fs::read(storage.join("store").join("signatures.bin")).unwrap_or_default();
