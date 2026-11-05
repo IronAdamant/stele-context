@@ -217,8 +217,8 @@ fn mcp_session(
             ),
         ]),
     )?;
-    read_id(&rx, &mut child, 1, Duration::from_secs(60))?;
-    let initialize_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let (_, answered) = read_id(&rx, &mut child, 1, Duration::from_secs(60))?;
+    let initialize_ms = answered.duration_since(started).as_secs_f64() * 1000.0;
     send(
         &mut stdin,
         &Value::object(vec![
@@ -236,8 +236,8 @@ fn mcp_session(
             ("params", Value::object(vec![])),
         ]),
     )?;
-    let listed = read_id(&rx, &mut child, 2, Duration::from_secs(30))?;
-    let list_ms = listed_at.elapsed().as_secs_f64() * 1000.0;
+    let (listed, answered) = read_id(&rx, &mut child, 2, Duration::from_secs(30))?;
+    let list_ms = answered.duration_since(listed_at).as_secs_f64() * 1000.0;
     let tools = object_get(&listed, "tools").and_then(as_array);
     if tools.map(|items| items.is_empty()).unwrap_or(true) {
         let _ = child.kill();
@@ -257,12 +257,16 @@ fn send(stdin: &mut impl Write, message: &Value) -> Result<(), String> {
         .map_err(|err| format!("mcp write: {err}"))
 }
 
+/// The reply to `request_id` and when its line arrived. The time is taken
+/// before this client parses the line: the gate times the server, and a
+/// longer reply should not count as a slower server because the bench's
+/// own JSON parser reads more bytes (the size is reported separately).
 fn read_id(
     rx: &mpsc::Receiver<String>,
     child: &mut std::process::Child,
     request_id: i64,
     timeout: Duration,
-) -> Result<Value, String> {
+) -> Result<(Value, Instant), String> {
     let deadline = Instant::now() + timeout;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -272,6 +276,7 @@ fn read_id(
         }
         match rx.recv_timeout(remaining) {
             Ok(line) => {
+                let arrived = Instant::now();
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
@@ -287,6 +292,7 @@ fn read_id(
                 }
                 return object_get(&message, "result")
                     .cloned()
+                    .map(|result| (result, arrived))
                     .ok_or_else(|| format!("mcp result missing: {line}"));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
