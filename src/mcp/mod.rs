@@ -292,23 +292,33 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
     let args = field(params, "arguments")
         .cloned()
         .unwrap_or(Value::object(vec![]));
-    let text = match dispatch(engine, &name, &args) {
+    let (text, is_error) = match dispatch(engine, &name, &args) {
         Ok(mut value) => {
             attach_hint(&name, &mut value);
-            json::to_string(&value)
+            (json::to_string(&value), false)
         }
         Err(message) => {
             engine.note_failure();
-            let mut value = Value::object(vec![
-                ("ok", Value::Bool(false)),
-                ("error", Value::string(message)),
-            ]);
+            let mut value = if name == "llm_embed" || name == "agent_grep" {
+                Value::object(vec![("error", Value::string(message))])
+            } else {
+                Value::object(vec![
+                    ("ok", Value::Bool(false)),
+                    ("error", Value::string(message)),
+                ])
+            };
             attach_hint(&name, &mut value);
-            json::to_string(&value)
+            (json::to_string(&value), true)
         }
     };
     engine.note_operation();
-    tool_text(&text)
+    let mut result = tool_text(&text);
+    if is_error {
+        if let Value::Object(pairs) = &mut result {
+            pairs.push(("isError".to_string(), Value::Bool(true)));
+        }
+    }
+    result
 }
 
 pub(crate) fn lite_tools() -> &'static [&'static str] {
@@ -389,19 +399,27 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             session.as_deref(),
             flag(args, "working_tree"),
         ),
-        "agent_grep" => engine.grep_full(
-            &query,
-            flag(args, "regex"),
-            arg(args, "document_path").as_deref(),
-            !flag(args, "no_classify") && flag_default(args, "classify", true),
-            flag_default(args, "include_scope", true),
-            arg(args, "group_by").as_deref().unwrap_or("file"),
-            int_arg(args, "max_tokens").unwrap_or(4000),
-            flag_default(args, "deduplicate", true),
-            int_arg(args, "context_lines").unwrap_or(0),
-            session.as_deref(),
-            flag(args, "working_tree"),
-        ),
+        "agent_grep" => {
+            if field(args, "path_prefix").is_some() {
+                return Err(
+                    "_SearchMixin.agent_grep() got an unexpected keyword argument 'path_prefix'"
+                        .to_string(),
+                );
+            }
+            engine.grep_full(
+                &query,
+                flag(args, "regex"),
+                arg(args, "document_path").as_deref(),
+                !flag(args, "no_classify") && flag_default(args, "classify", true),
+                flag_default(args, "include_scope", true),
+                arg(args, "group_by").as_deref().unwrap_or("file"),
+                int_arg(args, "max_tokens").unwrap_or(4000),
+                flag_default(args, "deduplicate", true),
+                int_arg(args, "context_lines").unwrap_or(0),
+                session.as_deref(),
+                flag(args, "working_tree"),
+            )
+        }
         "query" => {
             if flag(args, "working_tree") || session.is_some() {
                 engine.index_working_tree();

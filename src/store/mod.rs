@@ -22,6 +22,8 @@ pub struct Document {
     pub sha256: String,
     pub doc_version: u64,
     pub chunk_count: u32,
+    /// Unix seconds when this document was last indexed. Not the file mtime.
+    pub indexed_at: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -41,6 +43,8 @@ pub struct Chunk {
     pub version: u64,
     pub staleness: f64,
     pub stale_since: Option<i64>,
+    /// Caller-supplied vector. Empty means none. Any positive length is kept.
+    pub embedding: Vec<f32>,
 }
 
 #[derive(Clone, Debug)]
@@ -175,6 +179,8 @@ pub struct Dynamic {
     pub agent: String,
     pub line: u32,
     pub chunk_id: String,
+    /// Stable id assigned at registration. Listing does not renumber it.
+    pub id: i64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -192,6 +198,10 @@ pub struct State {
     pub change_log: Vec<ChangeRow>,
     pub next_annotation: i64,
     pub seq: u64,
+    /// HNSW inserts. Grows on every vector add and does not shrink on remove.
+    pub inserts: u64,
+    /// Next symbol id. SQLite row ids keep climbing after a rebuild.
+    pub next_symbol_id: i64,
     /// Parallel to `chunks`. Not part of the JSON snapshot; `signatures.bin`.
     pub sigs: Vec<[f32; 128]>,
 }
@@ -371,6 +381,12 @@ impl State {
                 Value::Array(self.change_log.iter().map(ChangeRow::to_json).collect()),
             ),
             ("next_annotation", Value::Int(self.next_annotation)),
+            ("inserts", Value::Int(self.inserts as i64)),
+            ("next_symbol_id", Value::Int(self.next_symbol_id)),
+            (
+                "chunk_history",
+                Value::Array(self.chunk_history.iter().map(ChunkHist::to_json).collect()),
+            ),
         ])
     }
 }
@@ -514,11 +530,15 @@ impl State {
             edges: array(value, "edges").map(Edge::from_json).collect(),
             sessions: array(value, "sessions").map(Session::from_json).collect(),
             dynamic: array(value, "dynamic").map(Dynamic::from_json).collect(),
-            chunk_history: Vec::new(),
+            chunk_history: array(value, "chunk_history")
+                .map(ChunkHist::from_json)
+                .collect(),
             change_log: array(value, "change_log")
                 .map(ChangeRow::from_json)
                 .collect(),
             next_annotation: int_field(value, "next_annotation"),
+            inserts: int_field(value, "inserts") as u64,
+            next_symbol_id: int_field(value, "next_symbol_id"),
             sigs: Vec::new(),
         }
     }
@@ -533,6 +553,7 @@ impl Document {
             ("sha256", Value::string(&self.sha256)),
             ("doc_version", Value::Int(self.doc_version as i64)),
             ("chunk_count", Value::Int(self.chunk_count as i64)),
+            ("indexed_at", Value::Float(self.indexed_at)),
         ])
     }
     fn from_json(value: &Value) -> Document {
@@ -543,6 +564,7 @@ impl Document {
             sha256: string_field(value, "sha256"),
             doc_version: int_field(value, "doc_version") as u64,
             chunk_count: int_field(value, "chunk_count") as u32,
+            indexed_at: float_field(value, "indexed_at"),
         }
     }
 }
@@ -561,6 +583,15 @@ impl Chunk {
             ("language", opt_string(&self.language)),
             ("summary", opt_string(&self.summary)),
             ("notes", opt_string(&self.notes)),
+            (
+                "embedding",
+                Value::Array(
+                    self.embedding
+                        .iter()
+                        .map(|lane| Value::Float(*lane as f64))
+                        .collect(),
+                ),
+            ),
         ])
     }
     fn from_json(value: &Value) -> Chunk {
@@ -583,6 +614,17 @@ impl Chunk {
             },
             staleness: float_field(value, "staleness"),
             stale_since: opt_int_field(value, "stale_since"),
+            embedding: match field(value, "embedding") {
+                Some(Value::Array(rows)) => rows
+                    .iter()
+                    .map(|item| match item {
+                        Value::Float(number) => *number as f32,
+                        Value::Int(number) => *number as f32,
+                        _ => 0.0,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
         }
     }
 }
@@ -802,6 +844,7 @@ impl Dynamic {
             ("agent", Value::string(&self.agent)),
             ("line", Value::Int(self.line as i64)),
             ("chunk_id", Value::string(&self.chunk_id)),
+            ("id", Value::Int(self.id)),
         ])
     }
     fn from_json(value: &Value) -> Dynamic {
@@ -820,6 +863,28 @@ impl Dynamic {
             agent: string_field(value, "agent"),
             line: int_field(value, "line") as u32,
             chunk_id: string_field(value, "chunk_id"),
+            id: int_field(value, "id"),
+        }
+    }
+}
+
+impl ChunkHist {
+    fn to_json(&self) -> Value {
+        Value::object(vec![
+            ("chunk_id", Value::string(&self.chunk_id)),
+            ("version", Value::Int(self.version as i64)),
+            ("hash", Value::string(&self.hash)),
+            ("at", Value::Int(self.at)),
+            ("path", Value::string(&self.path)),
+        ])
+    }
+    fn from_json(value: &Value) -> ChunkHist {
+        ChunkHist {
+            chunk_id: string_field(value, "chunk_id"),
+            version: int_field(value, "version") as u64,
+            hash: string_field(value, "hash"),
+            at: int_field(value, "at"),
+            path: string_field(value, "path"),
         }
     }
 }

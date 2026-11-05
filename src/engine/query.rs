@@ -844,8 +844,8 @@ impl Engine {
                 .documents
                 .iter()
                 .find(|doc| doc.path == path)
-                .map(|doc| (doc.size, doc.mtime_ns, doc.sha256.clone()));
-            let Some((size, mtime, sha)) = stored else {
+                .map(|doc| (doc.size, doc.mtime_ns, doc.sha256.clone(), doc.indexed_at));
+            let Some((size, mtime, sha, indexed_at)) = stored else {
                 new_rows.push(Value::object(vec![("path", Value::string(&path))]));
                 continue;
             };
@@ -889,7 +889,7 @@ impl Engine {
                 entry.push((
                     "trust".to_string(),
                     Value::object(vec![
-                        ("document_indexed_at", Value::Float(file_mtime)),
+                        ("document_indexed_at", Value::Float(indexed_at)),
                         ("stored_last_modified", Value::Float(file_mtime)),
                         ("file_mtime", Value::Float(file_mtime)),
                         ("file_size", Value::Int(file_size as i64)),
@@ -1038,7 +1038,7 @@ impl Engine {
                             && (tags.is_empty()
                                 || tags
                                     .iter()
-                                    .all(|tag| note.tags.iter().any(|have| have == tag)))
+                                    .any(|tag| note.tags.iter().any(|have| have == tag)))
                     })
                     .map(|note| {
                         Value::object(vec![
@@ -1308,6 +1308,7 @@ impl Engine {
         kind: &str,
         path: &str,
     ) -> Result<Value, String> {
+        let id = self.take_symbol_id();
         self.store.state.dynamic.push(Dynamic {
             name: name.to_string(),
             kind: kind.to_string(),
@@ -1316,6 +1317,7 @@ impl Engine {
             agent: String::new(),
             line: 0,
             chunk_id: format!("runtime:default:{name}"),
+            id,
         });
         self.store.save("dynamic", &Value::string(name))?;
         Ok(Value::object(vec![("registered", Value::string(name))]))
@@ -1340,7 +1342,7 @@ impl Engine {
     }
 
     fn symbol_index(&self) -> Value {
-        let sym_n = self.store.state.symbols.len() as i64;
+        let sym_n = (self.store.state.symbols.len() + self.store.state.dynamic.len()) as i64;
         let doc_n = self.store.state.documents.len() as i64;
         Value::object(vec![
             (
@@ -1415,6 +1417,26 @@ impl Engine {
                 rows.push(Value::Object(row));
             }
         }
+        let mut dynamic: Vec<_> = self
+            .store
+            .state
+            .dynamic
+            .iter()
+            .filter(|sym| sym.name == name)
+            .collect();
+        dynamic.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        for sym in dynamic {
+            rows.push(Value::object(vec![
+                ("symbol", Value::string(&sym.name)),
+                ("kind", Value::string(&sym.kind)),
+                ("chunk_id", Value::string(&sym.chunk_id)),
+                ("document_path", Value::string(&sym.path)),
+                ("line_number", Value::Null),
+                ("content", Value::string("[dynamic/runtime symbol]")),
+                ("token_count", Value::Int(0)),
+                ("dynamic", Value::Bool(true)),
+            ]));
+        }
         rows
     }
 
@@ -1481,7 +1503,9 @@ impl Engine {
                     ("source".to_string(), Value::string(hit.source)),
                     (
                         "tier2_present".to_string(),
-                        Value::Bool(tier2 && chunk.summary.is_some()),
+                        Value::Bool(
+                            tier2 && (chunk.summary.is_some() || !chunk.embedding.is_empty()),
+                        ),
                     ),
                 ];
                 if let Some(edges) = edge_block(&self.store.state.edges, &chunk.id) {

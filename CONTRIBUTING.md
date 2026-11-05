@@ -96,6 +96,8 @@ cargo test
 
 The fetch step is optional. Corpus round-trip tests skip when `parity/.cache` is absent, and they run when it is present.
 
+`cargo test` runs the parity tests against an installed interpreter. That interpreter needs `python3`, `stele-context==1.5.2`, and PyMuPDF (`pymupdf`). The tests skip the live comparison when those imports are missing.
+
 ### Writing Tests
 
 - Put unit tests in the module they cover (`#[cfg(test)]`).

@@ -20,20 +20,31 @@ pub fn pages(bytes: &[u8]) -> Vec<(String, usize, usize)> {
         }
         texts.push(joined);
     }
-    texts
-        .into_iter()
+    let chunks: Vec<(String, usize, usize)> = texts
+        .iter()
         .enumerate()
-        .map(|(index, text)| {
+        .filter_map(|(index, text)| {
+            if text.trim().is_empty() {
+                return None;
+            }
             let text = if text.ends_with('\n') {
-                text
+                text.clone()
             } else {
                 format!("{text}\n")
             };
             let body = format!("[Page {}]\n{text}", index + 1);
             let end = (index + 1) * 1000;
-            (body, index * 1000, end)
+            Some((body, index * 1000, end))
         })
-        .collect()
+        .collect();
+    if !chunks.is_empty() {
+        return chunks;
+    }
+    let joined = content_streams(bytes).join("\n");
+    if joined.trim().is_empty() {
+        return vec![(format!("pdf pages 0 bytes {}", bytes.len()), 0, bytes.len())];
+    }
+    vec![(format!("[Page 1]\n{joined}\n"), 0, 1000)]
 }
 
 struct PdfObj {
@@ -95,9 +106,8 @@ fn page_texts(bytes: &[u8]) -> Vec<String> {
             }
             text.push_str(piece);
         }
-        if !text.trim().is_empty() {
-            out.push(text);
-        }
+        // A blank page stays in the list so later pages keep their numbers.
+        out.push(text);
     }
     out
 }

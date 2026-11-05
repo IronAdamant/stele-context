@@ -88,7 +88,7 @@ The parity audit's six extractor and token gaps were Rust defects. They were fix
 | `stele-context migrate` and open | same | A 1.5 database is read in place, including its `-wal` file. `documents.document_path` is the path column. Chunks, symbols, edges, annotations, sessions, chunk history, and conflicts are copied. The original files are not written. If the native store already has documents, the database is left untouched. |
 | `doctor` when the db was copied | same | `next_steps` says the database was copied into the native store and was not modified. |
 
-`version_count` in `GET /health` is 0. There is no `chunk_history` table.
+`version_count` in `GET /health` is the number of `chunk_history` rows. A first index writes none, so the count is 0 until a chunk is updated. `migrate` copies the 1.5 `chunk_history` table into that list, and `doctor` reports its length under `db_health.table_rows.chunk_history`.
 
 ## Bug fixed from Python
 
@@ -157,13 +157,13 @@ Exit codes in 2.0: 0 success, 1 operation error, 2 usage. A closed stdout pipe e
 | `find-definition` | same | Payload is `symbol`, `definitions`, `count`, `symbol_index`, `guidance`. Shadow fields are set only when one file has more than one definition, and `definition_index` starts at 1. `find-references` adds `verdict`, `references`, and `total`. |
 | `impact-radius` | intentional change | `--symbol NAME`, or the first positional as the symbol. Depth is 2. Result: `symbol`, `affected_files`, `affected_chunks`, `affected` (paths). `--summary-mode` is accepted and ignored. `--depth`, `--document-path`, `--chunk-id`, `--significance-threshold`, and `--direction` are unknown flags (exit 2). PR #5 compared file sets, not this JSON: `Console` at depth 2 was 162 files on both sides, and `coupling` of `rich/console.py` was 144 files on both sides. |
 | `coupling` | intentional change | One path. Result includes `coupled_files`. No `--mode` (`edges` vs `co_consumers`) and no `--significance-threshold`. |
-| `map` | same | Compact map: `documents` rows (`path`, `chunk_count`, `total_tokens`, `indexed_at`, `annotations`), `total_documents`, `total_tokens`, `index_health`, `compact`, `project_root`. |
+| `map` | same | Compact map: `documents` rows (`path`, `chunk_count`, `total_tokens`, `indexed_at`, `annotations`), `total_documents`, `total_tokens`, `index_health`, `compact`, `project_root`. `path_prefix` is resolved against the project root the way 1.5.2 `Path` does. `""` and `./` become `.` and match no document. `./src` becomes `src`. `indexed_at` is the time the document was indexed. |
 | `stats` and `project-brief` | same | `stats` is the 1.5 storage object. `project-brief` is `purpose`, `totals`, `extensions`, `largest_files_by_tokens`, `index_health`, `project_root`. `--top-n` is accepted. |
 | `history` | same | Change-history rows newest first: `id`, `timestamp`, `session_id`, `summary`, `reason`. A `detect` writes one row. |
 | `enrichment-plan` | same | `top_n`, `candidates`, `candidates_total`, `uncovered_tokens`, `tier2_token_coverage_percent`, `total_tokens`, `how_to_enrich`. `--top-n` and `--min-tokens` are accepted. |
 | `init` | intentional change | Writes `.stele-context.toml` containing the line `# stele-context 2.0` if the file is absent, and returns `path`. It does not index and it does not print an MCP snippet. 1.5 `init` indexes, prints the lite client config, and prints doctor `next_steps`. |
 | `clear` | same | Deletes the store only when `--confirm` is set. Without it the command returns `cancelled: true` and does not write. |
-| `doctor` | same, except `db_health` | The MCP object matches 1.5.2 (`stele_version`, `python` of the host interpreter, counts, `index_health`, `search_quality`, `environment`, `map_preview`, `recommended_mcp_mode`, `recommended_ritual`, `mcp_config`, `next_steps`, `token_savings`, `enrichment_preview`). `db_health` does not invent SQLite settings. `journal_mode`, `synchronous`, `page_count`, `page_size`, `wal_autocheckpoint`, and `busy_timeout_ms` are null because there is no database file. `wal_size_bytes` is 0 (no WAL). `database_size_bytes` is the size of `snapshot.json`, `journal.jsonl`, `signatures.bin`, and `bm25.bin`. `table_rows` counts the native lists (`change_history`, `chunk_history`, `operation_log` of MCP calls, `sessions`). |
+| `doctor` | same, except `python` and the SQLite fields | The MCP object matches 1.5.2 on counts, `index_health`, `search_quality`, `environment`, `map_preview`, `recommended_mcp_mode`, `recommended_ritual`, `mcp_config`, `next_steps`, `token_savings`, and `enrichment_preview`. `python` is null: the binary does not start an interpreter, so the first call does not pay for a `python3` process. `index_health.latest_indexed_at` and `seconds_since_last_index` use the stored index time (the maximum `indexed_at` on the documents), not the time of the call and not the snapshot file's mtime. `map` and `project_brief` return that same stored time. `get_context` `trust.document_indexed_at` is the stored index time, not the file mtime. |
 | `get-context PATH` | same shape | `{unchanged, changed, new}`. An unchanged file has `chunks` (`chunk_id`, `content`, `start_pos`, `end_pos`, `token_count`, `content_truncated`, `staleness_score`), `total_tokens`, and `trust`. A changed file has `old_hash`, `new_hash`, and `diff_since_cache` (unified diff, `diff_exact`, added and removed line counts, `diff_tokens`, `diff_truncated`, `recommendation`). `--session-id` records the read. |
 | `annotations` | same actions | `stele-context annotations --action create PATH`. Listed in `--help`. Tags passed as repeated `--tags` are stored. The old singleton names are MCP full-mode aliases, not separate CLI commands. |
 | `document-lock` | intentional change | `--action` and a positional. See the MCP section for the actions that run. |
@@ -202,12 +202,12 @@ Calls that send only the 1.5 property names therefore miss:
 | `index` | not supported for the 1.5 body | Schema requires `paths` (array). The dispatcher reads `path`. A call with only `paths` indexes `.`. `force_reindex`, `summaries`, and `expected_versions` are ignored. |
 | `search` | same for the knobs that change the set | `top_k`, `search_mode`, `path_prefix`, and `working_tree` are read. `compact` and `max_result_tokens` are accepted and do not trim bodies. |
 | `search_text`, `agent_grep` | same | `regex` defaults off, so `file.py` is a substring. `document_path`, `limit`, `group_by`, `max_tokens`, and `working_tree` are read. `session_id` records the search and indexes files that matched. |
-| `query` | same | The stdio result matches unmodified 1.5.2 on the parity fixture (merged search, symbols, and grep). |
+| `query` | same | The stdio result matches unmodified 1.5.2 (merged search, symbols, and grep). Keyword scores use BM25 over chunks whose content is non-empty, which is what 1.5.2 indexes. |
 | `get_context` | same for the path list | `document_paths` returns `unchanged`, `changed`, and `new`. A file whose size or mtime differs includes `diff_since_cache` (`diff`, `diff_exact`, added and removed line counts, `recommendation`). |
 | `detect_changes` | same | `document_paths`, `limit`, and `scan_new` are read. New files are reported and not indexed. Changed files are reindexed. |
 | `impact_radius` | same on the parity fixture | The symbol call matches unmodified 1.5.2. |
 | `coupling` | same on the parity fixture | The `document_path` call matches unmodified 1.5.2. |
-| `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `get` and `search` return newest first and filter on `target_type` when it is set. `create` echoes the stored `target_type`. A document path is normalized only when the type is `document`. `delete` matches id. Migrated annotation ids keep the 1.5 values, and `created_at` keeps the fractional seconds. |
+| `annotations` | same | Actions `create`, `get`, `delete`, `update`, `search`, `bulk_create`. `get` and `search` return newest first and filter on `target_type` when it is set. A `tags` filter matches when the annotation has any of the requested tags. `create` echoes the stored `target_type`. A document path is normalized only when the type is `document`. `delete` matches id. Migrated annotation ids keep the 1.5 values, and `created_at` keeps the fractional seconds. |
 | `document_lock` | intentional change | Actions `acquire`, `release`, `refresh`, `status`, `release_all`, `reap`, `conflicts`. `ttl` and `limit` are ignored (TTL 300). `force` is read. Storage is the JSON coordination file, not `coordination.db`. |
 | `bulk_store_summaries` | same | `summaries` is a chunk id to text object. One `chunk_id` plus `summary` still works. |
 | `register_dynamic_symbols` | same | `symbols` is a list, stored under `runtime:<agent_id>:<name>`. |
@@ -231,10 +231,11 @@ Full-mode names run in 2.0.1 by calling the tool in the replacement column. Anno
 - `doctor.db_health.recent_operations_1h`, `recent_failures_1h`, `busy_ratio`, and `recommended_action` are counted from MCP tool results in this process (`busy_ratio` under 0.01 is `idle`, under 0.1 is `vacuum`, otherwise `rebuild_symbols`). 1.5.2 counts rows in the SQLite `operation_log`, including internal writes.
 - `get_relevant_kv` `relevance_score` matches 1.5.2 to 5 decimal places. The signature bytes match; the last bits of the cosine move with f32 packing.
 
-- `llm_embed` without `chunk_id` returns an error. 1.5.2 raises `TypeError: llm_embed() missing 1 required positional argument: 'chunk_id'`. Rust returns that same message as a tool error.
-- Keyword `relevance_score` uses 1.5.2 BM25, the proximity nudge, and the same identifier split (`renderWidget` contributes `render`, `widget`, and `renderwidget`).
+- `llm_embed` without `chunk_id` is an MCP tool error (`isError` true). The text is `{"error": "_IndexMixin.llm_embed() missing 1 required positional argument: 'chunk_id'"}`, which is the TypeError 1.5.2 raises.
+- `agent_grep` with `path_prefix` is an MCP tool error (`isError` true). The text is `{"error": "_SearchMixin.agent_grep() got an unexpected keyword argument 'path_prefix'"}`. 1.5.2's function does not take that argument.
+- Keyword `relevance_score` uses 1.5.2 BM25 over chunks with non-empty content, the proximity nudge, and the same identifier split (`renderWidget` contributes `render`, `widget`, and `renderwidget`). An empty file such as `__init__.py` is stored as a chunk and is left out of the keyword index.
 
-Their singleton payloads match 1.5.2 except the alias errors and `kv_cache_size_bytes` above. The names still run; they are not `tool_removed`.
+`bulk_store_embeddings` and `store_embedding` accept any non-empty vector and L2-normalise it. A 64-value vector is stored. A zero vector stays zeros of that length. Their other singleton payloads match 1.5.2 except the alias errors and `kv_cache_size_bytes` above. The names still run; they are not `tool_removed`.
 
 | Removed name | Replacement named in the error |
 | --- | --- |
@@ -257,14 +258,14 @@ Stdio attaches the 1.5.2 hint string when `impact_radius` has `affected_chunks` 
 | Force steal | same fields | The conflict row is `id`, `document_path`, `agent_a`, `agent_b`, `conflict_type` `lock_stolen`, `expected_version` null, `actual_version` null, `resolution` `force_overwritten`, `created_at`. It is written to the coordination log and is not counted in `stats.total_conflicts`. |
 | Where it is stored | intentional change | `<git-common-dir>/stele-context/coordination.json` when `.git` resolves. The snapshot also keeps a copy. No git directory: snapshot only. `coordination.db` is not opened. |
 | Optimistic `expected_versions` on index | not supported | Ignored. |
-| Agent registry and notifications | same | `serve-mcp` registers `stele-context-mcp-<pid>` and injects that id into write tools that take `agent_id`. `list_agents` lists that registry. `list_sessions.agent_id` is that id when `detect_changes` or `save_kv_state` created the session. `get_notifications` is newest first. A reindex from `detect_changes` adds a `modified` row. `remove` and a detect removal add a `removed` row with that `agent_id`. Timestamps are fractional seconds. |
+| Agent registry and notifications | same, disk write deferred | `serve-mcp` remembers `stele-context-mcp-<pid>` in memory during initialize and injects that id into write tools that take `agent_id`. The registry file is written on the first `tools/call`. A process that only initializes does not register. `list_agents` lists that registry. `list_sessions.agent_id` is that id when `detect_changes` or `save_kv_state` created the session. `get_notifications` is newest first. A reindex from `detect_changes` adds a `modified` row. `remove` and a detect removal add a `removed` row with that `agent_id`. Timestamps are fractional seconds. |
 
 ## HTTP serve
 
 | Item | Mark | 2.0 |
 | --- | --- | --- |
 | Routes and envelope | same | `GET /health`, `GET /tools`, `POST /call` with `{"tool", "parameters"}`. Success is `{"success": true, "result"}`. A tool error string is HTTP 200 `{"error": "..."}`. Unknown tool is HTTP 200 `{"error": "Unknown tool: ...", "available_tools": [...]}`. Bad JSON or a missing `tool` is HTTP 400. |
-| `/health` storage fields | same names, different counts | The 20 keys match 1.5 `get_storage_stats`: `chunk_count`, `document_count`, `session_count`, `total_tokens`, `version_count`, `annotation_count`, `history_count`, `kv_cache_size_bytes`, `database_size_bytes`, `storage_dir`, `symbol_count`, `definition_count`, `reference_count`, `edge_count`, `runtime_symbol_count`, `locked_documents`, `expired_locks`, `active_lock_agents`, `total_conflicts`, `last_conflict_at`. `version_count` is 0 (no chunk history). `history_count` is journal lines, not `change_history` rows. `database_size_bytes` is snapshot + journal + `signatures.bin` + `bm25.bin`. `runtime_symbol_count` is the dynamic-symbol list, not rows whose chunk id starts with `runtime:`. `locked_documents` is the lock list length. |
+| `/health` storage fields | same names, different counts | The 20 keys match 1.5 `get_storage_stats`: `chunk_count`, `document_count`, `session_count`, `total_tokens`, `version_count`, `annotation_count`, `history_count`, `kv_cache_size_bytes`, `database_size_bytes`, `storage_dir`, `symbol_count`, `definition_count`, `reference_count`, `edge_count`, `runtime_symbol_count`, `locked_documents`, `expired_locks`, `active_lock_agents`, `total_conflicts`, `last_conflict_at`. `version_count` is the `chunk_history` length (0 until a chunk is updated). `history_count` is journal lines, not `change_history` rows. `database_size_bytes` is snapshot + journal + `signatures.bin` + `bm25.bin`. `symbol_count` includes dynamic symbols. `runtime_symbol_count` is the dynamic-symbol list. `locked_documents` is the lock list length. `index.insert_count` is the number of vector inserts. It grows when a chunk is added and when an embedding is stored, and it does not shrink when a chunk is removed. `node_count` is the current chunk count. |
 | Bind | intentional change | One thread per connection, `std::net`, host `127.0.0.1` unless `--host` is set. No `--blocking`. |
 | Mode | intentional change | HTTP is lite-only. See MCP. |
 | CORS | same header | `Access-Control-Allow-Origin: *`. |
@@ -280,18 +281,40 @@ Stdio attaches the 1.5.2 hint string when `impact_radius` has `affected_chunks` 
 | WAV | intentional change | `audio wav <rate>Hz <seconds>s bytes <len>`. Longer than 30 seconds: one chunk per 30s span, `audio wav <rate>Hz <start>-<end>s`. A non-RIFF wav falls back to `audio wav bytes <len>`. |
 | Other audio | intentional change | One line, `audio <ext> bytes <len>`. No MFCC. |
 | Video | intentional change | One line, `video <ext> bytes <len> header <brand>` (`mp4`, `webm`, `avi`, or `unknown`). No frames. |
-| PDF text vs PyMuPDF | same merge rule | One chunk per page, then adjacent pages merge when the signature cosine clears 0.75 and the combined tokens fit in `max_chunk_size`. A long page next to a short page still merges with that neighbour when those two tests pass. Text is `[Page N]` plus literal and hex strings, with a trailing newline. Layout, fonts, and reading order can still differ from PyMuPDF. |
+| PDF text vs PyMuPDF | same merge rule | One chunk per page that has text, then adjacent pages merge when the signature cosine clears 0.75 and the combined tokens fit in `max_chunk_size`. A blank page is not a chunk, and it still occupies its page slot: the next page keeps `[Page N]` and `end_pos` of `N * 1000`. A long page next to a short page still merges with that neighbour when those two tests pass. Text is `[Page N]` plus literal and hex strings, with a trailing newline. Layout, fonts, and reading order can still differ from PyMuPDF. |
 | PDF that does not start with `%PDF` | intentional change | One chunk, `pdf bytes <len>`. |
 | PDF with no text streams | intentional change | One chunk, `pdf pages 0 bytes <len>`. |
 | Tree-sitter chunking | not supported | Boundaries are the 1.5.2 regex path (tree-sitter absent), and the Python definition spans for `.py`, `.pyw`, and `.pyx`. A 1.5 install that had the `tree-sitter` extra can split JS, TS, Java, C, C++, Go, Rust, Ruby, PHP, and Swift differently. |
 | numpy signatures | not supported | Goldens are the zero-dependency f32 path. A 1.5 index built with numpy loaded can differ in the signature blob. Re-index to get the 2.0 signature. |
+
+## Accepted fields that stay different
+
+These are reported as null or zero on purpose. The store is JSON, so there is no SQLite connection to ask.
+
+| Field | 2.0 value | Why |
+| --- | --- | --- |
+| `db_health.journal_mode` | null | 1.5.2 reads the SQLite `journal_mode` pragma, often `wal`. |
+| `db_health.synchronous` | null | 1.5.2 reads the SQLite `synchronous` pragma. |
+| `db_health.page_count` | null | 1.5.2 reads the SQLite `page_count` pragma. |
+| `db_health.page_size` | null | 1.5.2 reads the SQLite `page_size` pragma. |
+| `db_health.wal_autocheckpoint` | null | 1.5.2 reads the SQLite `wal_autocheckpoint` pragma. |
+| `db_health.busy_timeout_ms` | null | 1.5.2 reads the connection busy timeout. |
+| `db_health.wal_size_bytes` | size of `stele_context.db-wal`, or 0 | There is no WAL. 1.5.2 reports the SQLite WAL file. |
+| `db_health.database_size_bytes` | snapshot + journal + `signatures.bin` + `bm25.bin` | Not `page_count * page_size`. |
+| `index.max_level` | 0 | The graph is not an HNSW. 1.5.2 reports the entry level. |
+| `index.avg_connections` | 0 | Same reason. 1.5.2 averages neighbour lists. |
+| `search_quality.hnsw_span` | 0 | There is no HNSW layer span to measure. |
+| `doctor.python` | null | No interpreter is started. |
+| `stats.storage.kv_cache_size_bytes` | UTF-8 payload size | 1.5.2 sums zlib files under the kv directory. |
+
+`insert_count` is not in this table. It counts vector inserts and is meant to match 1.5.2.
 
 ## Removed and added
 
 Removed, relative to a 1.5.2 process that had the extras installed:
 
 - PyPI install of 2.0, tree-sitter, numpy, Pillow, PyMuPDF, librosa, OpenCV, msgspec
-- SQLite store, `indices/`, `coordination.db`, bytecache, operation log, chunk history
+- SQLite store, `indices/`, `coordination.db`, bytecache, SQLite operation log. Chunk history is kept as a list, not a table.
 - CLI `release`
 - Lookaround and backreference regex
 - Pip egg-info and editable-install checks inside `environment_check`

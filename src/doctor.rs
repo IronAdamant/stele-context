@@ -7,8 +7,6 @@ use crate::root::{detect_project_root, resolve_storage_dir};
 use crate::VERSION;
 use std::fs;
 use std::path::Path;
-use std::time::SystemTime;
-
 pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
@@ -140,6 +138,7 @@ struct ParsedStore {
     symbols: i64,
     tokens: i64,
     tier2: i64,
+    latest: f64,
     error: Option<String>,
     paths: Vec<String>,
 }
@@ -151,6 +150,7 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         symbols: 0,
         tokens: 0,
         tier2: 0,
+        latest: 0.0,
         error: None,
         paths: Vec::new(),
     };
@@ -176,7 +176,7 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         }
     };
     let documents = array_len(&value, "documents");
-    let symbols = array_len(&value, "symbols");
+    let mut symbols = array_len(&value, "symbols");
     let chunk_rows = match field(&value, "chunks") {
         Some(Value::Array(rows)) => rows.as_slice(),
         _ => &[],
@@ -190,12 +190,17 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         }
     }
     let mut paths = Vec::new();
+    let mut latest = 0.0f64;
     if let Some(Value::Array(rows)) = field(&value, "documents") {
         for document in rows {
             if let Some(Value::String(path)) = field(document, "path") {
                 paths.push(path.clone());
             }
+            latest = latest.max(float_field(document, "indexed_at"));
         }
+    }
+    if let Some(Value::Array(rows)) = field(&value, "dynamic") {
+        symbols += rows.len();
     }
     ParsedStore {
         documents: documents as i64,
@@ -203,6 +208,7 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         symbols: symbols as i64,
         tokens,
         tier2,
+        latest,
         error: None,
         paths,
     }
@@ -240,11 +246,6 @@ impl ParsedStore {
                     .to_string(),
             );
         }
-        let latest = fs::metadata(storage.join("store").join("snapshot.json"))
-            .ok()
-            .and_then(|meta| meta.modified().ok())
-            .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_secs() as i64);
         Value::object(vec![
             ("documents", Value::Int(self.documents)),
             ("chunks", Value::Int(self.chunks)),
@@ -252,7 +253,11 @@ impl ParsedStore {
             ("symbols_ready", Value::Bool(self.symbols > 0)),
             (
                 "latest_indexed_at",
-                latest.map(Value::Int).unwrap_or(Value::Null),
+                if self.latest > 0.0 {
+                    Value::Float(self.latest)
+                } else {
+                    Value::Null
+                },
             ),
             ("storage_dir", Value::string(storage.display().to_string())),
             ("symbol_graph_status", Value::string(symbol_graph_status)),
@@ -362,6 +367,14 @@ fn int_field(value: &Value, key: &str) -> i64 {
     match field(value, key) {
         Some(Value::Int(number)) => *number,
         _ => 0,
+    }
+}
+
+fn float_field(value: &Value, key: &str) -> f64 {
+    match field(value, key) {
+        Some(Value::Float(number)) => *number,
+        Some(Value::Int(number)) => *number as f64,
+        _ => 0.0,
     }
 }
 

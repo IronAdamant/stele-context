@@ -203,6 +203,7 @@ impl Engine {
                 .clone()
                 .unwrap_or_else(|| super::extension_of(&chunk.path).to_string());
             for hit in crate::symbols::extract(&ext, &chunk.content) {
+                let _id = self.take_symbol_id();
                 self.store.state.symbols.push(crate::store::Symbol {
                     name: hit.name,
                     kind: hit.kind,
@@ -284,19 +285,19 @@ impl Engine {
     }
 
     pub fn dynamic_symbols(&self, agent: Option<&str>) -> Value {
-        let rows = self
+        let mut rows: Vec<_> = self
             .store
             .state
             .dynamic
             .iter()
             .filter(|sym| agent.is_none_or(|id| sym.agent == id))
-            .enumerate()
-            .map(|(index, sym)| {
+            .collect();
+        rows.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        let rows = rows
+            .into_iter()
+            .map(|sym| {
                 Value::object(vec![
-                    (
-                        "id",
-                        Value::Int(self.store.state.symbols.len() as i64 + index as i64 + 1),
-                    ),
+                    ("id", Value::Int(sym.id)),
                     ("name", Value::string(&sym.name)),
                     ("kind", Value::string(&sym.kind)),
                     ("role", Value::string(&sym.role)),
@@ -415,8 +416,8 @@ impl Engine {
         let mut stored = 0i64;
         let mut errors = Vec::new();
         for (id, values) in pairs {
-            if values.len() != 128 {
-                errors.push(Value::string(format!("{id}: expected 128 floats")));
+            if values.is_empty() {
+                errors.push(Value::string(format!("{id}: expected a non-empty vector")));
                 continue;
             }
             let Some(index) = self
@@ -429,12 +430,22 @@ impl Engine {
                 errors.push(Value::string(id.clone()));
                 continue;
             };
-            self.store.ensure_sigs();
-            let mut sig = [0f32; 128];
-            for (lane, value) in values.iter().enumerate() {
-                sig[lane] = *value as f32;
+            let vector = l2_normalize(values);
+            self.store.state.chunks[index].embedding = vector.clone();
+            if vector.len() == 128 {
+                self.store.ensure_sigs();
+                let mut sig = [0f32; 128];
+                for (lane, value) in vector.iter().enumerate() {
+                    sig[lane] = *value;
+                }
+                self.store.state.sigs[index] = sig;
             }
-            self.store.state.sigs[index] = sig;
+            // remove + add of an existing id. The add increments only when
+            // another node is still in the index. A lone chunk is the new
+            // entry point and 1.5.2 does not count it.
+            if self.store.state.chunks.len() > 1 {
+                self.store.state.inserts += 1;
+            }
             stored += 1;
         }
         self.store.save("embeddings", &Value::Int(stored))?;
@@ -565,7 +576,8 @@ impl Engine {
     ) -> Result<Value, String> {
         if chunk_id.is_empty() {
             return Err(
-                "llm_embed() missing 1 required positional argument: 'chunk_id'".to_string(),
+                "_IndexMixin.llm_embed() missing 1 required positional argument: 'chunk_id'"
+                    .to_string(),
             );
         }
         let vector = match fingerprint {
@@ -605,6 +617,7 @@ impl Engine {
                 version: 1,
                 staleness: 0.0,
                 stale_since: None,
+                embedding: Vec::new(),
             });
             self.store.state.sigs.push([0f32; 128]);
         }
@@ -994,4 +1007,12 @@ fn num_of(value: &Value, key: &str) -> f64 {
         Some(Value::Int(number)) => *number as f64,
         _ => 0.0,
     }
+}
+
+fn l2_normalize(values: &[f64]) -> Vec<f32> {
+    let norm = values.iter().map(|value| value * value).sum::<f64>().sqrt();
+    if norm == 0.0 {
+        return values.iter().map(|value| *value as f32).collect();
+    }
+    values.iter().map(|value| (*value / norm) as f32).collect()
 }

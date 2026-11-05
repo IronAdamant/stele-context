@@ -74,6 +74,7 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
             sha256: sql_text(&row, "content_hash"),
             doc_version: sql_number(&row, "doc_version") as u64,
             chunk_count: 0,
+            indexed_at: sql_number(&row, "indexed_at"),
         });
     }
     for row in opened
@@ -111,6 +112,7 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
             version: sql_number(&row, "version") as u64,
             staleness: sql_number(&row, "staleness_score"),
             stale_since: nonzero_opt(sql_number(&row, "stale_since")),
+            embedding: Vec::new(),
         });
     }
     for row in opened.table("symbols").unwrap_or_default() {
@@ -120,6 +122,10 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
         }
         let chunk_id = sql_text(&row, "chunk_id");
         if chunk_id.starts_with("runtime:") {
+            let mut id = sql_number(&row, "id") as i64;
+            if id == 0 {
+                id = (state.symbols.len() + state.dynamic.len() + 1) as i64;
+            }
             state.dynamic.push(crate::store::Dynamic {
                 name: name.clone(),
                 kind: sql_text(&row, "kind"),
@@ -128,6 +134,7 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
                 agent: runtime_agent(&chunk_id),
                 line: sql_number(&row, "line_number") as u32,
                 chunk_id,
+                id,
             });
             continue;
         }

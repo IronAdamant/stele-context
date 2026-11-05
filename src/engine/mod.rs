@@ -408,39 +408,39 @@ impl Engine {
                 ("old_hash", Value::string(old_short)),
                 ("new_hash", Value::string(new_short)),
             ]));
-            let modality = if media { "media" } else { "code" };
-            let threshold = match modality {
-                "code" => 0.80,
-                "text" | "pdf" => 0.85,
-                _ => self.change_threshold,
-            };
-            let new_text = if media {
-                String::new()
-            } else {
-                chunk::read_python_text(&bytes)
-            };
-            let old_chunks: Vec<String> = self
+            let produced = chunk::chunk_bytes(
+                rel,
+                &bytes,
+                self.chunk_size,
+                self.max_chunk_size,
+                self.merge_threshold,
+            );
+            let old_chunks: Vec<(usize, usize, String, String)> = self
                 .store
                 .state
                 .chunks
                 .iter()
                 .filter(|chunk| chunk.path == *rel)
-                .map(|chunk| chunk.content.clone())
+                .map(|chunk| {
+                    (
+                        chunk.start,
+                        chunk.end,
+                        chunk.sha256.clone(),
+                        chunk.content.clone(),
+                    )
+                })
                 .collect();
-            if old_chunks.is_empty() {
-                kv_reprocessed += 1;
-            } else {
-                let new_sig = chunk::signature(&new_text);
-                for old in &old_chunks {
-                    let old_sig = chunk::signature(old);
-                    let sim: f64 = old_sig.iter().zip(new_sig).map(|(a, b)| a * b).sum();
-                    if sim >= threshold {
-                        kv_restored += 1;
-                    } else {
-                        kv_reprocessed += 1;
-                    }
-                }
-            }
+            let all_sigs: Vec<[f64; 128]> = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .map(|chunk| chunk::signature(&chunk.content))
+                .collect();
+            let (restored, reprocessed) =
+                classify_kv(&old_chunks, &all_sigs, &produced, self.change_threshold);
+            kv_restored += restored;
+            kv_reprocessed += reprocessed;
             self.reindex_file(rel, &abs, &meta)?;
         }
         if !modified.is_empty() {
@@ -456,6 +456,7 @@ impl Engine {
         }
         if !removed.is_empty() || !modified.is_empty() {
             self.rebuild_bm25();
+            self.store.save("detect", &Value::object(vec![]))?;
         }
         let mut result = Value::object(vec![
             ("unchanged", strings(&unchanged)),
@@ -524,8 +525,8 @@ impl Engine {
             }
         }
         let chunks = self.store.state.chunks.len() as i64;
-        let symbols = self.store.state.symbols.len() as i64;
-        let ready = !self.store.state.symbols.is_empty();
+        let symbols = (self.store.state.symbols.len() + self.store.state.dynamic.len()) as i64;
+        let ready = symbols > 0;
         Value::object(vec![
             ("version", Value::string(crate::VERSION)),
             ("storage", storage),
@@ -535,7 +536,7 @@ impl Engine {
                     ("node_count", Value::Int(chunks)),
                     ("max_level", Value::Int(0)),
                     ("avg_connections", Value::Float(0.0)),
-                    ("insert_count", Value::Int(chunks)),
+                    ("insert_count", Value::Int(self.store.state.inserts as i64)),
                     ("chunk_count", Value::Int(chunks)),
                 ]),
             ),
@@ -566,7 +567,7 @@ impl Engine {
             ("chunks", Value::Int(chunks)),
             ("symbol_rows", Value::Int(symbols)),
             ("symbols_ready", Value::Bool(ready)),
-            ("latest_indexed_at", Value::Float(now_f64())),
+            ("latest_indexed_at", self.indexed_stamp()),
             (
                 "storage_dir",
                 Value::string(self.storage.display().to_string()),
@@ -578,7 +579,7 @@ impl Engine {
             ("chunk_store_status", Value::string("ready")),
             (
                 "seconds_since_last_index",
-                Value::Float(seconds_since_index(&self.storage)),
+                Value::Float(self.seconds_since_last_index()),
             ),
             ("alerts", Value::Array(Vec::new())),
         ])
@@ -588,11 +589,12 @@ impl Engine {
     pub fn storage_report(&self) -> Value {
         let state = &self.store.state;
         let tokens: i64 = state.chunks.iter().map(|chunk| chunk.tokens as i64).sum();
-        let definitions = state
-            .symbols
-            .iter()
-            .filter(|symbol| symbol.role == "definition")
-            .count() as i64;
+        let definitions = state.dynamic.len() as i64
+            + state
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.role == "definition")
+                .count() as i64;
         let references = state
             .symbols
             .iter()
@@ -649,7 +651,10 @@ impl Engine {
                 "storage_dir",
                 Value::string(self.storage.display().to_string()),
             ),
-            ("symbol_count", Value::Int(state.symbols.len() as i64)),
+            (
+                "symbol_count",
+                Value::Int((state.symbols.len() + state.dynamic.len()) as i64),
+            ),
             ("definition_count", Value::Int(definitions)),
             ("reference_count", Value::Int(references)),
             ("edge_count", Value::Int(state.edges.len() as i64)),
@@ -683,7 +688,7 @@ impl Engine {
             .state
             .documents
             .iter()
-            .filter(|doc| path_under(prefix, &doc.path))
+            .filter(|doc| path_under(&self.cwd, prefix, &doc.path))
             .map(|doc| {
                 let chunks: Vec<_> = self
                     .store
@@ -719,7 +724,7 @@ impl Engine {
                     ("path", Value::string(&doc.path)),
                     ("chunk_count", Value::Int(chunks.len() as i64)),
                     ("total_tokens", Value::Int(tokens)),
-                    ("indexed_at", Value::Float(now_f64())),
+                    ("indexed_at", Value::Float(doc.indexed_at)),
                     ("annotations", Value::Array(notes)),
                 ])
             })
@@ -769,7 +774,7 @@ impl Engine {
     }
 
     pub fn project_brief(&self) -> Value {
-        let mut files: Vec<(i64, String, i64)> = Vec::new();
+        let mut files: Vec<(i64, String, i64, f64)> = Vec::new();
         for doc in &self.store.state.documents {
             let chunks: Vec<_> = self
                 .store
@@ -779,18 +784,23 @@ impl Engine {
                 .filter(|chunk| chunk.path == doc.path)
                 .collect();
             let tokens = chunks.iter().map(|chunk| chunk.tokens as i64).sum();
-            files.push((tokens, doc.path.clone(), chunks.len() as i64));
+            files.push((
+                tokens,
+                doc.path.clone(),
+                chunks.len() as i64,
+                doc.indexed_at,
+            ));
         }
         files.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
         let largest: Vec<Value> = files
             .into_iter()
             .take(40)
-            .map(|(tokens, path, count)| {
+            .map(|(tokens, path, count, indexed_at)| {
                 Value::object(vec![
                     ("path", Value::string(path)),
                     ("chunk_count", Value::Int(count)),
                     ("total_tokens", Value::Int(tokens)),
-                    ("indexed_at", Value::Float(now_f64())),
+                    ("indexed_at", Value::Float(indexed_at)),
                 ])
             })
             .collect();
@@ -990,10 +1000,10 @@ impl Engine {
         let mut health = self.index_health(chunks, symbols, ready);
         if let Value::Object(pairs) = &mut health {
             pairs.retain(|(key, _)| key != "latest_indexed_at");
-            pairs.push(("latest_indexed_at".to_string(), Value::Float(now_f64())));
+            pairs.push(("latest_indexed_at".to_string(), self.indexed_stamp()));
             pairs.push((
                 "seconds_since_last_index".to_string(),
-                Value::Float(seconds_since_index(&self.storage)),
+                Value::Float(self.seconds_since_last_index()),
             ));
         }
         let avg = if documents == 0 {
@@ -1034,10 +1044,10 @@ impl Engine {
             {
                 if let Value::Object(health_pairs) = health_slot {
                     health_pairs.retain(|(key, _)| key != "latest_indexed_at");
-                    health_pairs.push(("latest_indexed_at".to_string(), Value::Float(now_f64())));
+                    health_pairs.push(("latest_indexed_at".to_string(), self.indexed_stamp()));
                     health_pairs.push((
                         "seconds_since_last_index".to_string(),
-                        Value::Float(seconds_since_index(&self.storage)),
+                        Value::Float(self.seconds_since_last_index()),
                     ));
                 }
             }
@@ -1304,6 +1314,7 @@ impl Engine {
             sha256: sha,
             doc_version: version,
             chunk_count: produced.len() as u32,
+            indexed_at: now_f64(),
         });
         let mine: Vec<_> = self
             .store
@@ -1375,6 +1386,10 @@ impl Engine {
             if matches!(chunk.modality.as_str(), "image" | "audio" | "video") {
                 continue;
             }
+            // 1.5.2 skips a chunk whose content is empty. Whitespace still counts.
+            if chunk.content.is_empty() {
+                continue;
+            }
             bm25.add(&chunk.id, &chunk.content);
         }
         *bm25_ready = true;
@@ -1419,17 +1434,46 @@ fn busy_action(failures: u64, operations: u64) -> &'static str {
     }
 }
 
-fn path_under(prefix: Option<&str>, path: &str) -> bool {
+fn path_under(cwd: &Path, prefix: Option<&str>, path: &str) -> bool {
     let Some(prefix) = prefix else {
         return true;
     };
-    if prefix.is_empty() {
-        return true;
+    // `""` and `./` resolve to `.`, which matches no stored relative path.
+    let prefix = normalize_prefix(cwd, prefix);
+    if prefix == "." {
+        return false;
     }
     let path = path.replace('\\', "/");
-    let prefix = prefix.replace('\\', "/");
-    let prefix = prefix.trim_end_matches('/');
     path == prefix || path.starts_with(&format!("{prefix}/"))
+}
+
+fn normalize_prefix(cwd: &Path, prefix: &str) -> String {
+    let joined = if Path::new(prefix).is_absolute() {
+        PathBuf::from(prefix)
+    } else {
+        cwd.join(prefix)
+    };
+    let mut cleaned = PathBuf::new();
+    for part in joined.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                cleaned.pop();
+            }
+            other => cleaned.push(other.as_os_str()),
+        }
+    }
+    match cleaned.strip_prefix(cwd) {
+        Ok(rel) => {
+            let text = rel.to_string_lossy().replace('\\', "/");
+            if text.is_empty() {
+                ".".into()
+            } else {
+                text
+            }
+        }
+        Err(_) => prefix.replace('\\', "/"),
+    }
 }
 
 fn trim_ann(text: &str, max_chars: Option<usize>) -> String {
@@ -1571,47 +1615,14 @@ fn store_bytes(storage: &std::path::Path) -> i64 {
     .sum::<u64>() as i64
 }
 
-fn seconds_since_index(storage: &Path) -> f64 {
-    let path = storage.join("store").join("snapshot.json");
-    let Ok(meta) = std::fs::metadata(path) else {
-        return 0.0;
-    };
-    let Ok(modified) = meta.modified() else {
-        return 0.0;
-    };
-    modified.elapsed().map(|d| d.as_secs_f64()).unwrap_or(0.0)
-}
-
 fn wal_bytes(storage: &Path) -> i64 {
     file_len(&storage.join("stele_context.db-wal")) as i64
 }
 
 fn host_python() -> Value {
-    static CACHED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    let text = CACHED.get_or_init(|| {
-        for bin in ["python3", "python"] {
-            let Ok(output) = std::process::Command::new(bin)
-                .arg("-c")
-                .arg("import sys; print(sys.version.split()[0])")
-                .output()
-            else {
-                continue;
-            };
-            if !output.status.success() {
-                continue;
-            }
-            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !text.is_empty() {
-                return text;
-            }
-        }
-        String::new()
-    });
-    if text.is_empty() {
-        Value::Null
-    } else {
-        Value::string(text)
-    }
+    // The binary does not start an interpreter. A first doctor call stays
+    // inside this process. 1.5.2 reports `sys.version` because it is Python.
+    Value::Null
 }
 
 fn plan_field<'a>(plan: &'a Value, key: &str) -> Option<&'a Value> {
@@ -1730,6 +1741,46 @@ pub fn session_time(value: i64) -> f64 {
 // moved value. `store_piece` above is replaced by the helper in this impl
 // once the borrow is split. See `commit_piece`.
 impl Engine {
+    fn take_symbol_id(&mut self) -> i64 {
+        if self.store.state.next_symbol_id <= 0 {
+            let from_dynamic = self
+                .store
+                .state
+                .dynamic
+                .iter()
+                .map(|sym| sym.id)
+                .max()
+                .unwrap_or(0);
+            self.store.state.next_symbol_id =
+                from_dynamic.max(self.store.state.symbols.len() as i64) + 1;
+        }
+        let id = self.store.state.next_symbol_id;
+        self.store.state.next_symbol_id += 1;
+        id
+    }
+
+    fn indexed_stamp(&self) -> Value {
+        let latest = self
+            .store
+            .state
+            .documents
+            .iter()
+            .map(|doc| doc.indexed_at)
+            .fold(0.0, f64::max);
+        if latest <= 0.0 {
+            Value::Null
+        } else {
+            Value::Float(latest)
+        }
+    }
+
+    fn seconds_since_last_index(&self) -> f64 {
+        let Value::Float(latest) = self.indexed_stamp() else {
+            return 0.0;
+        };
+        (now_f64() - latest).max(0.0)
+    }
+
     pub fn store_dynamic_remove(&mut self, name: &str) {
         self.store.state.dynamic.retain(|sym| sym.name != name);
     }
@@ -1742,6 +1793,7 @@ impl Engine {
             .clone()
             .unwrap_or_else(|| extension_of(rel).to_string());
         for hit in symbols::extract(&ext, &piece.content) {
+            let _id = self.take_symbol_id();
             self.store.state.symbols.push(Symbol {
                 name: hit.name,
                 kind: hit.kind,
@@ -1769,8 +1821,67 @@ impl Engine {
             version: 1,
             staleness: 0.0,
             stale_since: None,
+            embedding: Vec::new(),
         });
+        // 1.5.2 HNSW increments only after the first node. The first insert
+        // returns before the counter moves. Replacing an existing id does not
+        // count either; commit_piece always adds a new id.
+        if self.store.state.chunks.len() > 1 {
+            self.store.state.inserts += 1;
+        }
     }
+}
+
+fn classify_kv(
+    old: &[(usize, usize, String, String)],
+    all_sigs: &[[f64; 128]],
+    produced: &[crate::chunk::Produced],
+    change_threshold: f64,
+) -> (i64, i64) {
+    let mut restored = 0i64;
+    let mut reprocessed = 0i64;
+    for piece in produced {
+        let limit = match piece.modality.as_str() {
+            "code" => 0.80,
+            "text" | "pdf" => 0.85,
+            _ => change_threshold,
+        };
+        let digest = chunk::content_sha256(&piece.content);
+        if let Some((_, _, hash, content)) = old
+            .iter()
+            .find(|(start, end, _, _)| *start == piece.start && *end == piece.end)
+        {
+            if hash == &digest {
+                restored += 1;
+            } else {
+                let sim = cosine(
+                    &chunk::signature(content),
+                    &chunk::signature(&piece.content),
+                );
+                if sim >= limit {
+                    restored += 1;
+                } else {
+                    reprocessed += 1;
+                }
+            }
+            continue;
+        }
+        let new_sig = chunk::signature(&piece.content);
+        let best = all_sigs
+            .iter()
+            .map(|sig| cosine(sig, &new_sig))
+            .fold(0.0, f64::max);
+        if !all_sigs.is_empty() && best >= limit {
+            restored += 1;
+        } else {
+            reprocessed += 1;
+        }
+    }
+    (restored, reprocessed)
+}
+
+fn cosine(left: &[f64; 128], right: &[f64; 128]) -> f64 {
+    left.iter().zip(right).map(|(a, b)| a * b).sum()
 }
 
 fn extension_of(path: &str) -> &str {

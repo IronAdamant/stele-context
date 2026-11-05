@@ -618,6 +618,13 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                         parsed.session = Some(value);
                     } else if arg == "--tags" {
                         parsed.tags.push(value);
+                        while args
+                            .get(index + 1)
+                            .is_some_and(|next| !next.starts_with('-'))
+                        {
+                            index += 1;
+                            parsed.tags.push(args[index].clone());
+                        }
                     } else {
                         parsed.note_body = Some(value);
                     }
