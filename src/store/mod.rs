@@ -50,6 +50,14 @@ pub struct Chunk {
     pub embedding: Vec<f32>,
 }
 
+impl Chunk {
+    /// 1.5.2 Tier 2: the chunk has an `agent_signature`. A summary, a stored
+    /// embedding, and `llm_embed` all write one.
+    pub fn has_tier2(&self) -> bool {
+        self.summary.is_some() || !self.embedding.is_empty()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Symbol {
     pub name: String,
@@ -207,6 +215,9 @@ pub struct State {
     pub next_symbol_id: i64,
     /// Parallel to `chunks`. Not part of the JSON snapshot; `signatures.bin`.
     pub sigs: Vec<[f32; 128]>,
+    /// Documents-only load: the snapshot may hold a `memory:` chunk, which
+    /// has no document row. Not serialised.
+    pub memory_hint: bool,
 }
 
 pub struct Store {
@@ -422,6 +433,7 @@ fn load_documents_only(path: &Path) -> Option<State> {
     };
     let mut state = State::default();
     state.documents = rows.iter().map(Document::from_json).collect();
+    state.memory_hint = text.contains("\"memory:");
     Some(state)
 }
 
@@ -556,6 +568,7 @@ impl State {
             inserts: int_field(value, "inserts") as u64,
             next_symbol_id: int_field(value, "next_symbol_id"),
             sigs: Vec::new(),
+            memory_hint: false,
         }
     }
 }

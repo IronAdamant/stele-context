@@ -10,7 +10,7 @@ use crate::store::{Conflict, State};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const TTL: i64 = 300;
+pub const TTL: i64 = 300;
 
 pub fn apply(
     state: &mut State,

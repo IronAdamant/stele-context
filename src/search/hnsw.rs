@@ -317,12 +317,14 @@ impl Hnsw {
         let mut results = candidates.clone();
         while let Some((cand_dist, cand_id)) = candidates.first().cloned() {
             candidates.remove(0);
+            // 1.5.2 stops as soon as the closest candidate is farther than
+            // the worst kept result, whether or not `ef` results are kept.
             if let Some((worst, _)) = results.iter().max_by(|left, right| {
                 left.0
                     .partial_cmp(&right.0)
                     .unwrap_or(std::cmp::Ordering::Equal)
             }) {
-                if cand_dist > *worst && results.len() >= ef {
+                if cand_dist > *worst {
                     break;
                 }
             }

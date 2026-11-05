@@ -339,10 +339,7 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
     if !tool_known(&name) {
         // 1.5.2: the name is not in this mode's tool map. Nothing runs and
         // the operation log does not see the call.
-        let mut value = Value::object(vec![(
-            "error",
-            Value::string(format!("Unknown tool: {name}")),
-        )]);
+        let mut value = Value::object(vec![("error", Value::string(unknown_tool(&name)))]);
         attach_hint(&name, &mut value);
         return tool_result(&json::to_string(&value), true);
     }
@@ -397,6 +394,36 @@ fn tool_result(text: &str, is_error: bool) -> Value {
         }
     }
     result
+}
+
+/// "Unknown tool: X." plus the way forward: the mode that has it, a near
+/// name, or where the list is.
+fn unknown_tool(name: &str) -> String {
+    let mode = std::env::var("STELE_MCP_MODE").unwrap_or_else(|_| "lite".to_string());
+    let mut current: Vec<&str> = LITE.to_vec();
+    if mode == "standard" || mode == "full" {
+        current.extend_from_slice(STANDARD_EXTRA);
+    }
+    if mode == "full" {
+        current.extend(REMOVED.iter().map(|(old, _)| *old));
+    }
+    if STANDARD_EXTRA.contains(&name) {
+        return format!(
+            "Unknown tool: {name}. It is available with STELE_MCP_MODE=standard or full (this server runs {mode})."
+        );
+    }
+    if let Some((_, replacement)) = REMOVED.iter().find(|(old, _)| *old == name) {
+        return format!(
+            "Unknown tool: {name}. Use {replacement}, or set STELE_MCP_MODE=full for the old name."
+        );
+    }
+    match signature::suggestion(&current, name) {
+        Some(near) => format!("Unknown tool: {name}. Did you mean '{near}'?"),
+        None => format!(
+            "Unknown tool: {name}. tools/list shows the {} tools in {mode} mode.",
+            current.len()
+        ),
+    }
 }
 
 pub(crate) fn lite_tools() -> &'static [&'static str] {
@@ -456,18 +483,19 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
                 engine.index_working_tree();
             }
             let top = int_arg(args, "top_k").unwrap_or(10).max(1) as usize;
-            let mut value = engine.search(
+            let prefix = match field(args, "path_prefix") {
+                Some(Value::String(text)) => Some(text.clone()),
+                _ => None,
+            };
+            Ok(engine.search_full(
                 &query,
                 &arg(args, "search_mode").unwrap_or_else(|| "keyword".to_string()),
                 top,
-            );
-            if let Some(prefix) = arg(args, "path_prefix") {
-                filter_prefix(&mut value, &prefix);
-            }
-            if flag(args, "compact") {
-                compact_results(&mut value);
-            }
-            Ok(value)
+                prefix.as_deref(),
+                flag(args, "compact"),
+                int_arg(args, "max_result_tokens"),
+                flag(args, "return_response_meta"),
+            ))
         }
         "search_text" => engine.text_search(
             &query,
@@ -491,10 +519,20 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             flag(args, "working_tree"),
         ),
         "query" => {
-            if flag(args, "working_tree") || session.is_some() {
-                engine.index_working_tree();
-            }
-            engine.query(&query)
+            let prefix = match field(args, "path_prefix") {
+                Some(Value::String(text)) => Some(text.clone()),
+                _ => None,
+            };
+            engine.query_full(
+                &query,
+                int_arg(args, "top_k").unwrap_or(10).max(1) as usize,
+                prefix.as_deref(),
+                flag(args, "working_tree"),
+                session.as_deref(),
+                &arg(args, "search_mode").unwrap_or_else(|| "keyword".to_string()),
+                flag_default(args, "compact", true),
+                int_arg(args, "max_result_tokens"),
+            )
         }
         "find_definition" => Ok(engine.find_definition(&symbol)),
         "find_references" => Ok(engine.find_references(&symbol)),
@@ -656,23 +694,50 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             engine.bulk_notes(&pairs)
         }
         "register_dynamic_symbols" => {
-            let rows = symbol_rows(args);
+            // 1.5.2 `store_dynamic_symbols`: each dict needs a name and a role
+            // of definition or reference; kind defaults to function.
             let agent = caller(engine, args);
-            if rows.is_empty() {
-                return engine.register_dynamic(&symbol, "function", &path);
-            }
+            let rows = match field(args, "symbols") {
+                Some(Value::Array(rows)) => rows.clone(),
+                _ => Vec::new(),
+            };
             let mut stored = 0i64;
             let mut errors = Vec::new();
-            for (name, kind, path, line) in rows {
-                if name.is_empty() {
-                    errors.push(Value::string("missing name"));
+            for row in rows {
+                let name = match field(&row, "name") {
+                    Some(Value::String(text)) if !text.is_empty() => text.clone(),
+                    _ => {
+                        errors.push(Value::string(format!(
+                            "missing name in symbol: {}",
+                            crate::json::py_repr(&row)
+                        )));
+                        continue;
+                    }
+                };
+                let role = match field(&row, "role") {
+                    None => "definition".to_string(),
+                    Some(Value::String(text)) => text.clone(),
+                    Some(other) => crate::json::py_repr(other),
+                };
+                if role != "definition" && role != "reference" {
+                    errors.push(Value::string(format!(
+                        "invalid role '{role}' for symbol '{name}'"
+                    )));
                     continue;
                 }
+                let kind = match field(&row, "kind") {
+                    None => "function".to_string(),
+                    Some(Value::String(text)) => text.clone(),
+                    Some(other) => crate::json::py_repr(other),
+                };
+                let path = string_field(&row, "document_path");
+                let line = int_arg(&row, "line_number").unwrap_or(0);
                 engine.register_dynamic(&name, &kind, &path)?;
                 if let Some(sym) = engine.store_dynamic_last() {
                     sym.agent = agent.clone();
+                    sym.role = role;
                     sym.chunk_id = format!("runtime:{agent}:{name}");
-                    sym.line = line as u32;
+                    sym.line = line.max(0) as u32;
                 }
                 stored += 1;
             }
@@ -1214,12 +1279,14 @@ fn float_list(value: &Value, key: &str) -> Option<Vec<f64>> {
     }
 }
 
+/// A value that is not a list is kept as an empty vector, which the store
+/// reports as `invalid vector` the way 1.5.2 does.
 fn float_pairs(value: &Value, key: &str) -> Vec<(String, Vec<f64>)> {
     match field(value, key) {
         Some(Value::Object(pairs)) => pairs
             .iter()
-            .filter_map(|(name, item)| match item {
-                Value::Array(rows) => Some((
+            .map(|(name, item)| match item {
+                Value::Array(rows) => (
                     name.clone(),
                     rows.iter()
                         .map(|item| match item {
@@ -1228,93 +1295,10 @@ fn float_pairs(value: &Value, key: &str) -> Vec<(String, Vec<f64>)> {
                             _ => 0.0,
                         })
                         .collect(),
-                )),
-                _ => None,
+                ),
+                _ => (name.clone(), Vec::new()),
             })
             .collect(),
         _ => Vec::new(),
-    }
-}
-
-fn symbol_rows(value: &Value) -> Vec<(String, String, String, i64)> {
-    match field(value, "symbols") {
-        Some(Value::Array(rows)) => rows
-            .iter()
-            .map(|row| {
-                (
-                    string_field(row, "name"),
-                    {
-                        let kind = string_field(row, "kind");
-                        if kind.is_empty() {
-                            "function".to_string()
-                        } else {
-                            kind
-                        }
-                    },
-                    string_field(row, "document_path"),
-                    int_arg(row, "line_number").unwrap_or(0),
-                )
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn filter_prefix(value: &mut Value, prefix: &str) {
-    let Some(rows) = result_rows(value) else {
-        return;
-    };
-    rows.retain(|row| crate::store::string_field(row, "document_path").starts_with(prefix));
-}
-
-fn compact_results(value: &mut Value) {
-    let Some(rows) = result_rows(value) else {
-        return;
-    };
-    for row in rows {
-        let Value::Object(pairs) = row else {
-            continue;
-        };
-        let content =
-            pairs
-                .iter()
-                .find(|(key, _)| key == "content")
-                .and_then(|(_, item)| match item {
-                    Value::String(text) => Some(text.clone()),
-                    _ => None,
-                });
-        let Some(content) = content else {
-            continue;
-        };
-        let preview = if content.chars().count() > 400 {
-            let mut text: String = content.chars().take(400).collect();
-            text.push('\u{2026}');
-            text
-        } else {
-            content.clone()
-        };
-        pairs.retain(|(key, _)| key != "content");
-        pairs.push(("content_preview".to_string(), Value::string(preview)));
-        pairs.push((
-            "content_token_estimate".to_string(),
-            Value::Int(crate::chunk::estimate_tokens(&content) as i64),
-        ));
-    }
-}
-
-fn result_rows(value: &mut Value) -> Option<&mut Vec<Value>> {
-    match value {
-        Value::Array(rows) => Some(rows),
-        Value::Object(pairs) => pairs.iter_mut().find_map(|(key, item)| {
-            if key == "results" {
-                match item {
-                    Value::Array(rows) => Some(rows),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        }),
-        _ => None,
     }
 }

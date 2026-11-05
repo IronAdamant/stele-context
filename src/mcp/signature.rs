@@ -691,7 +691,7 @@ fn levenshtein(a: &[u8], b: &[u8], max_cost: usize) -> usize {
 }
 
 /// The closest parameter name, if it is within a third of the characters.
-fn suggestion<'a>(candidates: &[&'a str], name: &str) -> Option<&'a str> {
+pub(crate) fn suggestion<'a>(candidates: &[&'a str], name: &str) -> Option<&'a str> {
     let mut best: Option<&'a str> = None;
     let mut best_distance = usize::MAX;
     for item in candidates {

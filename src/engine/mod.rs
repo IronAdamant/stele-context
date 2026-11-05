@@ -17,6 +17,7 @@ use crate::search::Bm25;
 use crate::store::{Chunk, Document, Store, Symbol};
 use crate::symbols;
 use crate::walk;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,6 +28,11 @@ pub struct Engine {
     store: Store,
     bm25: Bm25,
     bm25_ready: bool,
+    /// Chunks the in-process keyword index does not hold. 1.5.2 updates its
+    /// BM25 incrementally and `llm_embed` does not add a memory chunk to it,
+    /// so a memory chunk created after the index was built stays out of
+    /// keyword search until the index is built again from the store.
+    bm25_excluded: HashSet<String>,
     hnsw: std::cell::RefCell<crate::search::Hnsw>,
     hnsw_ready: std::cell::Cell<bool>,
     chunk_size: usize,
@@ -40,6 +46,10 @@ pub struct Engine {
     /// Detect can answer from document mtime and size. Chunk bodies stay
     /// unloaded until a file actually differs.
     documents_only: bool,
+    /// A `.git` or `.stele-context.toml` marker was found. Without one,
+    /// 1.5.2 has no project root: document paths are absolute and
+    /// `project_root` is null.
+    rooted: bool,
     server_agent: String,
     file_reads: Vec<(String, String, Vec<String>, f64)>,
     operations: u64,
@@ -52,14 +62,14 @@ impl Engine {
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
-        Self::finish(cwd, storage, loaded, false)
+        Self::finish(cwd, storage, loaded, false, root.is_some())
     }
 
     pub fn open_from(cwd: PathBuf, storage_flag: Option<&Path>) -> Result<Engine, String> {
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
-        Self::finish(cwd, storage, loaded, false)
+        Self::finish(cwd, storage, loaded, false, root.is_some())
     }
 
     /// Open for `detect`. Document rows are enough while every indexed file
@@ -68,13 +78,13 @@ impl Engine {
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
-        Self::finish(cwd, storage, loaded, true)
+        Self::finish(cwd, storage, loaded, true, root.is_some())
     }
 
     pub fn open_at(cwd: PathBuf, storage: PathBuf) -> Result<Engine, String> {
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
-        Self::finish(cwd, storage, loaded, false)
+        Self::finish(cwd, storage, loaded, false, root.is_some())
     }
 
     fn finish(
@@ -82,6 +92,7 @@ impl Engine {
         storage: PathBuf,
         loaded: config::Config,
         documents_only: bool,
+        rooted: bool,
     ) -> Result<Engine, String> {
         let legacy = storage.join("stele_context.db");
         let documents_only = documents_only && !legacy.is_file();
@@ -104,6 +115,7 @@ impl Engine {
             store,
             bm25: Bm25::new(),
             bm25_ready: false,
+            bm25_excluded: HashSet::new(),
             hnsw: std::cell::RefCell::new(crate::search::Hnsw::new()),
             hnsw_ready: std::cell::Cell::new(false),
             chunk_size: loaded.chunk_size.unwrap_or(256).max(1) as usize,
@@ -115,6 +127,7 @@ impl Engine {
             search_alpha: loaded.search_alpha.unwrap_or(0.42),
             max_history_entries: loaded.max_history_entries.unwrap_or(1000),
             documents_only,
+            rooted,
             server_agent: String::new(),
             file_reads: Vec::new(),
             operations: 0,
@@ -160,7 +173,13 @@ impl Engine {
             self.store.reload_full()?;
             self.documents_only = false;
         }
-        let files = collect(&self.cwd, paths, self.respect_gitignore, &self.skip_dirs)?;
+        let files = collect(
+            &self.cwd,
+            paths,
+            self.respect_gitignore,
+            &self.skip_dirs,
+            self.rooted,
+        )?;
         let mut indexed_rows = Vec::new();
         let mut skipped_rows = Vec::new();
         let mut seen = Vec::new();
@@ -211,6 +230,23 @@ impl Engine {
         let removed = before as i64 - self.store.state.documents.len() as i64;
         if !indexed_rows.is_empty() || removed > 0 || force {
             self.rebuild_bm25();
+            // 1.5.2 locks what the server indexed for its agent. With no git
+            // directory there is no shared coordination file, so the locks
+            // live in this store, where `stats` counts them.
+            if !self.server_agent.is_empty()
+                && !fresh.is_empty()
+                && crate::locks::coordination_dir(&self.cwd).is_none()
+            {
+                let until = now_secs() + crate::locks::TTL;
+                for path in &fresh {
+                    self.store.state.locks.retain(|lock| &lock.path != path);
+                    self.store.state.locks.push(crate::store::Lock {
+                        path: path.clone(),
+                        agent: self.server_agent.clone(),
+                        until,
+                    });
+                }
+            }
             self.store.save(
                 "index",
                 &Value::object(vec![
@@ -290,6 +326,7 @@ impl Engine {
             &[".".to_string()],
             self.respect_gitignore,
             &self.skip_dirs,
+            self.rooted,
         )?;
         let mut unchanged = Vec::new();
         let mut modified = Vec::new();
@@ -298,7 +335,9 @@ impl Engine {
         let mut kv_restored = 0i64;
         let mut kv_reprocessed = 0i64;
         if only.is_none() {
-            let mut aligned = true;
+            // 1.5.2 checks every path that has chunks. A `memory:` chunk has
+            // no file, so it is removed; that is not the aligned fast path.
+            let mut aligned = !self.store.state.memory_hint && self.memory_paths().is_empty();
             unchanged.reserve(self.store.state.documents.len());
             for doc in &self.store.state.documents {
                 let abs = self.cwd.join(&doc.path);
@@ -314,7 +353,8 @@ impl Engine {
                 }
             }
             if aligned {
-                if scan_new {
+                // 1.5.2 scans for new files only under a project root.
+                if scan_new && self.rooted {
                     let have: std::collections::HashSet<&str> = self
                         .store
                         .state
@@ -360,7 +400,7 @@ impl Engine {
             .iter()
             .map(|doc| (doc.path.clone(), (doc.size, doc.mtime_ns)))
             .collect();
-        let indexed: Vec<String> = if let Some(only) = only {
+        let mut indexed: Vec<String> = if let Some(only) = only {
             if only.is_empty() {
                 docs.keys().cloned().collect()
             } else {
@@ -369,7 +409,13 @@ impl Engine {
         } else {
             docs.keys().cloned().collect()
         };
-        if scan_new {
+        let memory: HashSet<String> = if only.is_none_or(|only| only.is_empty()) {
+            self.memory_paths().into_iter().collect()
+        } else {
+            HashSet::new()
+        };
+        indexed.extend(memory.iter().cloned());
+        if scan_new && self.rooted {
             for (rel, _) in &files {
                 if !docs.contains_key(rel) {
                     new_rows.push(Value::object(vec![
@@ -383,7 +429,15 @@ impl Engine {
             let abs = self.cwd.join(rel);
             if !abs.is_file() {
                 removed.push(rel.clone());
-                self.drop_path(rel);
+                // 1.5.2 `remove_document` finds no document row for a memory
+                // chunk and deletes nothing, so the chunk stays and the next
+                // detect lists it again.
+                if !memory.contains(rel) {
+                    // The document row goes, and with it the lock 1.5.2
+                    // keeps on that row.
+                    self.store.state.locks.retain(|lock| &lock.path != rel);
+                    self.drop_path(rel);
+                }
                 continue;
             }
             let meta = fs::metadata(&abs).map_err(|err| format!("{rel}: {err}"))?;
@@ -487,7 +541,7 @@ impl Engine {
     }
 
     pub fn remove(&mut self, path: &str) -> Result<Value, String> {
-        let rel = normalize(path);
+        let rel = self.doc_path(path);
         let known = self.store.state.documents.iter().any(|doc| doc.path == rel);
         if !known {
             return Ok(Value::object(vec![("removed", Value::Bool(false))]));
@@ -508,6 +562,7 @@ impl Engine {
             .filter(|note| note.path == rel)
             .count();
         let chunks_removed = chunk_ids.len() as i64;
+        self.store.state.locks.retain(|lock| lock.path != rel);
         self.drop_path(&rel);
         self.rebuild_bm25();
         crate::locks::note_change(&self.cwd, &[rel.clone()], &self.server_agent, "removed");
@@ -575,10 +630,7 @@ impl Engine {
                 ]),
             ),
             ("index_health", self.index_health(chunks, symbols, ready)),
-            (
-                "project_root",
-                Value::string(self.cwd.display().to_string()),
-            ),
+            ("project_root", self.project_root_value()),
         ])
     }
 
@@ -699,7 +751,7 @@ impl Engine {
             .state
             .documents
             .iter()
-            .filter(|doc| path_under(&self.cwd, prefix, &doc.path))
+            .filter(|doc| self.under_prefix(prefix, &doc.path))
             .map(|doc| {
                 let chunks: Vec<_> = self
                     .store
@@ -749,32 +801,31 @@ impl Engine {
                 )
         });
         let total_before_cap = docs.len();
+        // 1.5.2 sums every matching document before the compact cap.
+        let total_tokens: i64 = docs
+            .iter()
+            .map(|doc| crate::store::int_field(doc, "total_tokens"))
+            .sum();
         if let Some(max) = max_documents {
             if docs.len() > max {
                 docs.truncate(max);
             }
         }
         let shown = docs.len() as i64;
-        let total_tokens: i64 = docs
-            .iter()
-            .map(|doc| crate::store::int_field(doc, "total_tokens"))
-            .sum();
         let total = total_before_cap as i64;
         let chunks = self.store.state.chunks.len() as i64;
-        let symbols = self.store.state.symbols.len() as i64;
+        // 1.5.2 counts the symbols table, which holds dynamic symbols too.
+        let symbols = (self.store.state.symbols.len() + self.store.state.dynamic.len()) as i64;
         let mut out = Value::object(vec![
             ("documents", Value::Array(docs)),
             ("total_documents", Value::Int(total)),
             ("total_tokens", Value::Int(total_tokens)),
             (
                 "index_health",
-                self.index_health(chunks, symbols, !self.store.state.symbols.is_empty()),
+                self.index_health(chunks, symbols, symbols > 0),
             ),
             ("compact", Value::Bool(true)),
-            (
-                "project_root",
-                Value::string(self.cwd.display().to_string()),
-            ),
+            ("project_root", self.project_root_value()),
         ]);
         if max_documents.is_some() {
             if let Value::Object(pairs) = &mut out {
@@ -837,7 +888,7 @@ impl Engine {
             .map(|chunk| chunk.tokens as i64)
             .sum();
         let chunks = self.store.state.chunks.len() as i64;
-        let symbols = self.store.state.symbols.len() as i64;
+        let symbols = (self.store.state.symbols.len() + self.store.state.dynamic.len()) as i64;
         Value::object(vec![
             (
                 "purpose",
@@ -866,12 +917,9 @@ impl Engine {
             ("largest_files_by_tokens", Value::Array(largest)),
             (
                 "index_health",
-                self.index_health(chunks, symbols, !self.store.state.symbols.is_empty()),
+                self.index_health(chunks, symbols, symbols > 0),
             ),
-            (
-                "project_root",
-                Value::string(self.cwd.display().to_string()),
-            ),
+            ("project_root", self.project_root_value()),
         ])
     }
 
@@ -886,7 +934,7 @@ impl Engine {
         for chunk in &self.store.state.chunks {
             let tokens = chunk.tokens as i64;
             total_tokens += tokens;
-            if chunk.summary.is_some() {
+            if chunk.has_tier2() {
                 tier2_tokens += tokens;
                 continue;
             }
@@ -970,7 +1018,7 @@ impl Engine {
     pub fn doctor_snapshot(&self) -> Value {
         let documents = self.store.state.documents.len() as i64;
         let chunks = self.store.state.chunks.len() as i64;
-        let symbols = self.store.state.symbols.len() as i64;
+        let symbols = (self.store.state.symbols.len() + self.store.state.dynamic.len()) as i64;
         let tokens: i64 = self
             .store
             .state
@@ -983,7 +1031,7 @@ impl Engine {
             .state
             .chunks
             .iter()
-            .filter(|chunk| chunk.summary.is_some())
+            .filter(|chunk| chunk.has_tier2())
             .count() as i64;
         let chunk_pct = if chunks == 0 {
             0.0
@@ -1068,7 +1116,7 @@ impl Engine {
             ("python", host_python()),
             (
                 "project_root",
-                Value::string(self.cwd.display().to_string()),
+                self.project_root_value(),
             ),
             (
                 "storage_dir",
@@ -1234,7 +1282,13 @@ impl Engine {
     /// `Ok(Some)` when every indexed file still matches mtime and size.
     /// The caller has not loaded chunk bodies, so a miss must reload first.
     fn index_if_unchanged(&self, paths: &[String]) -> Result<Option<Value>, String> {
-        let files = collect(&self.cwd, paths, self.respect_gitignore, &self.skip_dirs)?;
+        let files = collect(
+            &self.cwd,
+            paths,
+            self.respect_gitignore,
+            &self.skip_dirs,
+            self.rooted,
+        )?;
         let known: std::collections::HashMap<&str, (u64, i64, i64)> = self
             .store
             .state
@@ -1375,6 +1429,50 @@ impl Engine {
         self.store.state.symbols.retain(|sym| !drop_doc(&sym.path));
     }
 
+    /// 1.5.2 `_normalize_path`: a project-relative path under a root, the
+    /// absolute path without one.
+    pub(crate) fn doc_path(&self, input: &str) -> String {
+        if self.rooted {
+            normalize(input)
+        } else {
+            absolute_text(&self.cwd, input)
+        }
+    }
+
+    pub(crate) fn project_root_value(&self) -> Value {
+        if self.rooted {
+            Value::string(self.cwd.display().to_string())
+        } else {
+            Value::Null
+        }
+    }
+
+    pub(crate) fn under_prefix(&self, prefix: Option<&str>, path: &str) -> bool {
+        path_under_root(&self.cwd, self.rooted, prefix, path)
+    }
+
+    /// Chunk paths with no document row: `llm_embed` memory chunks.
+    fn memory_paths(&self) -> Vec<String> {
+        let state = &self.store.state;
+        if state.chunks.is_empty() {
+            return Vec::new();
+        }
+        let known: std::collections::HashSet<&str> = state
+            .documents
+            .iter()
+            .map(|doc| doc.path.as_str())
+            .collect();
+        let mut paths: Vec<String> = state
+            .chunks
+            .iter()
+            .filter(|chunk| !known.contains(chunk.path.as_str()))
+            .map(|chunk| chunk.path.clone())
+            .collect();
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
     fn drop_path(&mut self, rel: &str) {
         self.store.state.documents.retain(|doc| doc.path != rel);
         self.store.state.chunks.retain(|chunk| chunk.path != rel);
@@ -1389,11 +1487,24 @@ impl Engine {
             store,
             bm25,
             bm25_ready,
+            bm25_excluded,
             ..
         } = self;
         store.state.edges = crate::symbols::build_edges(&store.state.symbols);
         *bm25 = Bm25::new();
+        if !bm25_excluded.is_empty() {
+            let live: HashSet<&str> = store
+                .state
+                .chunks
+                .iter()
+                .map(|chunk| chunk.id.as_str())
+                .collect();
+            bm25_excluded.retain(|id| live.contains(id.as_str()));
+        }
         for chunk in &store.state.chunks {
+            if bm25_excluded.contains(&chunk.id) {
+                continue;
+            }
             // Image, audio, and video bytes are not keyword text. PDF text is.
             if matches!(chunk.modality.as_str(), "image" | "audio" | "video") {
                 continue;
@@ -1415,10 +1526,20 @@ impl Engine {
         let fingerprint = bm25_fingerprint(&self.store.state.chunks);
         let path = self.storage.join("store").join("bm25.bin");
         if let Some(index) = crate::search::load_bm25(&path, fingerprint) {
+            // A saved index can leave out memory chunks (see bm25_excluded).
+            self.bm25_excluded = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .filter(|chunk| chunk.path.starts_with("memory:") && !index.contains(&chunk.id))
+                .map(|chunk| chunk.id.clone())
+                .collect();
             self.bm25 = index;
             self.bm25_ready = true;
             return;
         }
+        self.bm25_excluded.clear();
         self.rebuild_bm25();
     }
 }
@@ -1446,12 +1567,21 @@ fn busy_action(failures: u64, operations: u64) -> &'static str {
     }
 }
 
-fn path_under(cwd: &Path, prefix: Option<&str>, path: &str) -> bool {
+/// 1.5.2 `_normalize_path(prefix)` then `_doc_matches_path_prefix`. Rooted,
+/// `""` and `./` resolve to `.`, which matches no stored relative path.
+/// Without a root the prefix becomes absolute, like the stored paths.
+pub(crate) fn path_under_root(cwd: &Path, rooted: bool, prefix: Option<&str>, path: &str) -> bool {
     let Some(prefix) = prefix else {
         return true;
     };
-    // `""` and `./` resolve to `.`, which matches no stored relative path.
-    let prefix = normalize_prefix(cwd, prefix);
+    let prefix = if rooted {
+        normalize_prefix(cwd, prefix)
+    } else {
+        absolute_text(cwd, prefix)
+            .replace('\\', "/")
+            .trim_end_matches('/')
+            .to_string()
+    };
     if prefix == "." {
         return false;
     }
@@ -1569,6 +1699,7 @@ fn collect(
     paths: &[String],
     respect_gitignore: bool,
     extra_skip: &[String],
+    rooted: bool,
 ) -> Result<Vec<(String, PathBuf)>, String> {
     let inputs: Vec<PathBuf> = if paths.is_empty() {
         vec![cwd.to_path_buf()]
@@ -1578,24 +1709,58 @@ fn collect(
     let mut out = Vec::new();
     for input in inputs {
         if input.is_file() {
-            out.push((rel_of(cwd, &input), input));
+            let key = if rooted {
+                rel_of(cwd, &input)
+            } else {
+                absolute_text(cwd, &input.to_string_lossy())
+            };
+            out.push((key, input));
             continue;
         }
         if input.is_dir() {
             for rel in walk::expand(&[input.clone()], respect_gitignore, extra_skip)
                 .map_err(|err| err.to_string())?
             {
-                out.push((normalize(&rel), input.join(&rel)));
+                let abs = input.join(&rel);
+                let key = if rooted {
+                    rel_of(cwd, &abs)
+                } else {
+                    absolute_text(cwd, &abs.to_string_lossy())
+                };
+                out.push((key, abs));
             }
         }
     }
-    out.sort_by(|left, right| left.0.cmp(&right.0));
-    out.dedup_by(|left, right| left.0 == right.0);
+    // Input order, each directory in 1.5.2 path order; a file named twice
+    // is indexed once.
+    let mut seen = HashSet::new();
+    out.retain(|(rel, _)| seen.insert(rel.clone()));
     Ok(out)
 }
 
 fn rel_of(cwd: &Path, path: &Path) -> String {
     crate::walk::native_sep(&path.strip_prefix(cwd).unwrap_or(path).to_string_lossy())
+}
+
+/// `str(Path(text).resolve())` for a path that may not exist: joined to
+/// `cwd` and cleaned of `.` and `..`, in the platform's separators.
+pub(crate) fn absolute_text(cwd: &Path, text: &str) -> String {
+    let joined = if Path::new(text).is_absolute() {
+        PathBuf::from(text)
+    } else {
+        cwd.join(text)
+    };
+    let mut cleaned = PathBuf::new();
+    for part in joined.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                cleaned.pop();
+            }
+            other => cleaned.push(other.as_os_str()),
+        }
+    }
+    crate::walk::native_sep(&cleaned.to_string_lossy())
 }
 
 fn normalize(path: &str) -> String {
@@ -1804,7 +1969,7 @@ impl Engine {
         let mut graph = crate::search::Hnsw::new();
         let rows = self.store.signature_rows();
         for (index, chunk) in self.store.state.chunks.iter().enumerate() {
-            let vector = if chunk.embedding.len() == 128 {
+            let vector = if !chunk.embedding.is_empty() {
                 chunk.embedding.clone()
             } else if let Some(summary) = chunk.summary.as_deref() {
                 crate::chunk::signature(summary)

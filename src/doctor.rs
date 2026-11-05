@@ -185,7 +185,13 @@ fn read_snapshot(path: &Path) -> ParsedStore {
     let mut tier2 = 0i64;
     for chunk in chunk_rows {
         tokens += int_field(chunk, "tokens");
-        if field(chunk, "summary").is_some_and(|item| !matches!(item, Value::Null)) {
+        // Tier 2 is a summary or a stored embedding (1.5.2 agent_signature).
+        let summary = field(chunk, "summary").is_some_and(|item| !matches!(item, Value::Null));
+        let embedding = field(chunk, "embedding").is_some_and(|item| {
+            matches!(item, Value::Array(rows) if !rows.is_empty())
+                || matches!(item, Value::String(text) if !text.is_empty())
+        });
+        if summary || embedding {
             tier2 += 1;
         }
     }

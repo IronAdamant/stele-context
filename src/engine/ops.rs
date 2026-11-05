@@ -412,43 +412,46 @@ impl Engine {
         ])
     }
 
+    /// 1.5.2 `bulk_store_embeddings`: an empty (or non-list) vector is
+    /// `"<id>: invalid vector"` and is not counted in `total`. Valid vectors
+    /// are L2-normalised (a zero vector stays zeros); ids with no chunk are
+    /// listed first in `errors`, then the invalid ones.
     pub fn bulk_embeddings(&mut self, pairs: &[(String, Vec<f64>)]) -> Result<Value, String> {
-        let mut stored = 0i64;
-        let mut errors = Vec::new();
+        let mut invalid = Vec::new();
+        let mut normalized: Vec<(&String, Vec<f32>)> = Vec::new();
         for (id, values) in pairs {
             if values.is_empty() {
-                errors.push(Value::string(format!("{id}: expected a non-empty vector")));
+                invalid.push(Value::string(format!("{id}: invalid vector")));
                 continue;
             }
+            normalized.push((id, l2_normalize(values)));
+        }
+        let mut stored = 0i64;
+        let mut errors = Vec::new();
+        for (id, vector) in &normalized {
             let Some(index) = self
                 .store
                 .state
                 .chunks
                 .iter()
-                .position(|chunk| chunk.id == *id)
+                .position(|chunk| chunk.id == **id)
             else {
-                errors.push(Value::string(id.clone()));
+                errors.push(Value::string((*id).clone()));
                 continue;
             };
-            let vector = l2_normalize(values);
+            // The agent signature: the graph and hybrid search use it, of any
+            // length, in place of the chunk's own signature.
             self.store.state.chunks[index].embedding = vector.clone();
-            if vector.len() == 128 {
-                self.store.ensure_sigs();
-                let mut sig = [0f32; 128];
-                for (lane, value) in vector.iter().enumerate() {
-                    sig[lane] = *value;
-                }
-                self.store.state.sigs[index] = sig;
-            }
             self.hnsw_ready.set(false);
             self.note_vector_replace();
             stored += 1;
         }
+        errors.extend(invalid);
         self.store.save("embeddings", &Value::Int(stored))?;
         Ok(Value::object(vec![
             ("stored", Value::Int(stored)),
             ("errors", Value::Array(errors)),
-            ("total", Value::Int(pairs.len() as i64)),
+            ("total", Value::Int(normalized.len() as i64)),
         ]))
     }
 
@@ -487,7 +490,10 @@ impl Engine {
                 .chunks
                 .iter_mut()
                 .find(|chunk| chunk.id == *id)
-                .map(|chunk| chunk.summary = Some(summary.clone()))
+                .map(|chunk| {
+                    chunk.summary = Some(summary.clone());
+                    chunk.embedding = summary_signature(summary);
+                })
                 .is_some();
             if !found {
                 errors.push(Value::string(id.clone()));
@@ -569,31 +575,36 @@ impl Engine {
             .collect()
     }
 
+    /// 1.5.2 `llm_embed`. `fingerprint_values` must be exactly the 32
+    /// fingerprint dimensions (each clamped to [-1, 1]); otherwise the text's
+    /// first 4000 characters are fingerprinted. An existing chunk gets the
+    /// vector; an unknown id becomes a memory chunk `memory:<id>` holding
+    /// those 4000 characters, with `len // 4` tokens.
     pub fn llm_embed(
         &mut self,
         text: &str,
         chunk_id: &str,
         fingerprint: Option<Vec<f64>>,
     ) -> Result<Value, String> {
-        if chunk_id.is_empty() {
-            return Err(
-                "_IndexMixin.llm_embed() missing 1 required positional argument: 'chunk_id'"
-                    .to_string(),
-            );
-        }
+        let head: String = text.chars().take(4000).collect();
         let vector = match fingerprint {
-            Some(values) if values.len() == 128 => values,
-            Some(values) if values.len() == 32 => expand_fingerprint(&values),
-            Some(_) => {
-                return Ok(Value::object(vec![
-                    ("stored", Value::Bool(false)),
-                    (
-                        "error",
-                        Value::string("fingerprint_values must have 32 or 128 numbers"),
-                    ),
-                ]));
+            Some(values) => {
+                if values.len() != 32 {
+                    return Ok(Value::object(vec![
+                        ("stored", Value::Bool(false)),
+                        (
+                            "error",
+                            Value::string(format!(
+                                "Expected 32 fingerprint values, got {}",
+                                values.len()
+                            )),
+                        ),
+                    ]));
+                }
+                let clamped: Vec<f64> = values.iter().map(|value| value.clamp(-1.0, 1.0)).collect();
+                expand_fingerprint(&clamped)
             }
-            None => super::fingerprint::embed_text(text),
+            None => super::fingerprint::embed_text(&head),
         };
         if !self
             .store
@@ -602,15 +613,19 @@ impl Engine {
             .iter()
             .any(|chunk| chunk.id == chunk_id)
         {
+            if self.bm25_ready {
+                self.bm25_excluded.insert(chunk_id.to_string());
+            }
+            let length = head.chars().count();
             self.store.state.chunks.push(crate::store::Chunk {
                 id: chunk_id.to_string(),
                 path: format!("memory:{chunk_id}"),
                 start: 0,
-                end: text.chars().count(),
-                content: text.chars().take(4000).collect(),
+                end: length,
+                content: head,
                 sha256: String::new(),
                 signature: String::new(),
-                tokens: crate::chunk::estimate_tokens(text).max(1),
+                tokens: length / 4,
                 modality: "text".to_string(),
                 language: None,
                 summary: None,
@@ -1010,6 +1025,14 @@ fn num_of(value: &Value, key: &str) -> f64 {
         Some(Value::Int(number)) => *number as f64,
         _ => 0.0,
     }
+}
+
+/// 1.5.2 writes `_text_signature(summary)` as the chunk's agent signature.
+pub(crate) fn summary_signature(summary: &str) -> Vec<f32> {
+    crate::chunk::signature(summary)
+        .iter()
+        .map(|value| *value as f32)
+        .collect()
 }
 
 fn l2_normalize(values: &[f64]) -> Vec<f32> {
