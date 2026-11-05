@@ -88,11 +88,11 @@ pub fn serve() -> Response {
 pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    let mut engine = Engine::open(storage).ok();
+    // The store opens on the first tools/call. initialize and tools/list
+    // answer without touching the disk, so a client's handshake is not
+    // held up by the snapshot read or the store lock.
+    let mut engine: Option<Engine> = None;
     let agent = format!("stele-context-mcp-{}", std::process::id());
-    if let Some(engine) = engine.as_mut() {
-        engine.remember_server_agent(&agent);
-    }
     let mut registered = false;
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
@@ -128,7 +128,9 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
             }
             "tools/call" => {
                 if !registered {
+                    engine = Engine::open(storage).ok();
                     if let Some(engine) = engine.as_mut() {
+                        engine.remember_server_agent(&agent);
                         engine.register_server_agent();
                     }
                     registered = true;
