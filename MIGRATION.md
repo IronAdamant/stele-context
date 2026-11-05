@@ -13,9 +13,9 @@ Open questions for the owner are at the end, under [Flagged for the owner](#flag
 
 | Item | 2.x |
 | --- | --- |
-| Install | GitHub Release binaries. `scripts/install.sh` (Linux, macOS) and `scripts/install.ps1` (Windows) download `stele-context` for `STELE_VERSION` (default `2.0.1`). Or `cargo build --release`. |
+| Install | GitHub Release binaries. `scripts/install.sh` (Linux, macOS) and `scripts/install.ps1` (Windows) download `stele-context` for `STELE_VERSION` (default `2.1.0`). Or `cargo build --release`. |
 | PyPI | `pip install stele-context` stays on 1.5.x. There is no 2.x wheel. A `v2.*` tag runs `.github/workflows/release-rust.yml` and does not upload to PyPI. |
-| 1.5.3 | The 1.5.3 wheel prints, on stderr, `2.0.0 is the Rust release: https://github.com/IronAdamant/stele-context/releases/tag/v2.0.0` and then runs the Python commands. It names 2.0.0, not 2.0.1. |
+| 1.5.3 | The 1.5.3 wheel prints, on stderr, `2.0.0 is the Rust release: https://github.com/IronAdamant/stele-context/releases/tag/v2.0.0` and then runs the Python commands. It names 2.0.0, not 2.1.0. |
 | Python source | The 1.x package, its tests, and `publish.yml` are on the `python-legacy` branch. |
 | Platforms | Release assets for `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`, each with `stele-context` and `stele-context-mcp`. `install.sh` exits with `unsupported platform` elsewhere. |
 | Runtime | No Python, no extras, no shared libraries. `[dependencies]` is empty. Python is used only as the 1.5.2 reference in tests and `stele-bench versus`. |
@@ -71,6 +71,7 @@ These match 1.5.2 and are covered by the parity tests unless noted.
 | `serve` | Blocks in the accept loop on `127.0.0.1` | Background thread unless `--blocking`, default host `localhost` |
 | HTTP tools | `POST /call` runs lite tools only, whatever `STELE_MCP_MODE` says | Follows `STELE_MCP_MODE` |
 | `tools/list` | Lite lists names with `{"type": "object"}` and description `stele-context <name>` (the reply stays the 2.0.0 size the benchmark gate measures); standard and full list each tool's properties | Full schemas and descriptions in every mode |
+| Tool groups (2.1) | `initialize` advertises `tools.listChanged: true` and returns one `instructions` line with the groups on and off. The `agent-tools` block of the project's AGENTS.md and `STELE_TOOLS` / `STELE_DISABLE` can hide groups; with none set, `tools/list` is unchanged. See README "Tool groups". | No groups; `listChanged` false; no instructions |
 | Media | Images, audio and video are metadata chunks (`image png 640x480 bytes N`, `audio wav 44100Hz 3.2s ...`, `video mp4 bytes N header ...`); WAV over 30 s splits per 30 s | Pixel hashes, MFCC, decoded frames, and only when Pillow, librosa or OpenCV is installed |
 | PDF text | Literal and hex strings in stream order, one chunk per page with text, adjacent pages merged with 1.5.2's rule; blank pages keep their page slot. A file that does not start with `%PDF` is one `pdf bytes N` chunk. | PyMuPDF text with its layout and reading order |
 | Regex | `regex=true` rejects lookaround and backreferences (`regex_lookaround`, `regex_backreference`) | Python `re` runs them |

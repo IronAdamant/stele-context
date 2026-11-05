@@ -691,6 +691,12 @@ impl Engine {
             "doctor_snapshot" => "doctor",
             other => other,
         };
+        // A tool switched off with STELE_TOOLS / STELE_DISABLE stays off
+        // inside batch too.
+        let selection = crate::mcp::groups::active();
+        if let Some(why) = selection.hidden(name) {
+            return Err(selection.refusal(name, &why));
+        }
         // `batch` calls the engine method directly: Python binds the
         // keywords, and the server does not inject its agent id.
         match crate::mcp::call_bound(self, name, params, false) {

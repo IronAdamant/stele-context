@@ -1,12 +1,12 @@
 {
   "name": "io.github.IronAdamant/stele-context",
-  "description": "Local context cache. Stdio MCP for the Rust 2.0.1 binary.",
-  "version": "2.0.1",
+  "description": "Local context cache. Stdio MCP for the Rust 2.1.0 binary.",
+  "version": "2.1.0",
   "packages": [
     {
       "registry_type": "github",
       "identifier": "IronAdamant/stele-context",
-      "version": "2.0.1",
+      "version": "2.1.0",
       "transport": { "type": "stdio" }
     }
   ]

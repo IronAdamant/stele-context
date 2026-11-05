@@ -21,7 +21,7 @@ Everything runs offline. Stele does not bundle a model and never calls one; Tier
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.0.1/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.1.0/scripts/install.sh | sh
 ```
 
 On Windows run `scripts/install.ps1`, or download `stele-context-<target>` from the [releases](https://github.com/IronAdamant/stele-context/releases). From source: `cargo build --release` (Rust 1.89+). The binaries are `stele-context` and `stele-context-mcp`.
@@ -49,6 +49,64 @@ or in a settings file:
 ```
 
 Other clients use the same command. `lite` (the default) exposes 25 tools; `standard` adds sessions, history and bulk embeddings (43); `full` adds the 1.x singleton names (61). Lite's `tools/list` carries names only; `standard` and `full` list each tool's parameters.
+
+## Tool groups
+
+Every MCP tool is in one group. `core` is always on; the others can be switched off so an agent that also runs another IronAdamant tool sees each feature once. Groups only shape the MCP tool list. The CLI is not affected.
+
+| Group | Tools (lite, then the extra ones in standard/full) | Overlaps with |
+|---|---|---|
+| `core` | doctor, map, get_context, detect_modality, get_supported_formats; environment_check, clean_bytecache, batch, stats, project_brief | always on |
+| `index` | index, remove, detect_changes; history, prune_history, get_chunk_history, stale_chunks | |
+| `search` | search, search_text, agent_grep, query, get_search_history, get_session_read_files | |
+| `symbols` | find_definition, find_references, impact_radius, coupling, register_dynamic_symbols, remove_dynamic_symbols; rebuild_symbols, get_dynamic_symbols | |
+| `embeddings` | llm_embed, bulk_store_summaries, enrichment_plan; bulk_store_embeddings, store_semantic_summary, store_embedding | |
+| `notes` | annotations; bulk_store_chunk_agent_notes, annotate, get_annotations, update_annotation, delete_annotation, search_annotations, bulk_annotate, store_chunk_agent_notes | Trammel notes, Wikifier notes |
+| `locks` | document_lock; list_agents, acquire_document_lock, refresh_document_lock, release_document_lock, get_document_lock_status, release_agent_locks, get_conflicts, reap_expired_locks | Chisel locks, Trammel claims, CoordinationHub leases |
+| `messages` | get_notifications (standard/full) | CoordinationHub messages |
+| `kv` | save_kv_state, get_relevant_kv, rollback, prune_chunks, list_sessions (standard/full) | |
+
+The agent picks the groups for a project in its AGENTS.md (see [Choosing groups](#choosing-groups)). An operator can override that in the client's `env` block:
+
+```json
+"env": { "STELE_DISABLE": "locks,notes" }
+```
+
+- `STELE_TOOLS`: comma-separated groups and/or tool names to keep (plus `core`); `all` keeps everything.
+- `STELE_DISABLE`: groups and/or tool names to hide, applied after `STELE_TOOLS`.
+- Case and spaces are ignored and a blank value counts as unset. They combine with `STELE_MCP_MODE`, which still picks lite, standard or full.
+- An unknown name, or `core` or a core tool in `STELE_DISABLE`, stops the server with one line on stderr and exit code 2, so the client shows it as failed.
+- A hidden tool is absent from `tools/list`; calling it anyway returns `isError` with the line to change, e.g. `tool "document_lock" is disabled (group "locks") by STELE_DISABLE; remove "locks" from it to enable`.
+- `initialize` instructions (and `doctor`, when anything is hidden) carry one line with the groups that are on and off.
+
+`tools/list` size with everything on, then with `locks`, `notes` or `messages` off: lite 2,556 / 2,455 / 2,459 bytes (no `messages` in lite); standard 17,009 / 16,131 / 15,995 / 16,667; full 23,099 / 19,847 / 19,755 / 22,757.
+
+## Choosing groups
+
+An agent sets Stele's groups for a project with `stele:` lines in the first `agent-tools` fenced block of the project's AGENTS.md (in the project root: the directory with `.git` or `.stele-context.toml`, else the server's working directory):
+
+````markdown
+```agent-tools
+# one agent works here; CoordinationHub owns leases
+stele: disable locks, notes
+```
+````
+
+Turn a group off when something else does its job:
+
+| Group | Turn it off when | Line |
+|---|---|---|
+| `locks` | one agent works on the project, or CoordinationHub, Trammel or Chisel coordinates the agents | `stele: disable locks` |
+| `notes` | Trammel or Wikifier keeps the notes and handoffs | `stele: disable notes` |
+| `messages` | CoordinationHub carries agent messages (standard/full only) | `stele: disable messages` |
+| `embeddings` | no agent writes Tier-2 summaries or vectors; keyword search is enough | `stele: disable embeddings` |
+| `kv` | you never save or restore session state (standard/full only) | `stele: disable kv` |
+| `symbols` | the project has no code (docs, data) | `stele: disable symbols` |
+| `index`, `search` | keep on: they are the cache and the lookups | |
+
+To keep only a few groups instead, list them: `stele: tools search, symbols` (`core` stays on). Lists take commas or spaces, and `#` starts a comment. Stele reads only its own lines, so other tools' lines can share the block.
+
+Stele checks the file's size and mtime on every request. When an edit changes the tool list it sends `notifications/tools/list_changed` and the client refetches the list; no restart. A line with an unknown name, or one that tries to switch off `core`, is ignored and reported as a warning in the `initialize` instructions and `doctor`. An env var beats the matching line: `STELE_TOOLS` replaces `stele: tools`, `STELE_DISABLE` replaces `stele: disable`.
 
 ## A short session
 

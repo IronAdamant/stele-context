@@ -1696,7 +1696,7 @@ impl Engine {
             })
             .collect();
         if rows.is_empty() {
-            // Snapshots written before 2.0.1 kept the patterns on the session.
+            // Snapshots written before 2.1.0 kept the patterns on the session.
             if let Some(item) = self
                 .store
                 .state

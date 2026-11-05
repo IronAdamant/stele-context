@@ -262,7 +262,7 @@ fn isolate_from(src: &Path, dest: &Path) -> Result<PathBuf, String> {
     }
     copy_dir(src, dest)?;
     // Mark the copy as a project root, as a checkout with `.git` is. Without
-    // a marker 2.0.1 (like 1.5.2) has no project root and stores absolute
+    // a marker 2.1 (like 1.5.2) has no project root and stores absolute
     // paths, which is not the case the gate is meant to time.
     fs::write(dest.join(".stele-context.toml"), "").map_err(|err| err.to_string())?;
     Ok(dest.to_path_buf())

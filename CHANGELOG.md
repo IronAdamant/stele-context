@@ -1,4 +1,4 @@
-## [2.0.1] - 2026-11-04
+## [2.1.0] - 2026-11-05
 
 Closes the gaps against the PyPI 1.5.2 package. [MIGRATION.md](MIGRATION.md) lists what still differs and why.
 
@@ -16,10 +16,12 @@ Closes the gaps against the PyPI 1.5.2 package. [MIGRATION.md](MIGRATION.md) lis
 - `doctor` `map_preview.total_tokens` is the project total; `index.max_level`, `index.avg_connections`, `search_quality.hnsw_span`, `insert_count` and `kv_cache_size_bytes` come from a real graph and KV files, computed the 1.5.2 way. `doctor.python` is read from the host interpreter's files; no Python is started.
 - `get_search_history` returns 1.5.2's rows and keeps them across processes.
 - Index locks without git are kept in the store; walked files come back in 1.5.2's path order (case-insensitive on Windows); CLI `annotate` requires `--type` and `--content`; the CLI applies 1.5.2's flags on `search`, `query`, `impact-radius`, `coupling`, `agent-grep`.
-- Speed: the MCP server opens the store on the first tool call; the graph uses heaps and is updated in place on Tier-2 writes, and its numbers are cached across processes.
+- Speed: release builds use fat LTO and one codegen unit (a 2.4 MB binary instead of 3.8 MB, faster process start); the MCP server opens the store on the first tool call; the graph uses heaps and is updated in place on Tier-2 writes, and its numbers are cached across processes.
 
 ### Added
 
+- MCP tool groups (the IronAdamant suite convention): `core`, `index`, `search`, `symbols`, `embeddings`, `notes`, `locks`, `messages`, `kv`. An agent picks them per project with `stele:` lines in the `agent-tools` block of the project's AGENTS.md; `STELE_TOOLS` / `STELE_DISABLE` override per key and combine with `STELE_MCP_MODE`. Hidden tools leave `tools/list` and return a one-line `isError` naming the switch. AGENTS.md is re-checked (size and mtime) on every request, and `notifications/tools/list_changed` is sent when the list changes (`tools.listChanged: true`). A bad env value exits 2 with one stderr line; a bad AGENTS.md line is a warning in the `initialize` instructions and `doctor`. With nothing set, `tools/list` is byte-identical. See README "Tool groups" and "Choosing groups".
+- `initialize` returns `instructions`: one line with the groups that are on and how to change them.
 - [MIGRATION.md](MIGRATION.md): 1.5.x Python (PyPI, `python-legacy`) to 2.x Rust.
 - `tests/mcp_parity.rs` (replaces `scripts/mcp_parity.py`) and `stele-bench versus` (replaces `scripts/versus_152.py`), both in Rust. Python stays only as the 1.5.2 reference in tests.
 

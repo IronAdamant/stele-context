@@ -7,6 +7,7 @@ use crate::json::{self, Value};
 use crate::VERSION;
 use std::io::{self, BufRead, Write};
 
+pub(crate) mod groups;
 mod signature;
 
 const HANDSHAKES: &[&str] = &["2026-07-28", "2025-11-25", "2025-06-18"];
@@ -86,6 +87,26 @@ pub fn serve() -> Response {
 }
 
 pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
+    // Tool groups: STELE_TOOLS / STELE_DISABLE from the operator, the
+    // `agent-tools` block of the project's AGENTS.md from the agent. A bad
+    // env value stops the server with one stderr line and exit code 2; a bad
+    // AGENTS.md line is a warning in the initialize instructions.
+    let project = std::env::current_dir()
+        .map(|cwd| crate::root::detect_project_root(&cwd).unwrap_or(cwd))
+        .unwrap_or_default();
+    let mut surface = match groups::Surface::open(&project) {
+        Ok(surface) => surface,
+        Err(line) => {
+            let _ = writeln!(io::stderr(), "{line}");
+            return Response {
+                code: 2,
+                stdout: Vec::new(),
+            };
+        }
+    };
+    let catalogue = mode_tool_names();
+    let mut filtered: Option<String> = None;
+    let mut initialized = false;
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     // The store opens on a background thread while the client does its
@@ -125,14 +146,41 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
         if field(&value, "id").is_none() {
             continue;
         }
-        let result = match method.as_str() {
-            "initialize" => initialize(&params),
-            "tools/list" => {
+        // One stat of AGENTS.md per request. When an agent edits the block
+        // mid-session and the exposed tools change, the client hears
+        // `notifications/tools/list_changed` before this response.
+        if surface.refresh(&catalogue) {
+            filtered = None;
+            if initialized {
                 let _ = writeln!(
                     stdout,
-                    "{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{cached}}}",
+                    "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}}"
+                );
+            }
+        }
+        let result = match method.as_str() {
+            "initialize" => {
+                initialized = true;
+                let mut result = initialize(&params);
+                if let Value::Object(pairs) = &mut result {
+                    pairs.push((
+                        "instructions".to_string(),
+                        Value::string(surface.instructions(&catalogue)),
+                    ));
+                }
+                result
+            }
+            "tools/list" => {
+                let selection = surface.selection();
+                let listed: &str = if selection.is_default() {
+                    cached_tools_json()
+                } else {
+                    filtered.get_or_insert_with(|| filtered_tools_json(selection))
+                };
+                let _ = writeln!(
+                    stdout,
+                    "{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{listed}}}",
                     id_json = json::to_string(&id),
-                    cached = cached_tools_json()
                 );
                 let _ = stdout.flush();
                 continue;
@@ -187,7 +235,10 @@ fn initialize(params: &Value) -> Value {
         ("protocolVersion", Value::string(version)),
         (
             "capabilities",
-            Value::object(vec![("tools", Value::object(vec![]))]),
+            Value::object(vec![(
+                "tools",
+                Value::object(vec![("listChanged", Value::Bool(true))]),
+            )]),
         ),
         (
             "serverInfo",
@@ -197,6 +248,46 @@ fn initialize(params: &Value) -> Value {
             ]),
         ),
     ])
+}
+
+/// The mode's tools/list with the hidden tools left out.
+fn filtered_tools_json(selection: &groups::Selection) -> String {
+    let Ok(mut listed) = json::parse(cached_tools_json()) else {
+        return cached_tools_json().to_string();
+    };
+    if let Value::Object(pairs) = &mut listed {
+        for (key, value) in pairs.iter_mut() {
+            if key != "tools" {
+                continue;
+            }
+            if let Value::Array(tools) = value {
+                tools.retain(|tool| selection.hidden(&string_field(tool, "name")).is_none());
+            }
+        }
+    }
+    json::to_string(&listed)
+}
+
+/// Every tool name in the current `STELE_MCP_MODE`.
+fn mode_tool_names() -> Vec<&'static str> {
+    let mode = std::env::var("STELE_MCP_MODE").unwrap_or_else(|_| "lite".to_string());
+    let mut names: Vec<&'static str> = LITE.to_vec();
+    if mode == "standard" || mode == "full" {
+        names.extend_from_slice(STANDARD_EXTRA);
+    }
+    if mode == "full" {
+        names.extend(REMOVED.iter().map(|(old, _)| *old));
+    }
+    names
+}
+
+/// The full catalogue, every mode together.
+#[cfg(test)]
+pub(crate) fn all_tool_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = LITE.to_vec();
+    names.extend_from_slice(STANDARD_EXTRA);
+    names.extend(REMOVED.iter().map(|(old, _)| *old));
+    names
 }
 
 fn cached_tools_json() -> &'static str {
@@ -360,9 +451,21 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
         attach_hint(&name, &mut value);
         return tool_result(&json::to_string(&value), true);
     }
+    let selection = groups::active();
+    if let Some(why) = selection.hidden(&name) {
+        // The convention's one line, as the text of an isError result.
+        return tool_result(&selection.refusal(&name, &why), true);
+    }
     let (text, is_error) = match call_bound(engine, &name, &args, true) {
         Ok(mut value) => {
             attach_hint(&name, &mut value);
+            if name == "doctor" {
+                if let Value::Object(pairs) = &mut value {
+                    for (key, line) in groups::doctor_fields(&mode_tool_names()) {
+                        pairs.push((key, Value::string(line)));
+                    }
+                }
+            }
             let errored = only_error(&value);
             (json::to_string(&value), errored)
         }

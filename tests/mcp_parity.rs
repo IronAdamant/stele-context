@@ -1154,12 +1154,10 @@ fn walk(value: &Py, root: &str, other_root: &str, key: &str) -> Py {
             }
             Py::List(rows)
         }
+        // The package version: 1.5.2 on one side, this crate's on the other.
         Py::Str(text)
             if (key == "version" || key == "stele_version")
-                && matches!(
-                    text.chars().take(3).collect::<String>().as_str(),
-                    "1.5" | "2.0"
-                ) =>
+                && (text.starts_with("1.5") || text == env!("CARGO_PKG_VERSION")) =>
         {
             s("version")
         }
