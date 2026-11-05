@@ -1,3 +1,18 @@
+## [2.3.0] - 2026-11-05
+
+Symbol accuracy fixes from the Specula live test (B5, B6). [MIGRATION.md](MIGRATION.md) lists them against 1.5.2.
+
+### Fixed
+
+- Symbol line numbers are file lines. They were counted from the top of the chunk, as in 1.5.2: `crc32` at line 37 of its file was reported at line 1, and a trait at line 128 at line 70. Each chunk now records where its lines sit in the file, so merged chunks map correctly too. The compact `find_definition` signature is the definition's own line, not the chunk's first line that names the symbol. A store from before 2.3 is converted the first time it is opened in full; on Specula (1,411 files) that one open took 3.4 s.
+- Rust references follow grouped and nested `use` imports, `crate::a::B` and `module::item` paths, and type names in code (`dyn Trait`). On Specula, `find_references` found 21 of 21 `.rs` files for `WorldWrite` (14 before), 7 of 7 for `crc32` (4), 17 of 17 for `hash_str` (6) and 21 of 21 for `GameWorld` (5; the 22nd mentions it only in comments and a string). Every reported line names the symbol.
+- `find_references` keeps to the languages the symbol is defined in: a Rust `crc32` no longer lists 9 Python `zlib.crc32` calls. `other_language_references` counts what was left out; `all_languages=true` (CLI `--all-languages`) lists everything.
+- `find_references` rows show the line that names the symbol instead of the first 200 characters of the chunk; `full=true` gives the 1.5.2 row. With the better recall, `WorldWrite` answers in 9.9 KB (56 rows in 21 files); 2.2 listed 15 rows in 6.2 KB.
+
+### Changed
+
+- More symbol rows for Rust: on Specula 111k instead of 71k, and the snapshot is 59 MB instead of 43 MB. A cold index of Specula takes 16.0 s instead of 15.0 s, and a CLI `find-references` 0.43 s instead of 0.29 s (most of it is loading the snapshot). Through MCP, `find_definition` takes 0.5-0.7 ms and `find_references` 1.4-2.7 ms (2.2: 0.4-0.7 and 0.7-1.3 ms).
+
 ## [2.2.0] - 2026-11-05
 
 Fixes for what slowed agents down or cost them tokens in a two-agent run on this repository. [MIGRATION.md](MIGRATION.md) lists each change against 1.5.2.

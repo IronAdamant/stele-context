@@ -48,6 +48,9 @@ pub struct Chunk {
     pub stale_since: Option<i64>,
     /// Caller-supplied vector. Empty means none. Any positive length is kept.
     pub embedding: Vec<f32>,
+    /// Where the chunk's lines are in the file (`chunk::lines`). Empty for
+    /// a chunk with no file text (memory, media) or from a store before 2.3.
+    pub line_map: Vec<(u32, u32)>,
 }
 
 impl Chunk {
@@ -225,6 +228,10 @@ pub struct State {
     /// Documents-only load: the snapshot may hold a `memory:` chunk, which
     /// has no document row. Not serialised.
     pub memory_hint: bool,
+    /// Symbol lines count from the top of the file (2.3). A store written
+    /// before 2.3 counts them from the top of the chunk, as 1.5.2 does;
+    /// opening it converts them once.
+    pub symbol_lines: bool,
 }
 
 pub struct Store {
@@ -454,6 +461,10 @@ impl State {
             ("inserts", Value::Int(self.inserts as i64)),
             ("next_symbol_id", Value::Int(self.next_symbol_id)),
             (
+                "symbol_lines",
+                Value::string(if self.symbol_lines { "file" } else { "chunk" }),
+            ),
+            (
                 "chunk_history",
                 Value::Array(self.chunk_history.iter().map(ChunkHist::to_json).collect()),
             ),
@@ -653,6 +664,7 @@ impl State {
                 })
                 .collect(),
             memory_hint: false,
+            symbol_lines: matches!(field(value, "symbol_lines"), Some(Value::String(text)) if text == "file"),
         }
     }
 }
@@ -684,7 +696,7 @@ impl Document {
 
 impl Chunk {
     fn to_json(&self) -> Value {
-        Value::object(vec![
+        let mut pairs = vec![
             ("id", Value::string(&self.id)),
             ("path", Value::string(&self.path)),
             ("start", Value::Int(self.start as i64)),
@@ -705,7 +717,24 @@ impl Chunk {
                         .collect(),
                 ),
             ),
-        ])
+        ];
+        if !self.line_map.is_empty() {
+            pairs.push((
+                "line_map",
+                Value::Array(
+                    self.line_map
+                        .iter()
+                        .map(|(chunk_at, file_at)| {
+                            Value::Array(vec![
+                                Value::Int(*chunk_at as i64),
+                                Value::Int(*file_at as i64),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ));
+        }
+        Value::object(pairs)
     }
     fn from_json(value: &Value) -> Chunk {
         Chunk {
@@ -734,6 +763,21 @@ impl Chunk {
                         Value::Float(number) => *number as f32,
                         Value::Int(number) => *number as f32,
                         _ => 0.0,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
+            line_map: match field(value, "line_map") {
+                Some(Value::Array(rows)) => rows
+                    .iter()
+                    .filter_map(|row| match row {
+                        Value::Array(pair) if pair.len() == 2 => match (&pair[0], &pair[1]) {
+                            (Value::Int(chunk_at), Value::Int(file_at)) => {
+                                Some((*chunk_at as u32, *file_at as u32))
+                            }
+                            _ => None,
+                        },
+                        _ => None,
                     })
                     .collect(),
                 _ => Vec::new(),

@@ -908,6 +908,32 @@ impl Engine {
         }
     }
 
+    /// The 0-based line of chunk `id` that holds 1-based file line `line`,
+    /// when the chunk maps onto its file.
+    pub(crate) fn chunk_line(&self, id: &str, line: u32) -> Option<usize> {
+        let chunk = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .find(|chunk| chunk.id == id)?;
+        crate::chunk::lines::relative(&chunk.line_map, line)
+    }
+
+    /// The text of file line `line` as chunk `id` holds it.
+    pub(crate) fn chunk_text_line(&self, id: &str, line: u32) -> Option<String> {
+        let chunk = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .find(|chunk| chunk.id == id)?;
+        let at = crate::chunk::lines::relative(&chunk.line_map, line)?;
+        crate::chunk::lines::content_lines(&chunk.content)
+            .get(at)
+            .map(|text| text.to_string())
+    }
+
     pub fn find_definition(&self, name: &str) -> Value {
         let defs = self.definition_rows(name);
         let count = defs.len() as i64;
@@ -928,8 +954,31 @@ impl Engine {
     }
 
     pub fn find_references(&self, name: &str) -> Value {
+        self.find_references_in(name, false)
+    }
+
+    /// 2.3: references are kept to the languages the symbol is defined in
+    /// (a Rust `crc32` does not list Python's `zlib.crc32` calls) unless
+    /// `all_languages`. A symbol with no definition, or one defined in a
+    /// file of no known language, is not narrowed.
+    pub fn find_references_in(&self, name: &str, all_languages: bool) -> Value {
         let defs = self.reference_rows(name, true);
-        let refs = self.reference_rows(name, false);
+        let mut refs = self.reference_rows(name, false);
+        let languages: Vec<&str> = defs
+            .iter()
+            .map(|row| language_of(&crate::store::string_field(row, "document_path")))
+            .collect();
+        let mut omitted = 0usize;
+        if !all_languages && !languages.is_empty() && !languages.contains(&"") {
+            let before = refs.len();
+            refs.retain(|row| {
+                languages.contains(&language_of(&crate::store::string_field(
+                    row,
+                    "document_path",
+                )))
+            });
+            omitted = before - refs.len();
+        }
         let total = (defs.len() + refs.len()) as i64;
         let verdict = if defs.is_empty() && refs.is_empty() {
             "not_found"
@@ -940,7 +989,7 @@ impl Engine {
         } else {
             "referenced"
         };
-        Value::object(vec![
+        let mut out = vec![
             ("symbol", Value::string(name)),
             ("verdict", Value::string(verdict)),
             ("definitions", Value::Array(defs)),
@@ -955,7 +1004,11 @@ impl Engine {
                     Value::Null
                 },
             ),
-        ])
+        ];
+        if omitted > 0 {
+            out.push(("other_language_references", Value::Int(omitted as i64)));
+        }
+        Value::object(out)
     }
 
     pub fn impact(&self, symbol: &str) -> Value {
@@ -2135,6 +2188,30 @@ fn edge_block(edges: &[crate::store::Edge], id: &str) -> Option<Value> {
         ("depends_on", Value::Array(depends)),
         ("depended_on_by", Value::Array(depended)),
     ]))
+}
+
+/// The language family of a file, by extension; "" when none is known.
+fn language_of(path: &str) -> &'static str {
+    let extension = path
+        .rsplit(['/', '\\'])
+        .next()
+        .and_then(|name| name.rsplit_once('.'))
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
+    match extension.as_str() {
+        "rs" => "rust",
+        "py" | "pyw" | "pyx" | "pyi" => "python",
+        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" => "javascript",
+        "java" | "kt" | "kts" | "scala" => "jvm",
+        "go" => "go",
+        "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "hxx" => "c",
+        "cs" => "csharp",
+        "swift" => "swift",
+        "rb" => "ruby",
+        "php" => "php",
+        "html" | "htm" | "css" | "scss" | "less" => "web",
+        _ => "",
+    }
 }
 
 fn guidance_empty(index: &Value) -> String {

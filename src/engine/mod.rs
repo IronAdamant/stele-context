@@ -151,9 +151,97 @@ impl Engine {
             if !engine.documents_only {
                 // 1.5.2 reloads the graph with insert_count = len(nodes).
                 engine.store.state.inserts = engine.store.state.chunks.len() as u64;
+                engine.file_lines_once();
             }
             engine
         })
+    }
+
+    /// A store from before 2.3 counts symbol lines from the top of each
+    /// chunk. Convert it once: map the chunks of every file that is still
+    /// as indexed (size and mtime) onto that file and extract its symbols
+    /// again with file lines and the 2.3 references. Files that changed get
+    /// both when they are re-indexed.
+    fn file_lines_once(&mut self) {
+        if self.store.state.symbol_lines {
+            return;
+        }
+        self.store.state.symbol_lines = true;
+        if self.store.state.symbols.is_empty() {
+            return;
+        }
+        let documents: Vec<(String, u64, i64)> = self
+            .store
+            .state
+            .documents
+            .iter()
+            .map(|doc| (doc.path.clone(), doc.size, doc.mtime_ns))
+            .collect();
+        let mut by_path: std::collections::HashMap<String, Vec<usize>> =
+            std::collections::HashMap::new();
+        for (at, chunk) in self.store.state.chunks.iter().enumerate() {
+            by_path.entry(chunk.path.clone()).or_default().push(at);
+        }
+        let mut converted: HashSet<String> = HashSet::new();
+        let mut fresh: Vec<Symbol> = Vec::new();
+        for (path, size, mtime) in documents {
+            if crate::media::is_media(extension_of(&path)) {
+                continue;
+            }
+            let abs = self.cwd.join(&path);
+            let Ok(meta) = fs::metadata(&abs) else {
+                continue;
+            };
+            if meta.len() != size || mtime_ns(&meta) != mtime {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&abs) else {
+                continue;
+            };
+            let text = chunk::read_python_text(&bytes);
+            let file_lines: Vec<&str> = text.split('\n').collect();
+            let mut order = by_path.remove(&path).unwrap_or_default();
+            order.sort_by_key(|at| self.store.state.chunks[*at].start);
+            // Map each chunk onto the file, then extract its symbols again:
+            // file lines, plus the references 2.3 finds that 1.5.2 does not.
+            let mut cursor = 0usize;
+            for (position, at) in order.iter().enumerate() {
+                let chunk = &mut self.store.state.chunks[*at];
+                chunk.line_map = chunk::lines::line_map(&file_lines, &chunk.content, &mut cursor);
+                let chunk = chunk.clone();
+                let ext = chunk
+                    .language
+                    .clone()
+                    .unwrap_or_else(|| extension_of(&chunk.path).to_string());
+                for hit in symbols::extract_all(&ext, &chunk.content) {
+                    let _id = self.take_symbol_id();
+                    fresh.push(Symbol {
+                        name: hit.name,
+                        kind: hit.kind,
+                        role: hit.role,
+                        line: chunk::lines::absolute(&chunk.line_map, hit.line),
+                        container: hit.container,
+                        chunk_id: chunk.id.clone(),
+                        path: path.clone(),
+                        chunk_index: position,
+                    });
+                }
+            }
+            converted.insert(path);
+        }
+        if converted.is_empty() {
+            return;
+        }
+        self.store
+            .state
+            .symbols
+            .retain(|sym| !converted.contains(&sym.path));
+        self.store.state.symbols.extend(fresh);
+        self.store.state.edges = symbols::build_edges(&self.store.state.symbols);
+        let _ = self.store.save(
+            "symbol_lines",
+            &Value::object(vec![("documents", Value::Int(converted.len() as i64))]),
+        );
     }
 
     /// MCP stdio registers this id, the same way 1.5.2 registers
@@ -176,6 +264,7 @@ impl Engine {
         }
         self.store.reload_full()?;
         self.documents_only = false;
+        self.file_lines_once();
         self.bm25 = Bm25::new();
         self.bm25_ready = false;
         self.bm25_excluded.clear();
@@ -211,6 +300,7 @@ impl Engine {
             }
             self.store.reload_full()?;
             self.documents_only = false;
+            self.file_lines_once();
         }
         let files = collect(
             &self.cwd,
@@ -420,6 +510,7 @@ impl Engine {
             if self.documents_only {
                 self.store.reload_full()?;
                 self.documents_only = false;
+                self.file_lines_once();
                 self.hnsw_ready.set(false);
                 self.graph_cache.set(None);
             }
@@ -1399,10 +1490,15 @@ impl Engine {
     ) -> Result<(i64, i64, String), String> {
         let bytes = fs::read(abs).map_err(|err| format!("{rel}: {err}"))?;
         let media = crate::media::is_media(crate::chunk::extension_of(rel));
+        let text = if media {
+            String::new()
+        } else {
+            chunk::read_python_text(&bytes)
+        };
         let sha = if media {
             hex(&sha256(&bytes))
         } else {
-            hex(&sha256(chunk::read_python_text(&bytes).as_bytes()))
+            hex(&sha256(text.as_bytes()))
         };
         let version = self
             .store
@@ -1421,8 +1517,20 @@ impl Engine {
             self.max_chunk_size,
             self.merge_threshold,
         );
+        // Symbol lines count from the top of the file (2.3).
+        let file_lines: Vec<&str> = if media {
+            Vec::new()
+        } else {
+            text.split('\n').collect()
+        };
+        let mut cursor = 0usize;
         for piece in &produced {
-            self.commit_piece(rel, piece);
+            let map = if media {
+                Vec::new()
+            } else {
+                chunk::lines::line_map(&file_lines, &piece.content, &mut cursor)
+            };
+            self.commit_piece(rel, piece, map);
         }
         self.store.state.documents.push(Document {
             path: rel.to_string(),
@@ -2231,20 +2339,25 @@ impl Engine {
         self.store.state.dynamic.retain(|sym| sym.name != name);
     }
 
-    pub fn commit_piece(&mut self, rel: &str, piece: &Produced) {
+    pub fn commit_piece(&mut self, rel: &str, piece: &Produced, line_map: Vec<(u32, u32)>) {
+        // Every symbol already in the store counts file lines here: a
+        // non-empty store went through `file_lines_once` when it was loaded
+        // in full, and an empty one has none. Say so, or the next open of a
+        // store first written here would convert these lines a second time.
+        self.store.state.symbol_lines = true;
         let digest = chunk::content_sha256(&piece.content);
         let id = chunk::chunk_id(rel, piece.start, piece.end, &digest);
         let ext = piece
             .language
             .clone()
             .unwrap_or_else(|| extension_of(rel).to_string());
-        for hit in symbols::extract(&ext, &piece.content) {
+        for hit in symbols::extract_all(&ext, &piece.content) {
             let _id = self.take_symbol_id();
             self.store.state.symbols.push(Symbol {
                 name: hit.name,
                 kind: hit.kind,
                 role: hit.role,
-                line: hit.line,
+                line: chunk::lines::absolute(&line_map, hit.line),
                 container: hit.container,
                 chunk_id: id.clone(),
                 path: rel.to_string(),
@@ -2270,6 +2383,7 @@ impl Engine {
             staleness: 0.0,
             stale_since: None,
             embedding: Vec::new(),
+            line_map,
         });
         // 1.5.2 HNSW increments only after the first node. The first insert
         // returns before the counter moves. Replacing an existing id does not

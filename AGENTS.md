@@ -27,7 +27,7 @@ Cold-start ritual (all on **MCP lite** by default):
 
 - **Start with `query`** for any broad natural-language question; it merges semantic search, symbol graph, and text grep into one result list.
 - **Compact by default (2.2).** Tools that can run long answer briefly: `find_definition` gives the `signature` line and a short `preview` (pass `full=true` for the chunk text), `search` returns previews (`compact=false` for text), `index` reports counts, `map` lists the 50 largest documents. Ask for more only when you need it.
-- **Symbols** (`find_definition`, `find_references`) for identifiers and imports. `find_definition` annotates shadowed symbols with `definition_index`, `shadowed`, and `shadow_count`.
+- **Symbols** (`find_definition`, `find_references`) for identifiers and imports. Line numbers are file lines (2.3). `find_references` stays in the language the symbol is defined in; pass `all_languages=true` for every language. Rust references include grouped `use` imports, `crate::a::B` paths and type names. `find_definition` annotates shadowed symbols with `definition_index`, `shadowed`, and `shadow_count`.
 - **Locks.** `index` marks the files it touched with an index-time lock (`"auto": true` in `status`). It never blocks `document_lock acquire`, yours or another agent's; an explicit lock does block other agents until it is released or expires.
 - **`agent_grep` / `search_text`** for exhaustive or regex proof. Both accept **`session_id`** — they auto-index files with matches and record search history, so **`get_search_history`** tells you what you already searched. Both also accept **`working_tree=true`** to auto-index modified/untracked files before searching.
 - **`search`** for exploration; use **`compact`**, **`max_result_tokens**`, or **`return_response_meta`** to cap context. Also supports **`working_tree=true`**. Results now include **`source`** (`hnsw`, `bm25`, `symbol_boost`) and **`tier2_present`** so you can see why a result ranked where it did.
@@ -141,7 +141,7 @@ bash scripts/fetch_corpora.sh
   --binary target/release/stele-context --group b1 --runs 10 --check-floor
 ```
 
-`stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.2.0`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. Full mode runs the 18 old singleton names by routing them to the current tools.
+`stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.3.0`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. Full mode runs the 18 old singleton names by routing them to the current tools.
 
 Fixture goldens live in `parity/goldens/`. `cargo test` checks chunks and symbols against `fixtures.json`. `bash scripts/fetch_corpora.sh` fills `parity/.cache` so the rich 13.9.4 and flask 3.1.0 round-trip tests run. Historical timings are `bench/baseline/` and `bench/rust-b1.json`.
 

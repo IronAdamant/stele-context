@@ -113,6 +113,7 @@ fn read_db(db: &Path, cwd: &Path) -> Result<State, String> {
             staleness: sql_number(&row, "staleness_score"),
             stale_since: nonzero_opt(sql_number(&row, "stale_since")),
             embedding: Vec::new(),
+            line_map: Vec::new(),
         });
     }
     for row in opened.table("symbols").unwrap_or_default() {

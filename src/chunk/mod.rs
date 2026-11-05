@@ -2,6 +2,7 @@
 //! Offsets are Unicode scalar counts, matching Python `len` on `str`.
 
 mod code;
+pub mod lines;
 mod merge;
 mod patterns;
 mod python_alnum;

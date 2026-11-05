@@ -1095,7 +1095,7 @@ fn rust_args(name: &str, arguments: Py) -> Py {
         }
     };
     match name {
-        "find_definition" | "index" | "detect_changes" | "history" => {
+        "find_definition" | "find_references" | "index" | "detect_changes" | "history" => {
             default("full", Py::Bool(true));
         }
         "get_notifications" => {
@@ -1350,6 +1350,10 @@ fn first_chunk(value: &Py) -> String {
 fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
     let mut notes: Vec<String> = Vec::new();
     let mut skip = false;
+    let extra = EXTRA_RUST_SYMBOLS.load(std::sync::atomic::Ordering::Relaxed);
+    if extra != 0 && rust_rows(left, right, extra) {
+        notes.push(format!("{extra} more Rust reference rows (2.3)"));
+    }
     // rust_args asks map for max_documents=0 (every document); 1.5.2 with
     // no cap has no documents_omitted.
     if name == "map" && matches!(right.get("documents_omitted"), None | Some(Py::None)) {
@@ -1470,6 +1474,57 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
 }
 
 /// Lock calls whose 1.5.2 answer follows from an index-time lock.
+/// Symbol rows 2.3 adds over 1.5.2 in the scenario's tree: the Rust
+/// references `symbols::extract_all` finds and 1.5.2's `extract` does not
+/// (MIGRATION.md). Set per scenario; 0 for a tree without `.rs` files.
+static EXTRA_RUST_SYMBOLS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+fn extra_rust_symbols(tree: &Path) -> i64 {
+    let mut extra = 0i64;
+    let mut stack = vec![tree.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let text = fs::read_to_string(&path).unwrap_or_default();
+                let old = stele_context::symbols::extract("rs", &text).len() as i64;
+                let new = stele_context::symbols::extract_all("rs", &text).len() as i64;
+                extra += new - old;
+            }
+        }
+    }
+    extra
+}
+
+/// Equalize symbol row counts that differ by exactly the 2.3 Rust rows.
+fn rust_rows(left: &mut Py, right: &Py, extra: i64) -> bool {
+    let mut changed = false;
+    if let (Py::Dict(lp), Py::Dict(rp)) = (left, right) {
+        for (key, value) in lp.iter_mut() {
+            let Some(other) = lookup(rp, key) else {
+                continue;
+            };
+            if (key == "symbol_rows"
+                || key == "symbol_row_count"
+                || key == "reference_count"
+                || key == "symbol_count")
+                && value.as_float() - other.as_float() == extra as f64
+            {
+                *value = other.clone();
+                changed = true;
+            } else if matches!(value, Py::Dict(_)) {
+                changed |= rust_rows(value, other, extra);
+            }
+        }
+    }
+    changed
+}
+
 const LOCK_TOOLS: &[&str] = &[
     "acquire_document_lock",
     "refresh_document_lock",
@@ -2321,6 +2376,10 @@ fn compare_scenario(
     steps: &[Step],
     extra_check: impl Fn(&[Option<Outcome>], &[Option<Outcome>]) -> usize,
 ) -> usize {
+    EXTRA_RUST_SYMBOLS.store(
+        extra_rust_symbols(tree),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let work = TempDir::new("stele-v5-").expect("mkdtemp");
     // Both sides report the resolved path (8.3 names and symlinks
     // expanded), so run in and strip that form.

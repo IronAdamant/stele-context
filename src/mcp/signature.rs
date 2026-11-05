@@ -195,7 +195,12 @@ const SIGS: &[Sig] = &[
     Sig {
         tool: "find_references",
         var_kw: false,
-        params: &[("symbol", true, "string")],
+        // 2.3: `all_languages` and `full` (MIGRATION.md).
+        params: &[
+            ("symbol", true, "string"),
+            ("all_languages", false, "boolean"),
+            ("full", false, "boolean"),
+        ],
     },
     Sig {
         tool: "get_annotations",
