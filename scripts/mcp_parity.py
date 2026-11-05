@@ -287,6 +287,9 @@ def documented(name, left, right):
                 for key in SQLITE_FIELDS:
                     health.pop(key, None)
         notes.append("sqlite pragma and database file fields")
+        for side in (left, right):
+            side.pop("python", None)
+        notes.append("python is null; the binary does not start an interpreter")
     if name == "stats" and isinstance(left, dict) and isinstance(right, dict):
         storage = left.get("storage") if isinstance(left.get("storage"), dict) else None
         other = right.get("storage") if isinstance(right.get("storage"), dict) else None
@@ -296,10 +299,7 @@ def documented(name, left, right):
             notes.append("kv_cache_size_bytes is zlib files on 1.5.2")
         index = left.get("index") if isinstance(left.get("index"), dict) else None
         other_index = right.get("index") if isinstance(right.get("index"), dict) else None
-        if isinstance(index, dict) and isinstance(other_index, dict):
-            index.pop("insert_count", None)
-            other_index.pop("insert_count", None)
-            notes.append("insert_count counts HNSW reinserts; rust reports the chunk count")
+        # insert_count is compared. It is the HNSW insert counter.
     if name == "get_supported_formats" and isinstance(left, dict) and isinstance(right, dict):
         lf = left.get("formats") if isinstance(left.get("formats"), dict) else {}
         rf = right.get("formats") if isinstance(right.get("formats"), dict) else {}
@@ -529,6 +529,46 @@ def main() -> int:
         if missed:
             print(f"parity diff tools not called: {missed}", flush=True)
             diffs += 1
+        probes = [
+            ("map", {"path_prefix": ""}),
+            ("map", {"path_prefix": "./src"}),
+            (
+                "annotations",
+                {
+                    "action": "create",
+                    "target": "src/calc.py",
+                    "target_type": "document",
+                    "content": "either tag",
+                    "tags": ["q", "x"],
+                },
+            ),
+            (
+                "annotations",
+                {
+                    "action": "get",
+                    "target": "src/calc.py",
+                    "target_type": "document",
+                    "tags": ["q", "missing"],
+                },
+            ),
+            ("llm_embed", {"text": "hello"}),
+            ("agent_grep", {"pattern": "classify", "path_prefix": "src"}),
+        ]
+        if saved_cid:
+            probes.append(
+                ("bulk_store_embeddings", {"embeddings": {saved_cid: [0.25] * 64}})
+            )
+        for name, args in probes:
+            left = tool(rust, name, args)
+            right = tool(python, name, args)
+            left_n = walk(left, root_s, str(rs_store))
+            right_n = walk(right, root_s, str(py_store))
+            for side in (left_n, right_n):
+                blank_graph(side)
+            left_n, right_n = timestamps_ok(left_n, right_n, [])
+            if left_n != right_n:
+                print(f"parity diff probe {name}: {first_diff(left_n, right_n)}", flush=True)
+                diffs += 1
         rust.close()
         python.close()
         # CLI behaviour, not just --help. The server must release the store lock first.
@@ -614,6 +654,30 @@ def main() -> int:
         if left_n != right_n:
             print(f"parity diff cli get-annotations: {first_diff(left_n, right_n)}", flush=True)
             diffs += 1
+        rc_r, out_r = cli(
+            rs_store,
+            ["annotate", "--content", "two", "--tags", "q", "x", "--json", "src/calc.py"],
+        )
+        rc_p, out_p = py_cli(
+            py_store,
+            ["annotate", "--type", "document", "--content", "two", "--tags", "q", "x", "--json", "src/calc.py"],
+        )
+        if rc_r != 0 or rc_p != 0:
+            print(f"parity diff cli --tags: rust {rc_r} {out_r[:180]!r} python {rc_p} {out_p[:180]!r}", flush=True)
+            diffs += 1
+        else:
+            rc_r, out_r = cli(rs_store, ["get-annotations", "--target", "src/calc.py", "--type", "document", "--json"])
+            rc_p, out_p = py_cli(py_store, ["get-annotations", "--target", "src/calc.py", "--type", "document", "--json"])
+            left_n = walk(unwrap(out_r), root_s, str(rs_store))
+            right_n = walk(unwrap(out_p), root_s, str(py_store))
+            if isinstance(left_n, dict) and "annotations" in left_n:
+                left_n = left_n["annotations"]
+            if isinstance(right_n, dict) and "annotations" in right_n:
+                right_n = right_n["annotations"]
+            left_n, right_n = timestamps_ok(left_n, right_n, [])
+            if left_n != right_n:
+                print(f"parity diff cli --tags stored: {first_diff(left_n, right_n)}", flush=True)
+                diffs += 1
         # Schema names the 1.5.2 functions do not accept. Observed after the
         # CLI compare so a Rust-only write does not change the shared stores.
         if not saved_cid:
