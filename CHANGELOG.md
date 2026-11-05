@@ -13,7 +13,8 @@ Fixes for what slowed agents down or cost them tokens in a two-agent run on this
 
 - Compact results by default for the tools that ran past 10 KB. On this repository (202 files): `find_definition` 60.7 KB to 0.5 KB, `search` 101.2 KB to 8.4 KB, `search_text` 21.9 KB to 8.6 KB, `agent_grep` 29.4 KB to 7.2 KB, `map` 25.3 KB to 6.7 KB, a re-`index` 15.2 KB to 0.1 KB, `detect_changes` 6.0 KB to 0.2 KB, `history` 12.2 KB to 0.3 KB, `get_notifications` 30.1 KB to 2.9 KB. `full=true` (or the 1.5.2 argument value) returns the 1.5.2 result. `get_context` still returns the text it was asked for. The CLI is unchanged.
 - Speed: indexing this repository through MCP went from 3.4 s to 1.3 s on Windows. The coordination file is read and written once per index, not once per file, and chunk signatures count trigrams and words by sorting instead of hashing (same values, about 3x faster).
-- The benchmark gate times a reply from the moment its line arrives, before the bench's own JSON parser reads it; reply sizes are still reported.
+- Each MCP message is written with one write, and the store-open thread pages in the tool list and a reply buffer while the client is on `initialize`, so the larger list does not slow the first `tools/list`.
+- The benchmark gate times a reply from the moment its line arrives, before the bench's own JSON parser reads it, and its reader touches its buffer first; reply sizes are still reported.
 
 ## [2.1.0] - 2026-11-05
 
