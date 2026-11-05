@@ -81,17 +81,18 @@ fn probe(python: &OsString) -> Result<String, String> {
         .output()
         .map_err(|err| format!("not runnable ({err})"))?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let last = stderr
-            .lines()
-            .chain(stdout.lines())
-            .filter(|line| !line.trim().is_empty())
-            .last()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        return Err(format!("exit {}: {last}", returncode(output.status)));
+        let last_line = |bytes: &[u8]| {
+            String::from_utf8_lossy(bytes)
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .last()
+                .map(str::to_string)
+        };
+        let why = last_line(&output.stderr)
+            .or_else(|| last_line(&output.stdout))
+            .unwrap_or_default();
+        return Err(format!("exit {}: {why}", returncode(output.status)));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
