@@ -6,6 +6,9 @@
 //! loader. `sqlite` reads a 1.5 database when `migrate` asks it to.
 
 mod sqlite;
+mod zlib;
+
+pub(crate) use zlib::compress;
 
 pub use sqlite::{blob as sql_blob, number as sql_number, text as sql_text, SqliteDb};
 

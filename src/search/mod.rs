@@ -6,7 +6,10 @@
 
 mod bm25;
 mod bm25_cache;
+mod hnsw;
 mod stem;
+
+pub use hnsw::Hnsw;
 
 use crate::chunk::signature;
 pub use bm25::Bm25;

@@ -27,6 +27,7 @@ pub struct Engine {
     store: Store,
     bm25: Bm25,
     bm25_ready: bool,
+    hnsw: crate::search::Hnsw,
     chunk_size: usize,
     max_chunk_size: usize,
     respect_gitignore: bool,
@@ -102,6 +103,7 @@ impl Engine {
             store,
             bm25: Bm25::new(),
             bm25_ready: false,
+            hnsw: crate::search::Hnsw::new(),
             chunk_size: loaded.chunk_size.unwrap_or(256).max(1) as usize,
             max_chunk_size: loaded.max_chunk_size.unwrap_or(4096).max(1) as usize,
             respect_gitignore: loaded.respect_gitignore.unwrap_or(true),
@@ -115,6 +117,14 @@ impl Engine {
             file_reads: Vec::new(),
             operations: 0,
             failures: 0,
+        })
+        .map(|mut engine| {
+            if !engine.documents_only {
+                engine.rebuild_hnsw();
+                // 1.5.2 reloads the graph with insert_count = len(nodes).
+                engine.store.state.inserts = engine.store.state.chunks.len() as u64;
+            }
+            engine
         })
     }
 
@@ -338,6 +348,7 @@ impl Engine {
             if self.documents_only {
                 self.store.reload_full()?;
                 self.documents_only = false;
+                self.rebuild_hnsw();
             }
             unchanged.clear();
         }
@@ -534,8 +545,8 @@ impl Engine {
                 "index",
                 Value::object(vec![
                     ("node_count", Value::Int(chunks)),
-                    ("max_level", Value::Int(0)),
-                    ("avg_connections", Value::Float(0.0)),
+                    ("max_level", Value::Int(self.hnsw.max_level())),
+                    ("avg_connections", Value::Float(self.hnsw.avg_connections())),
                     ("insert_count", Value::Int(self.store.state.inserts as i64)),
                     ("chunk_count", Value::Int(chunks)),
                 ]),
@@ -609,23 +620,7 @@ impl Engine {
             }
         }
         let last_conflict = state.conflicts.iter().map(|row| row.at).max();
-        let kv_bytes: u64 = state
-            .sessions
-            .iter()
-            .map(|session| {
-                let pairs = session
-                    .kv
-                    .iter()
-                    .map(|(key, value)| key.len() + value.len())
-                    .sum::<usize>();
-                let saved = session
-                    .kv_state
-                    .iter()
-                    .map(|(chunk_id, _, data)| chunk_id.len() + data.len())
-                    .sum::<usize>();
-                pairs + saved
-            })
-            .sum::<usize>() as u64;
+        let kv_bytes = kv_cache_bytes(&self.storage);
         let store_dir = self.storage.join("store");
         let database_size = file_len(&store_dir.join("snapshot.json"))
             + file_len(&store_dir.join("journal.jsonl"))
@@ -636,7 +631,10 @@ impl Engine {
             ("document_count", Value::Int(state.documents.len() as i64)),
             ("session_count", Value::Int(state.sessions.len() as i64)),
             ("total_tokens", Value::Int(tokens)),
-            ("version_count", Value::Int(0)),
+            (
+                "version_count",
+                Value::Int(state.chunk_history.len() as i64),
+            ),
             (
                 "annotation_count",
                 Value::Int(state.annotations.len() as i64),
@@ -1117,7 +1115,7 @@ impl Engine {
                     ("total_chunks", Value::Int(chunks)),
                     ("tier2_chunks", Value::Int(tier2_chunks)),
                     ("tier2_coverage_percent", Value::Float(chunk_pct)),
-                    ("hnsw_span", Value::Float(0.0)),
+                    ("hnsw_span", Value::Float(self.hnsw_span())),
                     ("advice", advice),
                 ]),
             ),
@@ -1366,8 +1364,19 @@ impl Engine {
 
     fn drop_path(&mut self, rel: &str) {
         self.store.state.documents.retain(|doc| doc.path != rel);
+        let gone: Vec<String> = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.path == rel)
+            .map(|chunk| chunk.id.clone())
+            .collect();
         self.store.state.chunks.retain(|chunk| chunk.path != rel);
         self.store.state.symbols.retain(|sym| sym.path != rel);
+        for id in gone {
+            self.hnsw.remove(&id);
+        }
     }
 
     fn rebuild_bm25(&mut self) {
@@ -1615,14 +1624,84 @@ fn store_bytes(storage: &std::path::Path) -> i64 {
     .sum::<u64>() as i64
 }
 
+fn kv_cache_bytes(storage: &Path) -> u64 {
+    let root = storage.join("kv_cache");
+    let mut total = 0u64;
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
+pub(crate) fn write_kv_file(
+    storage: &Path,
+    session: &str,
+    chunk_id: &str,
+    turn: i64,
+    json_bytes: &[u8],
+) {
+    let dir = storage.join("kv_cache").join(session);
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(format!("{chunk_id}_turn{turn}.kv"));
+    let _ = std::fs::write(path, crate::store::compress(json_bytes));
+}
+
 fn wal_bytes(storage: &Path) -> i64 {
     file_len(&storage.join("stele_context.db-wal")) as i64
 }
 
-fn host_python() -> Value {
-    // The binary does not start an interpreter. A first doctor call stays
-    // inside this process. 1.5.2 reports `sys.version` because it is Python.
-    Value::Null
+/// Start reading `python3`'s version before `doctor` runs. The doctor call
+/// only waits for a lookup that is already in flight, and a later call does
+/// not start a process.
+pub fn prefetch_python() {
+    let _ = std::thread::Builder::new()
+        .name("python-version".to_string())
+        .spawn(|| {
+            let _ = python_version();
+        });
+}
+
+fn python_version() -> &'static str {
+    static READY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    READY.get_or_init(|| {
+        for bin in ["python3", "python"] {
+            let Ok(output) = std::process::Command::new(bin)
+                .arg("-c")
+                .arg("import sys; print(sys.version.split()[0], end='')")
+                .output()
+            else {
+                continue;
+            };
+            if !output.status.success() {
+                continue;
+            }
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !text.is_empty() {
+                return text;
+            }
+        }
+        String::new()
+    })
+}
+
+pub fn host_python() -> crate::json::Value {
+    let text = python_version();
+    if text.is_empty() {
+        crate::json::Value::Null
+    } else {
+        crate::json::Value::string(text)
+    }
 }
 
 fn plan_field<'a>(plan: &'a Value, key: &str) -> Option<&'a Value> {
@@ -1748,6 +1827,38 @@ impl Engine {
         }
     }
 
+    fn rebuild_hnsw(&mut self) {
+        self.hnsw.clear();
+        self.store.ensure_sigs();
+        let pairs: Vec<(String, Vec<f32>)> = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .enumerate()
+            .map(|(index, chunk)| {
+                let vector = if chunk.embedding.len() == 128 {
+                    chunk.embedding.clone()
+                } else {
+                    self.store
+                        .state
+                        .sigs
+                        .get(index)
+                        .map(|sig| sig.to_vec())
+                        .unwrap_or_else(|| vec![0.0; 128])
+                };
+                (chunk.id.clone(), vector)
+            })
+            .collect();
+        for (id, vector) in pairs {
+            self.hnsw.insert(&id, vector);
+        }
+    }
+
+    fn hnsw_span(&self) -> f64 {
+        self.hnsw.probe_span()
+    }
+
     fn take_symbol_id(&mut self) -> i64 {
         if self.store.state.next_symbol_id <= 0 {
             let from_dynamic = self
@@ -1812,6 +1923,11 @@ impl Engine {
                 chunk_index: piece.index,
             });
         }
+        let vector: Vec<f32> = chunk::signature(&piece.content)
+            .iter()
+            .map(|value| *value as f32)
+            .collect();
+        self.hnsw.insert(&id, vector);
         self.store.state.chunks.push(Chunk {
             id,
             path: rel.to_string(),

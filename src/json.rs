@@ -48,6 +48,41 @@ pub fn parse(input: &str) -> Result<Value, ParseError> {
     Ok(value)
 }
 
+/// `json.dumps` default separators and ASCII escapes, for zlib KV files.
+pub fn dumps_python(value: &Value) -> String {
+    let mut out = String::new();
+    write_python(&mut out, value);
+    out
+}
+
+fn write_python(out: &mut String, value: &Value) {
+    match value {
+        Value::Array(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                write_python(out, item);
+            }
+            out.push(']');
+        }
+        Value::Object(pairs) => {
+            out.push('{');
+            for (index, (key, item)) in pairs.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                write_string(out, key);
+                out.push_str(": ");
+                write_python(out, item);
+            }
+            out.push('}');
+        }
+        other => write_value(out, other),
+    }
+}
+
 pub fn to_string(value: &Value) -> String {
     let mut out = String::new();
     write_value(&mut out, value);

@@ -300,9 +300,9 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
         Err(message) => {
             engine.note_failure();
             if name == "llm_embed" {
-                // The 1.5.2 stdio server rejects this in the schema checker.
-                // The tool text is that sentence, and isError is true.
-                (message, true)
+                // 1.5.2's own handler returns this object and marks the call an error.
+                let value = Value::object(vec![("error", Value::string(message))]);
+                (json::to_string(&value), true)
             } else if name == "agent_grep" {
                 let value = Value::object(vec![("error", Value::string(message))]);
                 (json::to_string(&value), false)
@@ -642,11 +642,23 @@ pub(crate) fn dispatch(engine: &mut Engine, name: &str, args: &Value) -> Result<
             ]),
         )])),
         "llm_embed" => {
-            if field(args, "text").is_none() {
-                return Err("Input validation error: 'text' is a required property".to_string());
+            if field(args, "text").is_none() && field(args, "chunk_id").is_none() {
+                return Err(
+                    "_IndexMixin.llm_embed() missing 2 required positional arguments: 'text' and 'chunk_id'"
+                        .to_string(),
+                );
             }
             if field(args, "chunk_id").is_none() {
-                return Err("Input validation error: 'chunk_id' is a required property".to_string());
+                return Err(
+                    "_IndexMixin.llm_embed() missing 1 required positional argument: 'chunk_id'"
+                        .to_string(),
+                );
+            }
+            if field(args, "text").is_none() {
+                return Err(
+                    "_IndexMixin.llm_embed() missing 1 required positional argument: 'text'"
+                        .to_string(),
+                );
             }
             engine.llm_embed(
                 &arg(args, "text").unwrap_or_default(),

@@ -440,6 +440,8 @@ impl Engine {
                 }
                 self.store.state.sigs[index] = sig;
             }
+            self.hnsw.remove(id);
+            self.hnsw.insert(id, vector);
             self.note_vector_replace();
             stored += 1;
         }
@@ -480,17 +482,24 @@ impl Engine {
         let mut stored = 0i64;
         let mut errors = Vec::new();
         for (id, summary) in pairs {
-            let Some(chunk) = self
+            let found = self
                 .store
                 .state
                 .chunks
                 .iter_mut()
                 .find(|chunk| chunk.id == *id)
-            else {
+                .map(|chunk| chunk.summary = Some(summary.clone()))
+                .is_some();
+            if !found {
                 errors.push(Value::string(id.clone()));
                 continue;
-            };
-            chunk.summary = Some(summary.clone());
+            }
+            let vector = crate::chunk::signature(summary)
+                .iter()
+                .map(|value| *value as f32)
+                .collect();
+            self.hnsw.remove(id);
+            self.hnsw.insert(id, vector);
             stored += 1;
         }
         if self.store.state.chunks.len() > 1 {

@@ -16,7 +16,8 @@ pub fn pages(bytes: &[u8]) -> Vec<(String, usize, usize)> {
     if texts.is_empty() {
         let joined = content_streams(bytes).join("\n");
         if joined.trim().is_empty() {
-            return vec![(format!("pdf pages 0 bytes {}", bytes.len()), 0, bytes.len())];
+            // Every page is blank. 1.5.2 stores one empty chunk.
+            return vec![(String::new(), 0, 0)];
         }
         texts.push(joined);
     }
@@ -42,7 +43,7 @@ pub fn pages(bytes: &[u8]) -> Vec<(String, usize, usize)> {
     }
     let joined = content_streams(bytes).join("\n");
     if joined.trim().is_empty() {
-        return vec![(format!("pdf pages 0 bytes {}", bytes.len()), 0, bytes.len())];
+        return vec![(String::new(), 0, 0)];
     }
     vec![(format!("[Page 1]\n{joined}\n"), 0, 1000)]
 }

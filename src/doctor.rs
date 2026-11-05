@@ -101,7 +101,7 @@ pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
         ("native_store_present", Value::Bool(native)),
         ("legacy_sqlite_present", Value::Bool(legacy)),
         ("stele_version", Value::string(VERSION)),
-        ("python", Value::Null),
+        ("python", crate::engine::host_python()),
         ("document_count", Value::Int(parsed.documents)),
         ("chunk_count", Value::Int(parsed.chunks)),
         ("index_health", parsed.index_health(&storage)),
@@ -139,6 +139,7 @@ struct ParsedStore {
     tokens: i64,
     tier2: i64,
     latest: f64,
+    signatures: Vec<Vec<f32>>,
     error: Option<String>,
     paths: Vec<String>,
 }
@@ -151,6 +152,7 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         tokens: 0,
         tier2: 0,
         latest: 0.0,
+        signatures: Vec::new(),
         error: None,
         paths: Vec::new(),
     };
@@ -183,11 +185,17 @@ fn read_snapshot(path: &Path) -> ParsedStore {
     };
     let mut tokens = 0i64;
     let mut tier2 = 0i64;
+    let mut signatures = Vec::new();
     for chunk in chunk_rows {
         tokens += int_field(chunk, "tokens");
         if field(chunk, "summary").is_some_and(|item| !matches!(item, Value::Null)) {
             tier2 += 1;
         }
+        let hex = match field(chunk, "signature") {
+            Some(Value::String(text)) => text.as_str(),
+            _ => "",
+        };
+        signatures.push(crate::store::decode_hex_sig(hex).to_vec());
     }
     let mut paths = Vec::new();
     let mut latest = 0.0f64;
@@ -209,6 +217,7 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         tokens,
         tier2,
         latest,
+        signatures,
         error: None,
         paths,
     }
@@ -333,7 +342,7 @@ impl ParsedStore {
             ("total_chunks", Value::Int(self.chunks)),
             ("tier2_chunks", Value::Int(self.tier2)),
             ("tier2_coverage_percent", Value::Float(coverage)),
-            ("hnsw_span", Value::Float(0.0)),
+            ("hnsw_span", Value::Float(hnsw_span(&self.signatures))),
             ("advice", advice.map(Value::string).unwrap_or(Value::Null)),
         ])
     }
@@ -354,6 +363,14 @@ impl ParsedStore {
 
 fn file_len(path: &Path) -> u64 {
     fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
+}
+
+fn hnsw_span(signatures: &[Vec<f32>]) -> f64 {
+    let mut graph = crate::search::Hnsw::new();
+    for (index, vector) in signatures.iter().enumerate() {
+        graph.insert(&index.to_string(), vector.clone());
+    }
+    graph.probe_span()
 }
 
 fn array_len(value: &Value, key: &str) -> usize {

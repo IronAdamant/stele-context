@@ -1173,7 +1173,14 @@ impl Engine {
             };
             added += tokens as i64;
             saved += 1;
-            let encoded = crate::json::to_string(&data);
+            let encoded = crate::json::dumps_python(&data);
+            super::write_kv_file(
+                &self.storage,
+                session,
+                &chunk_id,
+                turn_number,
+                encoded.as_bytes(),
+            );
             if let Some(slot) = self
                 .store
                 .state
@@ -1337,6 +1344,12 @@ impl Engine {
         if !found {
             return Err(format!("unknown chunk '{chunk_id}'"));
         }
+        let vector = crate::chunk::signature(summary)
+            .iter()
+            .map(|value| *value as f32)
+            .collect();
+        self.hnsw.remove(chunk_id);
+        self.hnsw.insert(chunk_id, vector);
         self.note_vector_replace();
         self.store.save("summary", &Value::string(chunk_id))?;
         Ok(Value::object(vec![

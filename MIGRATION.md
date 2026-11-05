@@ -231,7 +231,7 @@ Full-mode names run in 2.0.1 by calling the tool in the replacement column. Anno
 - `doctor.db_health.recent_operations_1h`, `recent_failures_1h`, `busy_ratio`, and `recommended_action` are counted from MCP tool results in this process (`busy_ratio` under 0.01 is `idle`, under 0.1 is `vacuum`, otherwise `rebuild_symbols`). 1.5.2 counts rows in the SQLite `operation_log`, including internal writes.
 - `get_relevant_kv` `relevance_score` matches 1.5.2 to 5 decimal places. The signature bytes match; the last bits of the cosine move with f32 packing.
 
-- `llm_embed` without `chunk_id` is an MCP tool error (`isError` true). The text is `Input validation error: 'chunk_id' is a required property`, which is what the 1.5.2 stdio server returns before the function runs. A call with no `text` is `Input validation error: 'text' is a required property`.
+- `llm_embed` without `chunk_id` is an MCP tool error (`isError` true). The text is `{"error": "_IndexMixin.llm_embed() missing 1 required positional argument: 'chunk_id'"}`. A call with neither `text` nor `chunk_id` names both arguments. An MCP SDK that validates the schema before the call can replace this with its own sentence; 1.5.2's handler, which is what current `mcp` 2.x runs, returns the TypeError.
 - `agent_grep` with `path_prefix` returns `{"error": "_SearchMixin.agent_grep() got an unexpected keyword argument 'path_prefix'"}`. 1.5.2's function does not take that argument. The stdio result is not marked `isError`.
 - Keyword `relevance_score` uses 1.5.2 BM25 over chunks with non-empty content, the proximity nudge, and the same identifier split (`renderWidget` contributes `render`, `widget`, and `renderwidget`). An empty file such as `__init__.py` is stored as a chunk and is left out of the keyword index.
 
@@ -283,7 +283,7 @@ Stdio attaches the 1.5.2 hint string when `impact_radius` has `affected_chunks` 
 | Video | intentional change | One line, `video <ext> bytes <len> header <brand>` (`mp4`, `webm`, `avi`, or `unknown`). No frames. |
 | PDF text vs PyMuPDF | same merge rule | One chunk per page that has text, then adjacent pages merge when the signature cosine clears 0.75 and the combined tokens fit in `max_chunk_size`. A blank page is not a chunk, and it still occupies its page slot: the next page keeps `[Page N]` and `end_pos` of `N * 1000`. A long page next to a short page still merges with that neighbour when those two tests pass. Text is `[Page N]` plus literal and hex strings, with a trailing newline. Layout, fonts, and reading order can still differ from PyMuPDF. |
 | PDF that does not start with `%PDF` | intentional change | One chunk, `pdf bytes <len>`. |
-| PDF with no text streams | intentional change | One chunk, `pdf pages 0 bytes <len>`. |
+| PDF whose pages are all blank | same empty chunk | One chunk, content `""`, 1 token, `start_pos` 0, `end_pos` 0. It is not added to the keyword index. |
 | Tree-sitter chunking | not supported | Boundaries are the 1.5.2 regex path (tree-sitter absent), and the Python definition spans for `.py`, `.pyw`, and `.pyx`. A 1.5 install that had the `tree-sitter` extra can split JS, TS, Java, C, C++, Go, Rust, Ruby, PHP, and Swift differently. |
 | numpy signatures | not supported | Goldens are the zero-dependency f32 path. A 1.5 index built with numpy loaded can differ in the signature blob. Re-index to get the 2.0 signature. |
 
@@ -301,13 +301,11 @@ These are reported as null or zero on purpose. The store is JSON, so there is no
 | `db_health.busy_timeout_ms` | null | 1.5.2 reads the connection busy timeout. |
 | `db_health.wal_size_bytes` | size of `stele_context.db-wal`, or 0 | There is no WAL. 1.5.2 reports the SQLite WAL file. |
 | `db_health.database_size_bytes` | snapshot + journal + `signatures.bin` + `bm25.bin` | Not `page_count * page_size`. |
-| `index.max_level` | 0 | The graph is not an HNSW. 1.5.2 reports the entry level. |
-| `index.avg_connections` | 0 | Same reason. 1.5.2 averages neighbour lists. |
-| `search_quality.hnsw_span` | 0 | There is no HNSW layer span to measure. |
-| `doctor.python` | null | No interpreter is started. |
-| `stats.storage.kv_cache_size_bytes` | UTF-8 payload size | 1.5.2 sums zlib files under the kv directory. |
+| `store_embedding` argument `embedding` | alias | 1.5.2 rejects `embedding` before inserting a vector, so its `insert_count` does not move. Rust accepts the alias, stores the vector, and `insert_count` grows by one when another node is already in the graph. Calls that pass `vector` follow the same insert rules as 1.5.2. |
 
-`insert_count` is not in this table. It counts vector inserts and is meant to match 1.5.2.
+`index.max_level` and `index.avg_connections` come from the HNSW graph (`M` 16, level `random() < 1/ln(16)`). They vary from run to run, the same way 1.5.2 does. `search_quality.hnsw_span` is `max - min` of `search([0.1] * 128, k=10)`, rounded to 4 decimal places. `doctor.python` is the first word of `sys.version`. The lookup starts when the process starts, not inside the doctor call. `kv_cache_size_bytes` is the sum of the zlib files under `kv_cache/`, each one `zlib.compress` of `json.dumps` for that chunk.
+
+`insert_count` counts vector inserts the way 1.5.2's HNSW does. The first node is not counted. Replacing an existing id is not counted. A later add, including a summary or an embedding stored under the real parameter name, is counted.
 
 ## Removed and added
 
