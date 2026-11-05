@@ -52,6 +52,8 @@ pub struct Engine {
     /// 1.5.2 has no project root: document paths are absolute and
     /// `project_root` is null.
     rooted: bool,
+    /// `project_root` as 1.5.2 prints it (`Path.cwd().resolve()`).
+    root_text: std::cell::OnceCell<String>,
     server_agent: String,
     file_reads: Vec<(String, String, Vec<String>, f64)>,
     operations: u64,
@@ -61,7 +63,6 @@ pub struct Engine {
 impl Engine {
     pub fn open(storage_flag: Option<&Path>) -> Result<Engine, String> {
         let cwd = std::env::current_dir().map_err(|err| format!("cwd: {err}"))?;
-        let cwd = crate::root::resolved(&cwd);
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
@@ -69,7 +70,6 @@ impl Engine {
     }
 
     pub fn open_from(cwd: PathBuf, storage_flag: Option<&Path>) -> Result<Engine, String> {
-        let cwd = crate::root::resolved(&cwd);
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
@@ -79,7 +79,6 @@ impl Engine {
     /// Open for `detect`. Document rows are enough while every indexed file
     /// still matches mtime and size.
     pub fn open_detect(cwd: PathBuf, storage_flag: Option<&Path>) -> Result<Engine, String> {
-        let cwd = crate::root::resolved(&cwd);
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         let storage = resolve_storage_dir(storage_flag, &loaded, root.as_deref())?;
@@ -87,7 +86,6 @@ impl Engine {
     }
 
     pub fn open_at(cwd: PathBuf, storage: PathBuf) -> Result<Engine, String> {
-        let cwd = crate::root::resolved(&cwd);
         let root = detect_project_root(&cwd);
         let loaded = config::load(root.as_deref());
         Self::finish(cwd, storage, loaded, false, root.is_some())
@@ -100,6 +98,14 @@ impl Engine {
         documents_only: bool,
         rooted: bool,
     ) -> Result<Engine, String> {
+        // Without a root, document paths are absolute, so they need 1.5.2's
+        // resolved form now. With one, only project_root's text does, and
+        // that is resolved when it is first printed.
+        let cwd = if rooted {
+            cwd
+        } else {
+            crate::root::resolved(&cwd)
+        };
         let legacy = storage.join("stele_context.db");
         let documents_only = documents_only && !legacy.is_file();
         let mut store = if documents_only {
@@ -135,6 +141,7 @@ impl Engine {
             max_history_entries: loaded.max_history_entries.unwrap_or(1000),
             documents_only,
             rooted,
+            root_text: std::cell::OnceCell::new(),
             server_agent: String::new(),
             file_reads: Vec::new(),
             operations: 0,
@@ -163,7 +170,10 @@ impl Engine {
         if self.server_agent.is_empty() {
             return;
         }
-        let root = self.cwd.display().to_string();
+        let root = self
+            .root_text
+            .get_or_init(|| crate::root::resolved(&self.cwd).display().to_string())
+            .clone();
         crate::locks::register_agent(&self.cwd, &self.server_agent, &root);
     }
 
@@ -1439,7 +1449,10 @@ impl Engine {
 
     pub(crate) fn project_root_value(&self) -> Value {
         if self.rooted {
-            Value::string(self.cwd.display().to_string())
+            Value::string(
+                self.root_text
+                    .get_or_init(|| crate::root::resolved(&self.cwd).display().to_string()),
+            )
         } else {
             Value::Null
         }
