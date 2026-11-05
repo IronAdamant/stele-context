@@ -9,6 +9,9 @@
 mod inflate;
 mod pdf;
 
+#[cfg(test)]
+pub(crate) use inflate::zlib_decode;
+
 use crate::chunk::{content_sha256, estimate_tokens, signature_f32_hex, Produced};
 
 pub fn is_media(ext: &str) -> bool {

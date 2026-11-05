@@ -7,8 +7,6 @@ use crate::root::{detect_project_root, resolve_storage_dir};
 use crate::VERSION;
 use std::fs;
 use std::path::Path;
-use std::time::SystemTime;
-
 pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
@@ -24,6 +22,7 @@ pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
             );
         }
     };
+    let cwd = crate::root::resolved(&cwd);
     let project_root = detect_project_root(&cwd);
     let config = Config::load_at(project_root.as_deref());
     let storage = match resolve_storage_dir(storage_flag, &config, project_root.as_deref()) {
@@ -38,23 +37,42 @@ pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
     };
     let legacy = storage.join("stele_context.db").is_file();
     let snapshot_path = storage.join("store").join("snapshot.json");
+    if legacy && !snapshot_path.is_file() {
+        let _ = crate::engine::Engine::open_at(cwd.clone(), storage.clone());
+    }
     let native = snapshot_path.is_file();
     let parsed = read_snapshot(&snapshot_path);
-    let mut steps = Vec::new();
-    if legacy {
+    let mut steps: Vec<String> = Vec::new();
+    let migrated = storage.join("store").join("migrated-from.txt").is_file();
+    let migrate_error = fs::read_to_string(storage.join("store").join("migrate-error.txt")).ok();
+    if let Some(err) = migrate_error.as_ref() {
+        steps.push(format!(
+            "migrate failed and the original stele_context.db was not modified: {err}"
+        ));
+    } else if legacy && migrated {
         steps.push(
-            "A Python 1.5.x stele_context.db is in the storage directory. It was left untouched. migrate is not in this build.",
+            "A Python 1.5.x stele_context.db was copied into the native store. The original database was not modified.".to_string(),
+        );
+    } else if legacy && native {
+        steps.push(
+            "A Python 1.5.x stele_context.db is present and was left untouched because a native store already has documents.".to_string(),
+        );
+    } else if legacy {
+        steps.push(
+            "A Python 1.5.x stele_context.db is present. Opening the store copies it into snapshot.json. The original database is not modified.".to_string(),
         );
     }
     if native && parsed.error.is_none() {
-        steps.push("A native store is present. snapshot.json parsed.");
+        steps.push("A native store is present. snapshot.json parsed.".to_string());
     } else if parsed.error.is_some() {
-        steps.push("snapshot.json did not parse. The native store was left untouched.");
+        steps.push("snapshot.json did not parse. The native store was left untouched.".to_string());
     } else {
-        steps.push("No 2.0 store yet. Index a directory to create the native store.");
+        steps.push("No 2.0 store yet. Index a directory to create the native store.".to_string());
     }
-    steps
-        .push("Image, audio, and video chunks are metadata. PDF text is the uncompressed streams.");
+    steps.push(
+        "Image, audio, and video chunks are metadata. PDF text is the uncompressed streams."
+            .to_string(),
+    );
     if human {
         let root = project_root
             .as_ref()
@@ -84,12 +102,12 @@ pub fn report(storage_flag: Option<&Path>, human: bool) -> Response {
         ("native_store_present", Value::Bool(native)),
         ("legacy_sqlite_present", Value::Bool(legacy)),
         ("stele_version", Value::string(VERSION)),
-        ("python", Value::Null),
+        ("python", crate::engine::host_python()),
         ("document_count", Value::Int(parsed.documents)),
         ("chunk_count", Value::Int(parsed.chunks)),
         ("index_health", parsed.index_health(&storage)),
         ("db_health", parsed.db_health(&storage)),
-        ("search_quality", parsed.search_quality()),
+        ("search_quality", parsed.search_quality(&storage)),
         (
             "environment",
             Value::object(vec![
@@ -121,8 +139,11 @@ struct ParsedStore {
     symbols: i64,
     tokens: i64,
     tier2: i64,
+    latest: f64,
     error: Option<String>,
     paths: Vec<String>,
+    /// Chunk ids with their agent vectors (empty when none), in store order.
+    vectors: Vec<(String, Vec<f32>)>,
 }
 
 fn read_snapshot(path: &Path) -> ParsedStore {
@@ -132,8 +153,10 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         symbols: 0,
         tokens: 0,
         tier2: 0,
+        latest: 0.0,
         error: None,
         paths: Vec::new(),
+        vectors: Vec::new(),
     };
     if !path.is_file() {
         return empty;
@@ -157,26 +180,54 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         }
     };
     let documents = array_len(&value, "documents");
-    let symbols = array_len(&value, "symbols");
+    let mut symbols = array_len(&value, "symbols");
     let chunk_rows = match field(&value, "chunks") {
         Some(Value::Array(rows)) => rows.as_slice(),
         _ => &[],
     };
     let mut tokens = 0i64;
     let mut tier2 = 0i64;
+    let mut vectors = Vec::with_capacity(chunk_rows.len());
     for chunk in chunk_rows {
+        let lanes: Vec<f32> = match field(chunk, "embedding") {
+            Some(Value::Array(rows)) => rows
+                .iter()
+                .map(|lane| match lane {
+                    Value::Float(number) => *number as f32,
+                    Value::Int(number) => *number as f32,
+                    _ => 0.0,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let id = match field(chunk, "id") {
+            Some(Value::String(text)) => text.clone(),
+            _ => String::new(),
+        };
+        vectors.push((id, lanes));
         tokens += int_field(chunk, "tokens");
-        if field(chunk, "summary").is_some_and(|item| !matches!(item, Value::Null)) {
+        // Tier 2 is a summary or a stored embedding (1.5.2 agent_signature).
+        let summary = field(chunk, "summary").is_some_and(|item| !matches!(item, Value::Null));
+        let embedding = field(chunk, "embedding").is_some_and(|item| {
+            matches!(item, Value::Array(rows) if !rows.is_empty())
+                || matches!(item, Value::String(text) if !text.is_empty())
+        });
+        if summary || embedding {
             tier2 += 1;
         }
     }
     let mut paths = Vec::new();
+    let mut latest = 0.0f64;
     if let Some(Value::Array(rows)) = field(&value, "documents") {
         for document in rows {
             if let Some(Value::String(path)) = field(document, "path") {
                 paths.push(path.clone());
             }
+            latest = latest.max(float_field(document, "indexed_at"));
         }
+    }
+    if let Some(Value::Array(rows)) = field(&value, "dynamic") {
+        symbols += rows.len();
     }
     ParsedStore {
         documents: documents as i64,
@@ -184,8 +235,10 @@ fn read_snapshot(path: &Path) -> ParsedStore {
         symbols: symbols as i64,
         tokens,
         tier2,
+        latest,
         error: None,
         paths,
+        vectors,
     }
 }
 
@@ -221,11 +274,6 @@ impl ParsedStore {
                     .to_string(),
             );
         }
-        let latest = fs::metadata(storage.join("store").join("snapshot.json"))
-            .ok()
-            .and_then(|meta| meta.modified().ok())
-            .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_secs() as i64);
         Value::object(vec![
             ("documents", Value::Int(self.documents)),
             ("chunks", Value::Int(self.chunks)),
@@ -233,7 +281,11 @@ impl ParsedStore {
             ("symbols_ready", Value::Bool(self.symbols > 0)),
             (
                 "latest_indexed_at",
-                latest.map(Value::Int).unwrap_or(Value::Null),
+                if self.latest > 0.0 {
+                    Value::Float(self.latest)
+                } else {
+                    Value::Null
+                },
             ),
             ("storage_dir", Value::string(storage.display().to_string())),
             ("symbol_graph_status", Value::string(symbol_graph_status)),
@@ -264,7 +316,7 @@ impl ParsedStore {
                 ]),
             ),
             ("growth_alerts", Value::Array(alerts)),
-            ("journal_mode", Value::string("json-snapshot")),
+            ("journal_mode", Value::Null),
             ("synchronous", Value::Null),
             ("page_count", Value::Null),
             ("page_size", Value::Null),
@@ -272,7 +324,10 @@ impl ParsedStore {
                 "database_size_bytes",
                 Value::Int((snapshot + journal + sigs) as i64),
             ),
-            ("wal_size_bytes", Value::Int(0)),
+            (
+                "wal_size_bytes",
+                Value::Int(file_len(&storage.join("stele_context.db-wal")) as i64),
+            ),
             ("wal_autocheckpoint", Value::Null),
             ("busy_timeout_ms", Value::Null),
             ("recent_operations_1h", Value::Int(0)),
@@ -289,7 +344,7 @@ impl ParsedStore {
         ])
     }
 
-    fn search_quality(&self) -> Value {
+    fn search_quality(&self, storage: &Path) -> Value {
         let coverage = if self.chunks == 0 {
             0.0
         } else {
@@ -306,7 +361,7 @@ impl ParsedStore {
             ("total_chunks", Value::Int(self.chunks)),
             ("tier2_chunks", Value::Int(self.tier2)),
             ("tier2_coverage_percent", Value::Float(coverage)),
-            ("hnsw_span", Value::Float(0.0)),
+            ("hnsw_span", Value::Float(hnsw_span(storage, &self.vectors))),
             ("advice", advice.map(Value::string).unwrap_or(Value::Null)),
         ])
     }
@@ -329,6 +384,47 @@ fn file_len(path: &Path) -> u64 {
     fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
 }
 
+/// The engine's cached graph numbers when they match this snapshot, else a
+/// graph built from the agent vectors and `signatures.bin`.
+fn hnsw_span(storage: &Path, vectors: &[(String, Vec<f32>)]) -> f64 {
+    let fingerprint = crate::engine::graph_fingerprint_of(
+        vectors
+            .iter()
+            .map(|(id, lanes)| (id.as_str(), lanes.as_slice())),
+    );
+    let cache = storage.join("store").join("hnsw_stats.json");
+    if vectors.len() >= crate::engine::GRAPH_CACHE_MIN {
+        if let Some((_, _, span)) = crate::engine::read_graph_stats(&cache, &fingerprint) {
+            return span;
+        }
+    }
+    let count = vectors.len();
+    let bytes = std::fs::read(storage.join("store").join("signatures.bin")).unwrap_or_default();
+    if count == 0 {
+        return 0.0;
+    }
+    let mut graph = crate::search::Hnsw::new();
+    for (index, (id, lanes)) in vectors.iter().enumerate() {
+        let vector = if !lanes.is_empty() {
+            lanes.clone()
+        } else if bytes.len() >= (index + 1) * 128 * 4 {
+            let start = index * 128 * 4;
+            (0..128)
+                .map(|lane| {
+                    let offset = start + lane * 4;
+                    let mut buf = [0u8; 4];
+                    buf.copy_from_slice(&bytes[offset..offset + 4]);
+                    f32::from_le_bytes(buf)
+                })
+                .collect()
+        } else {
+            vec![0.0; 128]
+        };
+        graph.insert(id, vector);
+    }
+    graph.probe_span()
+}
+
 fn array_len(value: &Value, key: &str) -> usize {
     match field(value, key) {
         Some(Value::Array(rows)) => rows.len(),
@@ -340,6 +436,14 @@ fn int_field(value: &Value, key: &str) -> i64 {
     match field(value, key) {
         Some(Value::Int(number)) => *number,
         _ => 0,
+    }
+}
+
+fn float_field(value: &Value, key: &str) -> f64 {
+    match field(value, key) {
+        Some(Value::Float(number)) => *number,
+        Some(Value::Int(number)) => *number as f64,
+        _ => 0.0,
     }
 }
 

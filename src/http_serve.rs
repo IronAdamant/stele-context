@@ -120,8 +120,7 @@ fn health(engine: &std::sync::Mutex<Engine>) -> Value {
 }
 
 fn tools() -> Value {
-    json::parse(include_str!("mcp/http_tools.json"))
-        .unwrap_or_else(|_| Value::object(vec![("error", Value::string("tool schemas"))]))
+    mcp::tools_document()
 }
 
 fn call(engine: &std::sync::Mutex<Engine>, body: &str) -> (u16, Value) {
@@ -160,17 +159,51 @@ fn call(engine: &std::sync::Mutex<Engine>, body: &str) -> (u16, Value) {
             ]),
         );
     }
-    match mcp::dispatch(&mut engine, &tool, &params) {
-        Ok(result) => (
+    // 1.5.2 `execute_tool`: a TypeError from binding is "Invalid
+    // parameters", any other exception is "Tool execution failed" with the
+    // self-healing hint, and a result that needs guidance carries the hint
+    // both on the envelope and inside the result.
+    if let Err(message) = mcp::bind_args(&tool, &params, true) {
+        return (
             200,
-            Value::object(vec![("success", Value::Bool(true)), ("result", result)]),
-        ),
-        Err(message) => (200, Value::object(vec![("error", Value::string(message))])),
+            Value::object(vec![(
+                "error",
+                Value::string(format!("Invalid parameters for {tool}: {message}")),
+            )]),
+        );
+    }
+    match mcp::dispatch(&mut engine, &tool, &params) {
+        Ok(mut result) => {
+            let hint = mcp::result_hint(&tool, &result);
+            let mut pairs = vec![("success".to_string(), Value::Bool(true))];
+            if let Some(hint) = hint {
+                if let Value::Object(fields) = &mut result {
+                    if !fields.iter().any(|(key, _)| key == "hint") {
+                        fields.push(("hint".to_string(), Value::string(hint)));
+                    }
+                }
+                pairs.push(("result".to_string(), result));
+                pairs.push(("hint".to_string(), Value::string(hint)));
+            } else {
+                pairs.push(("result".to_string(), result));
+            }
+            (200, Value::Object(pairs))
+        }
+        Err(message) => {
+            let mut pairs = vec![(
+                "error".to_string(),
+                Value::string(format!("Tool execution failed: {message}")),
+            )];
+            if let Some(hint) = mcp::healing_hint(&tool, &message.to_lowercase()) {
+                pairs.push(("hint".to_string(), Value::string(hint)));
+            }
+            (200, Value::Object(pairs))
+        }
     }
 }
 
 fn known_tool(name: &str) -> bool {
-    mcp::lite_tools().contains(&name)
+    mcp::tool_known(name)
 }
 
 fn http(status: u16, body: &str) -> String {

@@ -5,13 +5,58 @@ use crate::hash::{hex, sha256};
 use crate::json::Value;
 use crate::search::{self, VectorDoc};
 use crate::store::{Annotation, Dynamic, Session};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+fn cosine_stored(query: &[f64], stored: &[f32]) -> f64 {
+    // 1.5.2 scores the f64 query signature against the f32 vector on disk.
+    let mut dot = 0.0f64;
+    let mut left_norm = 0.0f64;
+    let mut right_norm = 0.0f64;
+    for (a, b) in query.iter().zip(stored.iter()) {
+        let b = f64::from(*b);
+        dot += a * b;
+        left_norm += a * a;
+        right_norm += b * b;
+    }
+    if left_norm > 0.0 && right_norm > 0.0 {
+        dot / (left_norm.sqrt() * right_norm.sqrt())
+    } else {
+        0.0
+    }
+}
 
 impl Engine {
     pub fn search(&mut self, query: &str, mode: &str, top_k: usize) -> Value {
+        self.search_full(query, mode, top_k, None, false, None, false)
+    }
+
+    /// 1.5.2 `search_unlocked`. With a path prefix the ranked list is
+    /// `top_k * 10` long before the prefix filter. Query identifiers that
+    /// name a definition add `symbol_boost` rows at 0.85 of the last score,
+    /// the proximity nudge re-sorts, and `compact` / `max_result_tokens`
+    /// trim the bodies (`return_response_meta` wraps them with `meta`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_full(
+        &mut self,
+        query: &str,
+        mode: &str,
+        top_k: usize,
+        path_prefix: Option<&str>,
+        compact: bool,
+        max_result_tokens: Option<i64>,
+        return_meta: bool,
+    ) -> Value {
+        let mode = mode.trim().to_lowercase();
+        let hybrid = mode == "hybrid";
         self.ensure_bm25();
         let top_k = top_k.max(1);
-        let hits = if mode == "hybrid" {
+        let rank_limit = if path_prefix.is_some() {
+            top_k * 10
+        } else {
+            top_k
+        };
+        let hits = if hybrid {
+            self.store.ensure_sigs();
             let docs: Vec<VectorDoc> = self
                 .store
                 .state
@@ -20,157 +65,1037 @@ impl Engine {
                 .enumerate()
                 .map(|(index, chunk)| VectorDoc {
                     id: &chunk.id,
-                    values: self
-                        .store
-                        .state
-                        .sigs
-                        .get(index)
-                        .map(|sig| sig.as_slice())
-                        .unwrap_or(&[]),
-                    tier2: chunk.summary.is_some(),
+                    // 1.5.2's graph holds the agent signature when one was
+                    // written, else the chunk signature.
+                    values: if chunk.embedding.is_empty() {
+                        self.store
+                            .state
+                            .sigs
+                            .get(index)
+                            .map(|sig| sig.as_slice())
+                            .unwrap_or(&[])
+                    } else {
+                        chunk.embedding.as_slice()
+                    },
+                    tier2: chunk.has_tier2(),
                 })
                 .collect();
-            search::hybrid(&self.bm25, &docs, query, top_k)
+            search::hybrid_ranked(
+                &self.bm25,
+                &docs,
+                query,
+                top_k,
+                rank_limit,
+                self.search_alpha,
+            )
         } else {
-            search::keyword(&self.bm25, query, top_k)
+            search::keyword(&self.bm25, query, rank_limit)
         };
-        Value::object(vec![("results", Value::Array(self.rows(&hits)))])
+        if hits.is_empty() {
+            return Value::Array(Vec::new());
+        }
+        let mut rows = self.rows(&hits, hybrid);
+        if !hybrid {
+            // Keyword scores are BM25 divided by the best candidate.
+            let max = rows.iter().map(score_of).fold(0.0_f64, f64::max);
+            if max > 0.0 {
+                for row in rows.iter_mut() {
+                    let score = score_of(row) / max;
+                    set_score(row, score);
+                }
+            }
+        }
+        let idents = py_query_identifiers(query);
+        if !idents.is_empty() {
+            self.symbol_boost(&mut rows, &idents, path_prefix, hybrid);
+            sort_by_score(&mut rows);
+            rows.truncate(top_k);
+        }
+        let mut terms = proximity_terms(query);
+        if terms.is_empty() {
+            terms = idents.iter().map(|ident| ident.to_lowercase()).collect();
+        }
+        if !rows.is_empty() && !terms.is_empty() {
+            apply_proximity(&mut rows, &terms);
+            sort_by_score(&mut rows);
+            rows.truncate(top_k);
+        }
+        if let Some(prefix) = path_prefix {
+            rows.retain(|row| {
+                self.under_prefix(
+                    Some(prefix),
+                    &crate::store::string_field(row, "document_path"),
+                )
+            });
+            rows.truncate(top_k);
+        }
+        if !(return_meta || max_result_tokens.is_some() || compact) {
+            return Value::Array(rows);
+        }
+        let total = rows.len() as i64;
+        let budget = max_result_tokens.unwrap_or(i64::MAX);
+        let mut used = 0i64;
+        let mut out = Vec::new();
+        for row in rows {
+            let Value::Object(mut pairs) = row else {
+                continue;
+            };
+            let content = pairs
+                .iter()
+                .find(|(key, _)| key == "content")
+                .map(|(_, value)| match value {
+                    Value::String(text) => text.clone(),
+                    _ => String::new(),
+                })
+                .unwrap_or_default();
+            let piece = if compact {
+                let preview = if content.chars().count() > 400 {
+                    let mut text: String = content.chars().take(400).collect();
+                    text.push('\u{2026}');
+                    text
+                } else {
+                    content.clone()
+                };
+                let piece = crate::chunk::estimate_tokens(&preview) as i64 + 32;
+                pairs.push(("content_preview".to_string(), Value::string(preview)));
+                pairs.push((
+                    "content_token_estimate".to_string(),
+                    Value::Int(crate::chunk::estimate_tokens(&content) as i64),
+                ));
+                pairs.retain(|(key, _)| key != "content");
+                piece
+            } else {
+                crate::chunk::estimate_tokens(&content) as i64
+            };
+            if used.saturating_add(piece) > budget {
+                break;
+            }
+            used += piece;
+            out.push(Value::Object(pairs));
+        }
+        if return_meta {
+            let returned = out.len() as i64;
+            return Value::object(vec![
+                ("results", Value::Array(out)),
+                (
+                    "meta",
+                    Value::object(vec![
+                        ("total_results", Value::Int(total)),
+                        ("returned", Value::Int(returned)),
+                        ("truncated", Value::Bool(returned < total)),
+                        ("estimated_tokens_used", Value::Int(used)),
+                    ]),
+                ),
+            ]);
+        }
+        Value::Array(out)
+    }
+
+    /// 1.5.2 symbol-boosted search: definitions whose name equals a query
+    /// identifier (ASCII-lowercased, as SQLite `LOWER`) and that the ranking
+    /// missed.
+    fn symbol_boost(
+        &self,
+        rows: &mut Vec<Value>,
+        idents: &[String],
+        path_prefix: Option<&str>,
+        hybrid: bool,
+    ) {
+        let wanted: Vec<String> = idents.iter().map(|ident| ident.to_lowercase()).collect();
+        let mut existing: HashSet<String> = rows
+            .iter()
+            .map(|row| crate::store::string_field(row, "chunk_id"))
+            .collect();
+        let min_score = rows.last().map(score_of).unwrap_or(0.1);
+        let boost = (min_score * 0.85 * 10_000.0).round() / 10_000.0;
+        let mut seen: HashSet<(&str, &str, &str, &str)> = HashSet::new();
+        let mut added = Vec::new();
+        for sym in &self.store.state.symbols {
+            // SQLite LOWER(name) folds ASCII only.
+            if sym.role != "definition"
+                || !wanted
+                    .iter()
+                    .any(|want| sym.name.eq_ignore_ascii_case(want))
+            {
+                continue;
+            }
+            if !seen.insert((
+                sym.chunk_id.as_str(),
+                sym.name.as_str(),
+                sym.kind.as_str(),
+                sym.path.as_str(),
+            )) {
+                continue;
+            }
+            if existing.contains(&sym.chunk_id) {
+                continue;
+            }
+            let Some(chunk) = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .find(|chunk| chunk.id == sym.chunk_id)
+            else {
+                continue;
+            };
+            if path_prefix.is_some() && !self.under_prefix(path_prefix, &chunk.path) {
+                continue;
+            }
+            let mut pairs = vec![
+                ("chunk_id".to_string(), Value::string(&chunk.id)),
+                ("content".to_string(), Value::string(&chunk.content)),
+                ("document_path".to_string(), Value::string(&sym.path)),
+                ("relevance_score".to_string(), Value::Float(boost)),
+                ("token_count".to_string(), Value::Int(chunk.tokens as i64)),
+                ("start_pos".to_string(), Value::Int(chunk.start as i64)),
+                ("end_pos".to_string(), Value::Int(chunk.end as i64)),
+                ("symbol_match".to_string(), Value::string(&sym.name)),
+                ("source".to_string(), Value::string("symbol_boost")),
+                (
+                    "tier2_present".to_string(),
+                    Value::Bool(hybrid && chunk.has_tier2()),
+                ),
+            ];
+            if let Some(edges) = edge_block(&self.store.state.edges, &chunk.id) {
+                pairs.push(("edges".to_string(), edges));
+            }
+            existing.insert(chunk.id.clone());
+            added.push(Value::Object(pairs));
+        }
+        rows.extend(added);
     }
 
     pub fn search_text(&mut self, pattern: &str) -> Result<Value, String> {
+        self.text_search(pattern, false, None, 50, None, false)
+    }
+
+    pub fn text_search(
+        &mut self,
+        pattern: &str,
+        regex: bool,
+        document: Option<&str>,
+        limit: usize,
+        session: Option<&str>,
+        working_tree: bool,
+    ) -> Result<Value, String> {
+        if working_tree {
+            self.index_working_tree();
+        }
+        // 1.5.2 normalizes document_path like any other document path.
+        let normalized = document.map(|path| self.doc_path(path));
+        let document = normalized.as_deref();
         let mut rows = Vec::new();
-        let literal = is_literal(pattern);
-        for chunk in &self.store.state.chunks {
-            let hits = if literal {
-                literal_hits(pattern, &chunk.content)
-            } else {
+        let limit = limit.max(1);
+        // 1.5.2: `ORDER BY document_path, start_pos` (byte order).
+        let chunks = &self.store.state.chunks;
+        let mut order: Vec<usize> = (0..chunks.len()).collect();
+        let sorted = chunks.windows(2).all(|pair| {
+            (pair[0].path.as_str(), pair[0].start) <= (pair[1].path.as_str(), pair[1].start)
+        });
+        if !sorted {
+            order.sort_by(|left, right| {
+                let (a, b) = (&chunks[*left], &chunks[*right]);
+                (a.path.as_str(), a.start).cmp(&(b.path.as_str(), b.start))
+            });
+        }
+        for chunk in order.into_iter().map(|index| &chunks[index]) {
+            if document.is_some_and(|path| chunk.path != path) {
+                continue;
+            }
+            let hits = if regex {
                 search::text_matches(pattern, &chunk.content)?
+            } else {
+                literal_hits(pattern, &chunk.content)
             };
-            for (start, end) in hits {
-                rows.push(Value::object(vec![
-                    ("path", Value::string(&chunk.path)),
-                    ("chunk_id", Value::string(&chunk.id)),
-                    ("start", Value::Int(start as i64)),
-                    ("end", Value::Int(end as i64)),
-                    (
-                        "text",
-                        Value::string(slice_chars(&chunk.content, start, end)),
-                    ),
-                ]));
-                if rows.len() >= 100 {
-                    return Ok(Value::object(vec![("matches", Value::Array(rows))]));
-                }
+            if hits.is_empty() {
+                continue;
+            }
+            let matches: Vec<Value> = hits
+                .iter()
+                .take(10)
+                .map(|(start, end)| {
+                    Value::object(vec![
+                        ("start", Value::Int(*start as i64)),
+                        ("end", Value::Int(*end as i64)),
+                        (
+                            "text",
+                            Value::string(slice_chars(&chunk.content, *start, *end)),
+                        ),
+                    ])
+                })
+                .collect();
+            let preview: String = chunk.content.chars().take(200).collect();
+            rows.push(Value::object(vec![
+                ("chunk_id", Value::string(&chunk.id)),
+                ("document_path", Value::string(&chunk.path)),
+                ("match_count", Value::Int(hits.len() as i64)),
+                ("matches", Value::Array(matches)),
+                ("content_preview", Value::string(preview)),
+                ("token_count", Value::Int(chunk.tokens as i64)),
+            ]));
+            if rows.len() >= limit {
+                break;
             }
         }
-        Ok(Value::object(vec![("matches", Value::Array(rows))]))
-    }
-
-    pub fn agent_grep(&mut self, pattern: &str, session: Option<&str>) -> Result<Value, String> {
-        let found = self.search_text(pattern)?;
+        let files = {
+            let mut names = Vec::new();
+            for row in &rows {
+                let path = crate::store::string_field(row, "document_path");
+                if !names.iter().any(|have: &String| have == &path) {
+                    names.push(path);
+                }
+            }
+            names.sort();
+            names
+        };
+        let match_count: i64 = rows
+            .iter()
+            .map(|row| crate::store::int_field(row, "match_count"))
+            .sum();
         if let Some(session) = session {
-            self.note_search(session, pattern);
-            self.store.save("search", &Value::string(pattern))?;
+            // 1.5.2: files_checked is the one document when given, else the
+            // matched documents.
+            let checked = if document.is_some() {
+                1
+            } else {
+                files.len() as i64
+            };
+            let matched = files.len() as i64;
+            self.record_search_row(session, pattern, "search_text", checked, matched);
+            let files_owned = files.clone();
+            if !files_owned.is_empty() {
+                let _ = self.index(&files_owned, false);
+            }
         }
-        Ok(found)
-    }
-
-    pub fn query(&mut self, text: &str) -> Result<Value, String> {
-        let lexical = self.search(text, "keyword", 8);
-        let symbols = self.find_definition(text);
-        let grep = self
-            .search_text(text)
-            .unwrap_or_else(|error| Value::object(vec![("error", Value::string(error))]));
         Ok(Value::object(vec![
-            ("search", lexical),
-            ("definitions", symbols),
-            ("grep", grep),
+            ("pattern", Value::string(pattern)),
+            ("regex", Value::Bool(regex)),
+            ("match_count", Value::Int(match_count)),
+            ("chunk_count", Value::Int(rows.len() as i64)),
+            ("results", Value::Array(rows)),
+            ("files_checked", Value::Int(files.len() as i64)),
+            (
+                "files_with_matches",
+                Value::Array(files.into_iter().map(Value::String).collect()),
+            ),
         ]))
     }
 
-    pub fn find_definition(&self, name: &str) -> Value {
-        let defs: Vec<_> = self
-            .store
-            .state
-            .symbols
+    pub fn agent_grep(&mut self, pattern: &str, session: Option<&str>) -> Result<Value, String> {
+        self.grep_full(
+            pattern, false, None, true, true, "file", 4000, true, 0, session, false,
+        )
+    }
+
+    pub fn grep_full(
+        &mut self,
+        pattern: &str,
+        regex: bool,
+        document: Option<&str>,
+        classify: bool,
+        include_scope: bool,
+        group_by: &str,
+        max_tokens: i64,
+        deduplicate: bool,
+        context_lines: i64,
+        session: Option<&str>,
+        working_tree: bool,
+    ) -> Result<Value, String> {
+        if working_tree {
+            self.index_working_tree();
+        }
+        // 1.5.2 `agent_grep`: storage.search_text(limit=500), each match
+        // (the first 10 per chunk) is one entry, then duplicates collapse.
+        let found = self.text_search(pattern, regex, document, 500, None, false)?;
+        let results = match object_field(&found, "results") {
+            Some(Value::Array(rows)) => rows.clone(),
+            _ => Vec::new(),
+        };
+        let mut doc_paths: Vec<String> = results
             .iter()
-            .filter(|sym| sym.name == name && sym.role == "definition")
+            .map(|row| crate::store::string_field(row, "document_path"))
             .collect();
-        let shadow = defs.len().saturating_sub(1);
-        let mut rows: Vec<Value> = defs
-            .into_iter()
-            .enumerate()
-            .map(|(index, sym)| {
-                let mut row = symbol_json(sym);
-                if let Value::Object(pairs) = &mut row {
-                    pairs.push(("definition_index".to_string(), Value::Int(index as i64)));
-                    pairs.push(("shadowed".to_string(), Value::Bool(index > 0)));
-                    pairs.push(("shadow_count".to_string(), Value::Int(shadow as i64)));
-                }
-                row
-            })
-            .collect();
-        for sym in self
-            .store
-            .state
-            .dynamic
-            .iter()
-            .filter(|sym| sym.name == name)
-        {
-            rows.push(Value::object(vec![
-                ("name", Value::string(&sym.name)),
-                ("kind", Value::string(&sym.kind)),
-                ("role", Value::string("definition")),
-                ("path", Value::string(&sym.path)),
-                ("dynamic", Value::Bool(true)),
+        doc_paths.sort();
+        doc_paths.dedup();
+        if let Some(session) = session {
+            let count = doc_paths.len() as i64;
+            self.record_search_row(session, pattern, "agent_grep", count, count);
+            if !doc_paths.is_empty() {
+                let _ = self.index(&doc_paths, false);
+            }
+            let _ = self.store.save("search", &Value::string(pattern));
+        }
+        if results.is_empty() {
+            return Ok(Value::object(vec![
+                (
+                    "summary",
+                    Value::string(format!("0 matches for '{}'", truncate_chars(pattern, 40))),
+                ),
+                ("groups", Value::Array(Vec::new())),
+                ("total_matches", Value::Int(0)),
+                ("shown_matches", Value::Int(0)),
+                ("truncated", Value::Int(0)),
+                ("total_tokens", Value::Int(0)),
+                ("files_checked", Value::Int(0)),
+                ("files_with_matches", Value::Array(Vec::new())),
             ]));
         }
-        Value::object(vec![("definitions", Value::Array(rows))])
-    }
-
-    pub fn find_references(&self, name: &str) -> Value {
-        let rows = self
-            .store
-            .state
-            .symbols
-            .iter()
-            .filter(|sym| sym.name == name)
-            .map(symbol_json)
-            .collect();
-        Value::object(vec![("references", Value::Array(rows))])
-    }
-
-    pub fn impact(&self, symbol: &str) -> Value {
-        let seeds: Vec<String> = self
-            .store
-            .state
-            .symbols
-            .iter()
-            .filter(|sym| sym.name == symbol && sym.role == "definition")
-            .map(|sym| sym.chunk_id.clone())
-            .collect();
-        let hits = dependent_chunks(&self.store.state.edges, &seeds, 2);
-        let mut files = Vec::new();
-        for id in &hits {
-            if let Some(path) = chunk_path(&self.store.state, id) {
-                if !files.iter().any(|have| have == &path) {
-                    files.push(path);
+        // 1.5.2 `_compute_base_lines` over each matched document's chunks.
+        let mut base_lines: HashMap<&str, usize> = HashMap::new();
+        {
+            let mut by_doc: HashMap<&str, Vec<&crate::store::Chunk>> = HashMap::new();
+            for chunk in &self.store.state.chunks {
+                if doc_paths.binary_search(&chunk.path).is_ok() {
+                    by_doc.entry(chunk.path.as_str()).or_default().push(chunk);
+                }
+            }
+            for (_, mut siblings) in by_doc {
+                siblings.sort_by_key(|chunk| chunk.start);
+                let mut cumulative = 1usize;
+                for chunk in siblings {
+                    base_lines.insert(chunk.id.as_str(), cumulative);
+                    cumulative += chunk.content.matches('\n').count()
+                        + usize::from(!chunk.content.ends_with('\n'));
                 }
             }
         }
-        files.sort();
-        Value::object(vec![
-            ("symbol", Value::string(symbol)),
-            ("affected_files", Value::Int(files.len() as i64)),
-            ("affected_chunks", Value::Int(hits.len() as i64)),
+        let base_lines: HashMap<String, usize> = base_lines
+            .into_iter()
+            .map(|(id, line)| (id.to_string(), line))
+            .collect();
+        let mut enriched: Vec<Vec<(String, Value)>> = Vec::new();
+        let mut total = 0i64;
+        for row in &results {
+            let file = crate::store::string_field(row, "document_path");
+            let chunk_id = crate::store::string_field(row, "chunk_id");
+            let content = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .find(|chunk| chunk.id == chunk_id)
+                .map(|chunk| chunk.content.clone())
+                .unwrap_or_default();
+            let lines: Vec<&str> = content.split('\n').collect();
+            let base_line = base_lines.get(&chunk_id).copied().unwrap_or(1);
+            let hit_list = match object_field(row, "matches") {
+                Some(Value::Array(items)) => items.clone(),
+                _ => Vec::new(),
+            };
+            for hit in hit_list {
+                total += 1;
+                let start = crate::store::int_field(&hit, "start").max(0) as usize;
+                let line_idx = content.chars().take(start).filter(|ch| *ch == '\n').count();
+                let first = (line_idx as i64 - context_lines).max(0);
+                let end = (line_idx as i64 + 1 + context_lines).min(lines.len() as i64);
+                let excerpt = if first < end {
+                    lines[first as usize..end as usize].join("\n")
+                } else {
+                    String::new()
+                };
+                let match_line = lines.get(line_idx).copied().unwrap_or("");
+                let mut entry = vec![
+                    ("file".to_string(), Value::string(&file)),
+                    (
+                        "line".to_string(),
+                        Value::Int((base_line + line_idx) as i64),
+                    ),
+                    ("excerpt".to_string(), Value::string(excerpt)),
+                ];
+                if include_scope {
+                    let scope = scope_for(self, &chunk_id, (line_idx + 1) as u32);
+                    entry.push((
+                        "scope".to_string(),
+                        if scope.is_empty() {
+                            Value::Null
+                        } else {
+                            Value::string(scope)
+                        },
+                    ));
+                }
+                if classify {
+                    entry.push((
+                        "classification".to_string(),
+                        Value::string(classify_line(match_line)),
+                    ));
+                }
+                enriched.push(entry);
+            }
+        }
+        let mut dedup_count = 0i64;
+        if deduplicate {
+            // Python dict order: one bucket per normalised excerpt, in first
+            // appearance order. More than two copies collapse into the first.
+            let mut buckets: Vec<Vec<Vec<(String, Value)>>> = Vec::new();
+            let mut slot: HashMap<String, usize> = HashMap::new();
+            for entry in enriched {
+                let key = py_split_join(&entry_text(&entry, "excerpt"));
+                match slot.get(&key) {
+                    Some(index) => buckets[*index].push(entry),
+                    None => {
+                        slot.insert(key, buckets.len());
+                        buckets.push(vec![entry]);
+                    }
+                }
+            }
+            let mut deduped = Vec::new();
+            for bucket in buckets {
+                if bucket.len() > 2 {
+                    let mut first = bucket[0].clone();
+                    let first_file = entry_text(&first, "file");
+                    first.push(("also_in".to_string(), Value::Int(bucket.len() as i64 - 1)));
+                    let mut others: Vec<String> = bucket[1..]
+                        .iter()
+                        .map(|entry| entry_text(entry, "file"))
+                        .filter(|name| *name != first_file)
+                        .collect();
+                    others.sort();
+                    others.dedup();
+                    if !others.is_empty() {
+                        others.truncate(5);
+                        first.push((
+                            "also_in_files".to_string(),
+                            Value::Array(others.into_iter().map(Value::String).collect()),
+                        ));
+                    }
+                    dedup_count += bucket.len() as i64 - 1;
+                    deduped.push(first);
+                } else {
+                    deduped.extend(bucket);
+                }
+            }
+            enriched = deduped;
+        }
+        let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
+        for entry in enriched {
+            let key = match group_by {
+                "scope" => match entry.iter().find(|(key, _)| key == "scope") {
+                    Some((_, Value::String(text))) if !text.is_empty() => text.clone(),
+                    _ => "(top-level)".to_string(),
+                },
+                "classification" => match entry.iter().find(|(key, _)| key == "classification") {
+                    Some((_, Value::String(text))) if !text.is_empty() => text.clone(),
+                    _ => "code".to_string(),
+                },
+                _ => entry_text(&entry, "file"),
+            };
+            let item = Value::Object(entry);
+            if let Some(group) = groups.iter_mut().find(|(name, _)| name == &key) {
+                group.1.push(item);
+            } else {
+                groups.push((key, vec![item]));
+            }
+        }
+        let budget = (max_tokens - 150).max(200);
+        let mut shown = 0i64;
+        let mut tokens = 0i64;
+        let mut kept = Vec::new();
+        for (key, rows) in groups {
+            let cost = group_tokens(&key, &rows) as i64;
+            if tokens + cost > budget && !kept.is_empty() {
+                break;
+            }
+            tokens += cost;
+            shown += rows.len() as i64;
+            kept.push(Value::object(vec![
+                ("key", Value::string(key)),
+                ("count", Value::Int(rows.len() as i64)),
+                ("matches", Value::Array(rows)),
+            ]));
+        }
+        let truncated = total - shown - dedup_count;
+        let file_count = doc_paths.len();
+        let mut summary = format!(
+            "{total} match{} in {file_count} file{}",
+            if total == 1 { "" } else { "es" },
+            if file_count == 1 { "" } else { "s" }
+        );
+        if dedup_count > 0 {
+            summary.push_str(&format!(" ({dedup_count} duplicates collapsed)"));
+        }
+        if truncated > 0 {
+            summary.push_str(&format!(" (showing {shown}, ~{tokens} tokens)"));
+        }
+        Ok(Value::object(vec![
+            ("summary", Value::string(summary)),
+            ("groups", Value::Array(kept)),
+            ("total_matches", Value::Int(total)),
+            ("shown_matches", Value::Int(shown)),
+            ("truncated", Value::Int(truncated.max(0))),
+            ("total_tokens", Value::Int(tokens)),
+            ("files_checked", Value::Int(file_count as i64)),
             (
-                "affected",
-                Value::Array(files.into_iter().map(Value::String).collect()),
+                "files_with_matches",
+                Value::Array(doc_paths.into_iter().map(Value::String).collect()),
+            ),
+        ]))
+    }
+
+    pub fn query(&mut self, text: &str) -> Result<Value, String> {
+        self.query_full(text, 10, None, false, None, "keyword", true, None)
+    }
+
+    /// 1.5.2 `Stele.query`: the search branch (with the caller's mode,
+    /// prefix and compact flag), definitions and references of the first
+    /// three query identifiers, then `agent_grep` with a 2000-token budget.
+    /// `sources` counts every merged row; `results` is the first `top_k`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn query_full(
+        &mut self,
+        text: &str,
+        top_k: usize,
+        path_prefix: Option<&str>,
+        working_tree: bool,
+        session: Option<&str>,
+        search_mode: &str,
+        compact: bool,
+        max_result_tokens: Option<i64>,
+    ) -> Result<Value, String> {
+        let requested_working_tree = working_tree;
+        let requested_prefix = path_prefix.map(str::to_string);
+        let mut working_tree = working_tree;
+        let mut auto_working_tree = false;
+        let mut auto_prefix = false;
+        let mut prefix = path_prefix.map(str::to_string);
+        if !working_tree && session.is_some_and(|id| !id.is_empty()) && self.git_dirty() {
+            working_tree = true;
+            auto_working_tree = true;
+        }
+        if prefix.is_none() && self.store.state.documents.len() > 500 {
+            let lower = text.to_lowercase();
+            let global = ["everywhere", "all files", "project-wide", "entire project"]
+                .iter()
+                .any(|word| lower.contains(word));
+            if !global {
+                prefix = self.recent_files_prefix();
+                auto_prefix = prefix.is_some();
+            }
+        }
+        if working_tree {
+            self.index_working_tree();
+        }
+        let mut results: Vec<Value> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let semantic = self.search_full(
+            text,
+            search_mode,
+            top_k,
+            prefix.as_deref(),
+            compact,
+            max_result_tokens,
+            max_result_tokens.is_some(),
+        );
+        let semantic = match semantic {
+            Value::Array(rows) => rows,
+            Value::Object(_) => match field_owned(&semantic, "results") {
+                Some(Value::Array(rows)) => rows,
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        for row in semantic {
+            let id = crate::store::string_field(&row, "chunk_id");
+            if id.is_empty() || !seen.insert(id) {
+                continue;
+            }
+            results.push(with_source(row, "semantic_search"));
+        }
+        let under = |path: &str| match prefix.as_deref() {
+            Some(p) if !p.is_empty() => path.starts_with(p),
+            _ => true,
+        };
+        for ident in py_query_identifiers(text).into_iter().take(3) {
+            let refs = self.find_references(&ident);
+            for key in ["definitions", "references"] {
+                let Some(Value::Array(rows)) = field_owned(&refs, key) else {
+                    continue;
+                };
+                for row in rows {
+                    let id = crate::store::string_field(&row, "chunk_id");
+                    let path = crate::store::string_field(&row, "document_path");
+                    if id.is_empty() || seen.contains(&id) || !under(&path) {
+                        continue;
+                    }
+                    seen.insert(id.clone());
+                    let Some(chunk) = self.store.state.chunks.iter().find(|chunk| chunk.id == id)
+                    else {
+                        continue;
+                    };
+                    let content: String = chunk.content.chars().take(300).collect();
+                    results.push(Value::object(vec![
+                        ("chunk_id", Value::string(&id)),
+                        ("document_path", Value::string(path)),
+                        ("content", Value::string(content)),
+                        ("source", Value::string("symbol_graph")),
+                        ("symbol", Value::string(&ident)),
+                    ]));
+                }
+            }
+        }
+        let grep = self.grep_full(
+            text, false, None, true, true, "file", 2000, true, 0, session, false,
+        );
+        if let Ok(grep) = grep {
+            if let Some(Value::Array(groups)) = field_owned(&grep, "groups") {
+                for group in groups {
+                    let Some(Value::Array(matches)) = field_owned(&group, "matches") else {
+                        continue;
+                    };
+                    for hit in matches {
+                        let file = crate::store::string_field(&hit, "file");
+                        if file.is_empty() || !under(&file) {
+                            continue;
+                        }
+                        let line = crate::store::int_field(&hit, "line");
+                        let Some(chunk) = self.chunk_for_line(&file, line) else {
+                            continue;
+                        };
+                        if !seen.insert(chunk.id.clone()) {
+                            continue;
+                        }
+                        let excerpt = crate::store::string_field(&hit, "excerpt");
+                        let content: String = excerpt.chars().take(300).collect();
+                        results.push(Value::object(vec![
+                            ("chunk_id", Value::string(&chunk.id)),
+                            ("document_path", Value::string(&file)),
+                            ("content", Value::string(content)),
+                            ("source", Value::string("text_match")),
+                        ]));
+                    }
+                }
+            }
+        }
+        let count = |name: &str| {
+            results
+                .iter()
+                .filter(|row| crate::store::string_field(row, "source") == name)
+                .count() as i64
+        };
+        let sources = Value::object(vec![
+            ("semantic_search", Value::Int(count("semantic_search"))),
+            ("symbol_graph", Value::Int(count("symbol_graph"))),
+            ("text_match", Value::Int(count("text_match"))),
+        ]);
+        let total = results.len();
+        let shown: Vec<Value> = results.into_iter().take(top_k).collect();
+        let opt = |value: Option<String>| value.map(Value::String).unwrap_or(Value::Null);
+        let mut out = vec![
+            ("query".to_string(), Value::string(text)),
+            ("results".to_string(), Value::Array(shown)),
+            ("sources".to_string(), sources),
+            (
+                "applied_defaults".to_string(),
+                Value::object(vec![
+                    ("working_tree", Value::Bool(working_tree)),
+                    ("working_tree_auto", Value::Bool(auto_working_tree)),
+                    (
+                        "working_tree_requested",
+                        Value::Bool(requested_working_tree),
+                    ),
+                    ("path_prefix", opt(prefix.clone())),
+                    ("path_prefix_auto", Value::Bool(auto_prefix)),
+                    ("path_prefix_requested", opt(requested_prefix)),
+                    ("search_mode", Value::string(search_mode)),
+                    ("compact", Value::Bool(compact)),
+                    ("session_id", opt(session.map(str::to_string))),
+                ]),
+            ),
+        ];
+        if total == 0 {
+            out.push((
+                "suggested_next".to_string(),
+                Value::Array(vec![
+                    Value::object(vec![
+                        ("action", Value::string("agent_grep")),
+                        (
+                            "detail",
+                            Value::string(
+                                "No hits — try agent_grep or search_text for exact tokens.",
+                            ),
+                        ),
+                    ]),
+                    Value::object(vec![
+                        ("action", Value::string("detect_changes")),
+                        (
+                            "detail",
+                            Value::string(
+                                "If files changed recently, run detect_changes / re-index.",
+                            ),
+                        ),
+                    ]),
+                    Value::object(vec![
+                        ("action", Value::string("enrich_tier2")),
+                        (
+                            "detail",
+                            Value::string(
+                                "For concept queries, check doctor.enrichment_preview and bulk_store_summaries.",
+                            ),
+                        ),
+                    ]),
+                ]),
+            ));
+        } else if total < 3.max(top_k / 2) {
+            out.push((
+                "suggested_next".to_string(),
+                Value::Array(vec![
+                    Value::object(vec![
+                        ("action", Value::string("agent_grep")),
+                        (
+                            "detail",
+                            Value::string(
+                                "Sparse results — confirm with agent_grep on key identifiers.",
+                            ),
+                        ),
+                    ]),
+                    Value::object(vec![
+                        ("action", Value::string("find_definition")),
+                        (
+                            "detail",
+                            Value::string("For symbols, use find_definition / find_references."),
+                        ),
+                    ]),
+                ]),
+            ));
+        }
+        Ok(Value::Object(out))
+    }
+
+    /// 1.5.2 `_git_working_tree_is_dirty`: `git status --porcelain` in the
+    /// project root printed something.
+    fn git_dirty(&self) -> bool {
+        std::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&self.cwd)
+            .output()
+            .map(|out| {
+                out.status.success() && !String::from_utf8_lossy(&out.stdout).trim().is_empty()
+            })
+            .unwrap_or(false)
+    }
+
+    /// 1.5.2 `_recent_files_path_prefix`: the common string prefix, cut back
+    /// at `/`, of the most recently indexed quarter of the documents.
+    fn recent_files_prefix(&self) -> Option<String> {
+        let mut docs: Vec<&crate::store::Document> = self.store.state.documents.iter().collect();
+        if docs.is_empty() {
+            return None;
+        }
+        docs.sort_by(|left, right| {
+            right
+                .indexed_at
+                .partial_cmp(&left.indexed_at)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let cutoff = (docs.len() / 4).max(1);
+        let paths: Vec<&str> = docs[..cutoff].iter().map(|doc| doc.path.as_str()).collect();
+        let mut prefix = paths[0].to_string();
+        for path in &paths[1..] {
+            while !path.starts_with(&prefix) {
+                match prefix.rfind('/') {
+                    Some(at) => prefix.truncate(at),
+                    None => prefix.clear(),
+                }
+                if prefix.is_empty() {
+                    break;
+                }
+            }
+        }
+        if prefix.is_empty() {
+            None
+        } else {
+            Some(prefix)
+        }
+    }
+
+    pub fn find_definition(&self, name: &str) -> Value {
+        let defs = self.definition_rows(name);
+        let count = defs.len() as i64;
+        Value::object(vec![
+            ("symbol", Value::string(name)),
+            ("definitions", Value::Array(defs)),
+            ("count", Value::Int(count)),
+            ("symbol_index", self.symbol_index()),
+            (
+                "guidance",
+                if count == 0 {
+                    Value::string(guidance_empty(&self.symbol_index()))
+                } else {
+                    Value::Null
+                },
             ),
         ])
     }
 
+    pub fn find_references(&self, name: &str) -> Value {
+        let defs = self.reference_rows(name, true);
+        let refs = self.reference_rows(name, false);
+        let total = (defs.len() + refs.len()) as i64;
+        let verdict = if defs.is_empty() && refs.is_empty() {
+            "not_found"
+        } else if !defs.is_empty() && refs.is_empty() {
+            "unreferenced"
+        } else if defs.is_empty() {
+            "external"
+        } else {
+            "referenced"
+        };
+        Value::object(vec![
+            ("symbol", Value::string(name)),
+            ("verdict", Value::string(verdict)),
+            ("definitions", Value::Array(defs)),
+            ("references", Value::Array(refs)),
+            ("total", Value::Int(total)),
+            ("symbol_index", self.symbol_index()),
+            (
+                "guidance",
+                if total == 0 {
+                    Value::string(guidance_empty(&self.symbol_index()))
+                } else {
+                    Value::Null
+                },
+            ),
+        ])
+    }
+
+    pub fn impact(&self, symbol: &str) -> Value {
+        self.impact_radius(symbol, None, None, 2, false)
+    }
+
+    /// Compact blast radius. The shape matches 1.5.2 `impact_radius` with
+    /// `compact=True` and `direction="dependents"`.
+    pub fn impact_radius(
+        &self,
+        symbol: &str,
+        document_path: Option<&str>,
+        chunk_id: Option<&str>,
+        depth: usize,
+        summary_mode: bool,
+    ) -> Value {
+        let mut seeds: Vec<String> = Vec::new();
+        let origin = if let Some(id) = chunk_id.filter(|id| !id.is_empty()) {
+            seeds.push(id.to_string());
+            id.to_string()
+        } else if !symbol.is_empty() {
+            seeds.extend(
+                self.store
+                    .state
+                    .symbols
+                    .iter()
+                    .filter(|sym| sym.name == symbol && sym.role == "definition")
+                    .map(|sym| sym.chunk_id.clone()),
+            );
+            symbol.to_string()
+        } else if let Some(path) = document_path.filter(|path| !path.is_empty()) {
+            let path = self.doc_path(path);
+            seeds.extend(
+                self.store
+                    .state
+                    .chunks
+                    .iter()
+                    .filter(|chunk| chunk.path == path)
+                    .map(|chunk| chunk.id.clone()),
+            );
+            path
+        } else {
+            return Value::object(vec![(
+                "error",
+                Value::string("Provide chunk_id, document_path, or symbol"),
+            )]);
+        };
+        if seeds.is_empty() {
+            return Value::object(vec![
+                ("origin", Value::string(origin)),
+                ("max_depth", Value::Int(depth as i64)),
+                ("affected_chunks", Value::Int(0)),
+                ("affected_files", Value::Int(0)),
+                ("chunks", Value::Array(Vec::new())),
+            ]);
+        }
+        let seed_set: HashSet<String> = seeds.iter().cloned().collect();
+        let mut queue: VecDeque<(String, usize)> =
+            seeds.into_iter().map(|id| (id, 0usize)).collect();
+        let mut seen = HashSet::new();
+        let mut by_file: HashMap<String, (i64, usize, usize)> = HashMap::new();
+        let mut depth_counts: HashMap<usize, i64> = HashMap::new();
+        while let Some((id, hop)) = queue.pop_front() {
+            if hop > depth || !seen.insert(id.clone()) {
+                continue;
+            }
+            if hop < depth {
+                for edge in &self.store.state.edges {
+                    if edge.target == id {
+                        queue.push_back((edge.source.clone(), hop + 1));
+                    }
+                }
+            }
+            if seed_set.contains(&id) && hop == 0 {
+                continue;
+            }
+            let Some(path) = chunk_path(&self.store.state, &id) else {
+                continue;
+            };
+            let entry = by_file.entry(path).or_insert((0, hop, hop));
+            entry.0 += 1;
+            entry.1 = entry.1.min(hop);
+            entry.2 = entry.2.max(hop);
+            *depth_counts.entry(hop).or_insert(0) += 1;
+        }
+        let mut files: Vec<Value> = by_file
+            .into_iter()
+            .map(|(path, (count, depth_min, depth_max))| {
+                Value::object(vec![
+                    ("path", Value::string(path)),
+                    ("chunk_count", Value::Int(count)),
+                    ("depth_min", Value::Int(depth_min as i64)),
+                    ("depth_max", Value::Int(depth_max as i64)),
+                ])
+            })
+            .collect();
+        files.sort_by(|left, right| {
+            crate::store::string_field(left, "path").cmp(&crate::store::string_field(right, "path"))
+        });
+        let affected_chunks: i64 = files
+            .iter()
+            .map(|row| crate::store::int_field(row, "chunk_count"))
+            .sum();
+        let mut out = vec![
+            ("origin".to_string(), Value::string(origin)),
+            ("max_depth".to_string(), Value::Int(depth as i64)),
+            ("affected_chunks".to_string(), Value::Int(affected_chunks)),
+            ("affected_files".to_string(), Value::Int(files.len() as i64)),
+        ];
+        if summary_mode {
+            out.push(("summary_mode".to_string(), Value::Bool(true)));
+            let mut depths: Vec<_> = depth_counts.into_iter().collect();
+            depths.sort_by_key(|(hop, _)| *hop);
+            out.push((
+                "depth_distribution".to_string(),
+                Value::Object(
+                    depths
+                        .into_iter()
+                        .map(|(hop, count)| (hop.to_string(), Value::Int(count)))
+                        .collect(),
+                ),
+            ));
+            out.push(("files".to_string(), Value::Array(files.clone())));
+            out.push(("files_total".to_string(), Value::Int(files.len() as i64)));
+        } else {
+            out.push(("files".to_string(), Value::Array(files)));
+        }
+        out.push(("chunks".to_string(), Value::Array(Vec::new())));
+        Value::Object(out)
+    }
+
     pub fn coupling(&self, path: &str) -> Value {
-        let path = path.replace('\\', "/");
+        self.coupling_mode(path, "edges", 0.0)
+    }
+
+    pub fn coupling_mode(&self, path: &str, mode: &str, significance: f64) -> Value {
+        let path = self.doc_path(path);
+        if mode == "co_consumers" {
+            return self.coupling_co_consumers(&path);
+        }
         let mine: HashSet<&str> = self
             .store
             .state
@@ -179,101 +1104,325 @@ impl Engine {
             .filter(|chunk| chunk.path == path)
             .map(|chunk| chunk.id.as_str())
             .collect();
-        let mut peers = Vec::new();
+        if mine.is_empty() {
+            return Value::object(vec![
+                ("document_path", Value::string(&path)),
+                ("coupled_files", Value::Array(Vec::new())),
+                ("total_coupled", Value::Int(0)),
+            ]);
+        }
+        struct Peer {
+            symbols: HashSet<String>,
+            outgoing: i64,
+            incoming: i64,
+        }
+        let mut peers: HashMap<String, Peer> = HashMap::new();
         for edge in &self.store.state.edges {
-            let other = if mine.contains(edge.source.as_str()) {
-                chunk_path(&self.store.state, &edge.target)
+            if significance > 0.0 && is_noise(&edge.name) {
+                continue;
+            }
+            let (other_id, outgoing) = if mine.contains(edge.source.as_str()) {
+                (edge.target.as_str(), true)
             } else if mine.contains(edge.target.as_str()) {
-                chunk_path(&self.store.state, &edge.source)
+                (edge.source.as_str(), false)
             } else {
-                None
+                continue;
             };
-            if let Some(other) = other {
-                if other != path && !peers.iter().any(|have| have == &other) {
-                    peers.push(other);
-                }
+            let Some(other) = chunk_path(&self.store.state, other_id) else {
+                continue;
+            };
+            if other == path {
+                continue;
+            }
+            let peer = peers.entry(other).or_insert_with(|| Peer {
+                symbols: HashSet::new(),
+                outgoing: 0,
+                incoming: 0,
+            });
+            peer.symbols.insert(edge.name.clone());
+            if outgoing {
+                peer.outgoing += 1;
+            } else {
+                peer.incoming += 1;
             }
         }
-        peers.sort();
+        let mut rows: Vec<Value> = peers
+            .into_iter()
+            .map(|(other, peer)| {
+                let direction = if peer.outgoing > 0 && peer.incoming > 0 {
+                    "bidirectional"
+                } else if peer.outgoing > 0 {
+                    "depends_on"
+                } else {
+                    "depended_on_by"
+                };
+                let mut names: Vec<_> = peer.symbols.iter().cloned().collect();
+                names.sort();
+                let score = semantic_score(&peer.symbols, &self.store.state.symbols);
+                Value::object(vec![
+                    ("path", Value::string(other)),
+                    (
+                        "shared_symbols",
+                        Value::Array(names.into_iter().map(Value::String).collect()),
+                    ),
+                    ("shared_symbol_count", Value::Int(peer.symbols.len() as i64)),
+                    ("direction", Value::string(direction)),
+                    ("edge_count", Value::Int(peer.outgoing + peer.incoming)),
+                    ("semantic_score", Value::Float(score)),
+                ])
+            })
+            .collect();
+        rows.sort_by(|left, right| {
+            let ls = float_of(left, "semantic_score");
+            let rs = float_of(right, "semantic_score");
+            rs.total_cmp(&ls).then_with(|| {
+                crate::store::int_field(right, "edge_count")
+                    .cmp(&crate::store::int_field(left, "edge_count"))
+            })
+        });
+        let total = rows.len() as i64;
+        let mut out = vec![
+            ("document_path".to_string(), Value::string(&path)),
+            ("coupled_files".to_string(), Value::Array(rows)),
+            ("total_coupled".to_string(), Value::Int(total)),
+        ];
+        if significance > 0.0 {
+            out.push((
+                "significance_threshold".to_string(),
+                Value::Float(significance),
+            ));
+        }
+        Value::Object(out)
+    }
+
+    fn coupling_co_consumers(&self, path: &str) -> Value {
         Value::object(vec![
-            ("path", Value::string(path)),
-            (
-                "coupled_files",
-                Value::Array(peers.into_iter().map(Value::String).collect()),
-            ),
+            ("document_path", Value::string(path)),
+            ("mode", Value::string("co_consumers")),
+            ("coupled_files", Value::Array(Vec::new())),
+            ("total_coupled", Value::Int(0)),
         ])
     }
 
-    pub fn get_context(&mut self, path: &str, session: Option<&str>) -> Result<Value, String> {
-        let path = path.replace('\\', "/");
-        let chunks: Vec<Value> = self
+    /// 1.5.2 `_chunk_for_line`: the chunk whose line span holds `line`,
+    /// else the document's last chunk.
+    fn chunk_for_line(&self, path: &str, line: i64) -> Option<&crate::store::Chunk> {
+        let mut rows: Vec<_> = self
             .store
             .state
             .chunks
             .iter()
             .filter(|chunk| chunk.path == path)
-            .map(|chunk| {
-                Value::object(vec![
-                    ("chunk_id", Value::string(&chunk.id)),
-                    ("start", Value::Int(chunk.start as i64)),
-                    ("end", Value::Int(chunk.end as i64)),
-                    ("content", Value::string(&chunk.content)),
-                    (
-                        "summary",
-                        match &chunk.summary {
-                            Some(text) => Value::string(text),
-                            None => Value::Null,
-                        },
-                    ),
-                    (
-                        "notes",
-                        match &chunk.notes {
-                            Some(text) => Value::string(text),
-                            None => Value::Null,
-                        },
-                    ),
-                ])
-            })
             .collect();
-        let abs = self.cwd.join(&path);
-        let aligned = match (
-            fs_meta(&abs),
-            self.store
+        rows.sort_by_key(|chunk| chunk.start);
+        let mut cursor = 1i64;
+        for chunk in &rows {
+            let newlines = chunk.content.matches('\n').count() as i64;
+            let end_line = cursor + newlines + i64::from(!chunk.content.ends_with('\n'));
+            if cursor <= line && line < end_line {
+                return Some(chunk);
+            }
+            cursor = end_line;
+        }
+        rows.last().copied()
+    }
+
+    pub fn get_context(&mut self, path: &str, session: Option<&str>) -> Result<Value, String> {
+        self.context_paths(std::slice::from_ref(&path.to_string()), session)
+    }
+
+    pub fn context_paths(
+        &mut self,
+        paths: &[String],
+        session: Option<&str>,
+    ) -> Result<Value, String> {
+        let mut unchanged = Vec::new();
+        let mut changed = Vec::new();
+        let mut new_rows = Vec::new();
+        for path in paths {
+            let path = self.doc_path(path);
+            let abs = self.cwd.join(&path);
+            if !abs.is_file() {
+                continue;
+            }
+            let stored = self
+                .store
                 .state
                 .documents
                 .iter()
-                .find(|doc| doc.path == path),
-        ) {
-            (Some(meta), Some(doc)) => doc.size == meta.len() && doc.mtime_ns == meta_mtime(&meta),
-            _ => false,
-        };
-        if let Some(session) = session {
-            self.note_read(session, &path);
-            self.store.save("read", &Value::string(&path))?;
+                .find(|doc| doc.path == path)
+                .map(|doc| (doc.size, doc.mtime_ns, doc.sha256.clone(), doc.indexed_at));
+            let Some((size, mtime, sha, indexed_at)) = stored else {
+                new_rows.push(Value::object(vec![("path", Value::string(&path))]));
+                continue;
+            };
+            let meta = fs_meta(&abs);
+            let aligned = meta
+                .as_ref()
+                .is_some_and(|meta| size == meta.len() && mtime == meta_mtime(meta));
+            if let Some(session) = session {
+                self.note_read(session, &path);
+            }
+            if aligned {
+                let chunk_rows: Vec<Value> = self
+                    .store
+                    .state
+                    .chunks
+                    .iter()
+                    .filter(|chunk| chunk.path == path)
+                    .map(|chunk| {
+                        Value::object(vec![
+                            ("chunk_id", Value::string(&chunk.id)),
+                            ("content", Value::string(&chunk.content)),
+                            ("start_pos", Value::Int(chunk.start as i64)),
+                            ("end_pos", Value::Int(chunk.end as i64)),
+                            ("token_count", Value::Int(chunk.tokens as i64)),
+                            ("content_truncated", Value::Bool(false)),
+                            ("staleness_score", Value::Float(chunk.staleness)),
+                        ])
+                    })
+                    .collect();
+                let total_tokens: i64 = chunk_rows
+                    .iter()
+                    .map(|row| crate::store::int_field(row, "token_count"))
+                    .sum();
+                let file_size = meta.as_ref().map(|item| item.len()).unwrap_or(size);
+                let file_mtime = py_stat_time(mtime);
+                let mut entry = vec![
+                    ("path".to_string(), Value::string(&path)),
+                    ("chunks".to_string(), Value::Array(chunk_rows)),
+                    ("total_tokens".to_string(), Value::Int(total_tokens)),
+                ];
+                entry.push((
+                    "trust".to_string(),
+                    Value::object(vec![
+                        ("document_indexed_at", Value::Float(indexed_at)),
+                        ("stored_last_modified", Value::Float(file_mtime)),
+                        ("file_mtime", Value::Float(file_mtime)),
+                        ("file_size", Value::Int(file_size as i64)),
+                        ("cache_aligned_with_disk", Value::Bool(true)),
+                        ("max_chunk_staleness", Value::Float(0.0)),
+                        ("staleness_hint", Value::Bool(false)),
+                    ]),
+                ));
+                if session.is_some() {
+                    entry.push(("recently_searched".to_string(), Value::Bool(false)));
+                }
+                unchanged.push(Value::Object(entry));
+            } else if let Ok(disk) = std::fs::read_to_string(&abs) {
+                let cached_chunks: Vec<(usize, usize, String)> = self
+                    .store
+                    .state
+                    .chunks
+                    .iter()
+                    .filter(|chunk| chunk.path == path)
+                    .map(|chunk| (chunk.start, chunk.end, chunk.content.clone()))
+                    .collect();
+                let mut entry = vec![
+                    ("path".to_string(), Value::string(&path)),
+                    (
+                        "old_hash".to_string(),
+                        Value::string(sha.chars().take(16).collect::<String>()),
+                    ),
+                    (
+                        "new_hash".to_string(),
+                        Value::string({
+                            let digest = hex(&sha256(disk.as_bytes()));
+                            digest.chars().take(16).collect::<String>()
+                        }),
+                    ),
+                ];
+                if let Some(diff) = cache_diff(&cached_chunks, &sha, &disk) {
+                    entry.push(("diff_since_cache".to_string(), diff));
+                }
+                if let Some(meta) = meta {
+                    entry.push((
+                        "trust".to_string(),
+                        Value::object(vec![
+                            ("file_mtime", Value::Float(py_stat_time(meta_mtime(&meta)))),
+                            ("file_size", Value::Int(meta.len() as i64)),
+                            ("indexed_cache_outdated", Value::Bool(true)),
+                        ]),
+                    ));
+                }
+                changed.push(Value::Object(entry));
+            }
+        }
+        if session.is_some() {
+            self.store.save("read", &Value::string("context"))?;
         }
         Ok(Value::object(vec![
-            ("path", Value::string(path)),
-            (
-                "trust",
-                Value::object(vec![("cache_aligned_with_disk", Value::Bool(aligned))]),
-            ),
-            ("staleness_hint", Value::Bool(!aligned)),
-            ("chunks", Value::Array(chunks)),
+            ("unchanged", Value::Array(unchanged)),
+            ("changed", Value::Array(changed)),
+            ("new", Value::Array(new_rows)),
         ]))
     }
 
     pub fn annotations(&mut self, action: &str, path: &str, body: &str) -> Result<Value, String> {
+        self.annotations_tagged(action, path, body, &[], "")
+    }
+
+    pub fn annotations_tagged(
+        &mut self,
+        action: &str,
+        path: &str,
+        body: &str,
+        tags: &[String],
+        target_type: &str,
+    ) -> Result<Value, String> {
+        // Document targets are stored the way Python Path renders them:
+        // backslashes on Windows, slashes elsewhere. A search query is text.
+        let stored;
+        // 1.5.2 normalizes a document path only. A get without a type
+        // compares the target string as given.
+        let normalize = matches!(action, "create" | "bulk_create")
+            && (target_type.is_empty() || target_type == "document")
+            || (action == "get" && target_type == "document");
+        let path = if normalize {
+            stored = self.doc_path(path);
+            stored.as_str()
+        } else {
+            path
+        };
         match action {
-            "create" | "bulk_create" => {
-                let id = hex(&sha256(format!("{path}\n{body}").as_bytes()))[..16].to_string();
+            "bulk_create" => {
+                let created = self.annotations("create", path, body)?;
+                Ok(Value::object(vec![
+                    ("created", Value::Array(vec![created])),
+                    ("errors", Value::Array(Vec::new())),
+                ]))
+            }
+            "create" => {
+                self.store.state.next_annotation += 1;
+                let id_num = self.store.state.next_annotation;
+                let id = id_num.to_string();
+                let now = super::now_us();
                 self.store.state.annotations.push(Annotation {
                     id: id.clone(),
                     path: path.to_string(),
                     body: body.to_string(),
-                    tags: Vec::new(),
+                    tags: tags.to_vec(),
+                    target_type: if target_type.is_empty() {
+                        "document".to_string()
+                    } else {
+                        target_type.to_string()
+                    },
+                    created_at: now,
+                    updated_at: now,
                 });
                 self.store.save("annotate", &Value::string(&id))?;
-                Ok(Value::object(vec![("id", Value::string(id))]))
+                Ok(Value::object(vec![
+                    ("id", Value::Int(id_num)),
+                    ("target", Value::string(path)),
+                    (
+                        "target_type",
+                        Value::string(if target_type.is_empty() {
+                            "document"
+                        } else {
+                            target_type
+                        }),
+                    ),
+                ]))
             }
             "get" | "search" => {
                 let rows = self
@@ -281,15 +1430,52 @@ impl Engine {
                     .state
                     .annotations
                     .iter()
-                    .filter(|note| path.is_empty() || note.path == path || note.body.contains(path))
+                    .filter(|note| {
+                        if action == "search" {
+                            let body_hit = path.is_empty() || note.body.contains(path);
+                            let type_hit =
+                                target_type.is_empty() || note.target_type == target_type;
+                            return body_hit && type_hit;
+                        }
+                        (path.is_empty() || note.path == path)
+                            && (target_type.is_empty() || note.target_type == target_type)
+                            && (tags.is_empty()
+                                || tags
+                                    .iter()
+                                    .any(|tag| note.tags.iter().any(|have| have == tag)))
+                    })
                     .map(|note| {
                         Value::object(vec![
-                            ("id", Value::string(&note.id)),
-                            ("path", Value::string(&note.path)),
-                            ("body", Value::string(&note.body)),
+                            ("id", Value::Int(note.id.parse::<i64>().unwrap_or(0))),
+                            ("target", Value::string(&note.path)),
+                            ("target_type", Value::string(&note.target_type)),
+                            ("content", Value::string(&note.body)),
+                            (
+                                "tags",
+                                Value::Array(
+                                    note.tags.iter().cloned().map(Value::String).collect(),
+                                ),
+                            ),
+                            (
+                                "created_at",
+                                Value::Float(super::session_time(note.created_at)),
+                            ),
+                            (
+                                "updated_at",
+                                Value::Float(super::session_time(note.updated_at)),
+                            ),
                         ])
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
+                let mut rows = rows;
+                rows.sort_by(|left, right| {
+                    crate::store::float_field(right, "created_at")
+                        .total_cmp(&crate::store::float_field(left, "created_at"))
+                        .then(
+                            crate::store::int_field(right, "id")
+                                .cmp(&crate::store::int_field(left, "id")),
+                        )
+                });
                 Ok(Value::object(vec![("annotations", Value::Array(rows))]))
             }
             "delete" => {
@@ -298,24 +1484,37 @@ impl Engine {
                     .state
                     .annotations
                     .retain(|note| note.id != path && note.path != path);
+                let deleted = before != self.store.state.annotations.len();
                 self.store.save("annotate-delete", &Value::string(path))?;
-                Ok(Value::object(vec![(
-                    "removed",
-                    Value::Int((before - self.store.state.annotations.len()) as i64),
-                )]))
+                Ok(Value::object(vec![
+                    ("deleted", Value::Bool(deleted)),
+                    ("id", Value::Int(path.parse::<i64>().unwrap_or(0))),
+                ]))
             }
             "update" => {
-                if let Some(note) = self
+                let updated = if let Some(note) = self
                     .store
                     .state
                     .annotations
                     .iter_mut()
                     .find(|note| note.id == path)
                 {
-                    note.body = body.to_string();
-                }
+                    if !body.is_empty() {
+                        note.body = body.to_string();
+                    }
+                    if !tags.is_empty() {
+                        note.tags = tags.to_vec();
+                    }
+                    note.updated_at = super::now_us();
+                    true
+                } else {
+                    false
+                };
                 self.store.save("annotate-update", &Value::string(path))?;
-                Ok(Value::object(vec![("updated", Value::string(path))]))
+                Ok(Value::object(vec![
+                    ("updated", Value::Bool(updated)),
+                    ("id", Value::Int(path.parse::<i64>().unwrap_or(0))),
+                ]))
             }
             _ => Err(format!("unknown annotations action '{action}'")),
         }
@@ -329,11 +1528,16 @@ impl Engine {
         force: bool,
     ) -> Result<Value, String> {
         let now = now_secs();
+        let path = if path.is_empty() {
+            String::new()
+        } else {
+            self.doc_path(path)
+        };
         let outcome = crate::locks::apply(
             &mut self.store.state,
             &self.cwd,
             action,
-            path,
+            &path,
             agent,
             now,
             force,
@@ -344,64 +1548,197 @@ impl Engine {
         outcome
     }
 
-    pub fn save_kv(&mut self, session: &str, key: &str, value: &str) -> Result<Value, String> {
+    pub fn save_kv_state(
+        &mut self,
+        session: &str,
+        kv: &Value,
+        only: &[String],
+        agent: &str,
+    ) -> Result<Value, String> {
         let slot = self.session_mut(session);
-        if let Some(pair) = slot.kv.iter_mut().find(|(name, _)| name == key) {
-            pair.1 = value.to_string();
-        } else {
-            slot.kv.push((key.to_string(), value.to_string()));
+        if !agent.is_empty() {
+            slot.agent = agent.to_string();
         }
-        self.store.save("kv", &Value::string(key))?;
-        Ok(Value::object(vec![("saved", Value::Bool(true))]))
+        let turn_number = slot.turn;
+        let mut saved = 0i64;
+        let mut added = 0i64;
+        let pairs = match kv {
+            Value::Object(pairs) => pairs.clone(),
+            _ => Vec::new(),
+        };
+        for (chunk_id, data) in pairs {
+            if !only.is_empty() && !only.iter().any(|id| id == &chunk_id) {
+                continue;
+            }
+            let tokens = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .find(|chunk| chunk.id == chunk_id)
+                .map(|chunk| chunk.tokens);
+            let Some(tokens) = tokens else {
+                continue;
+            };
+            added += tokens as i64;
+            saved += 1;
+            let encoded = crate::json::dumps_python(&data);
+            super::write_kv_file(
+                &self.storage,
+                session,
+                &chunk_id,
+                turn_number,
+                encoded.as_bytes(),
+            );
+            if let Some(slot) = self
+                .store
+                .state
+                .sessions
+                .iter_mut()
+                .find(|item| item.id == session)
+            {
+                slot.attached.push((chunk_id.clone(), turn_number, 1.0));
+                slot.kv_state.push((chunk_id, turn_number, encoded));
+            }
+        }
+        let slot = self
+            .store
+            .state
+            .sessions
+            .iter_mut()
+            .find(|item| item.id == session)
+            .unwrap();
+        slot.tokens += added;
+        let total = slot.tokens;
+        slot.turn = turn_number + 1;
+        slot.updated_at = super::now_us();
+        self.store.save("kv", &Value::string(session))?;
+        Ok(Value::object(vec![
+            ("session_id", Value::string(session)),
+            ("turn_number", Value::Int(turn_number)),
+            ("chunks_saved", Value::Int(saved)),
+            ("total_tokens", Value::Int(total)),
+        ]))
     }
 
-    pub fn get_kv(&self, session: &str) -> Value {
-        let kv = self
+    pub fn relevant_kv(&self, session: &str, query: &str, top_k: usize) -> Value {
+        let attached = self
             .store
             .state
             .sessions
             .iter()
             .find(|item| item.id == session)
-            .map(|item| {
-                item.kv
-                    .iter()
-                    .map(|(key, value)| {
-                        Value::object(vec![("k", Value::string(key)), ("v", Value::string(value))])
-                    })
-                    .collect()
+            .map(|item| item.attached.clone())
+            .unwrap_or_default();
+        if attached.is_empty() {
+            return Value::object(vec![
+                ("query", Value::string(query)),
+                ("chunks", Value::Array(Vec::new())),
+                ("total_tokens", Value::Int(0)),
+            ]);
+        }
+        let query_sig = crate::chunk::signature(query);
+        let mut scored = Vec::new();
+        for (chunk_id, _turn, _stored) in &attached {
+            let Some(chunk) = self
+                .store
+                .state
+                .chunks
+                .iter()
+                .find(|chunk| &chunk.id == chunk_id)
+            else {
+                continue;
+            };
+            let stored = crate::store::decode_hex_sig(&chunk.signature);
+            let score = cosine_stored(&query_sig, &stored);
+            scored.push((score, chunk));
+        }
+        scored.sort_by(|left, right| right.0.total_cmp(&left.0));
+        scored.truncate(top_k);
+        let mut total = 0i64;
+        let chunks: Vec<Value> = scored
+            .into_iter()
+            .map(|(score, chunk)| {
+                total += chunk.tokens as i64;
+                Value::object(vec![
+                    ("chunk_id", Value::string(&chunk.id)),
+                    ("content", Value::string(&chunk.content)),
+                    ("document_path", Value::string(&chunk.path)),
+                    ("relevance_score", Value::Float(score)),
+                    ("token_count", Value::Int(chunk.tokens as i64)),
+                ])
             })
-            .unwrap_or_default();
-        Value::object(vec![("kv", Value::Array(kv))])
+            .collect();
+        Value::object(vec![
+            ("query", Value::string(query)),
+            ("chunks", Value::Array(chunks)),
+            ("total_tokens", Value::Int(total)),
+        ])
     }
 
+    /// 1.5.2 `get_search_history`: one row per recorded agent_grep or
+    /// search_text call, oldest first.
     pub fn search_history(&self, session: &str) -> Value {
-        let rows = self
+        let mut rows: Vec<Value> = self
             .store
             .state
-            .sessions
+            .search_log
             .iter()
-            .find(|item| item.id == session)
-            .map(|item| item.searches.clone())
-            .unwrap_or_default();
-        Value::object(vec![(
-            "searches",
-            Value::Array(rows.into_iter().map(Value::String).collect()),
-        )])
+            .filter(|(id, _)| id == session)
+            .map(|(_, row)| {
+                Value::object(vec![
+                    ("pattern", Value::string(&row.pattern)),
+                    ("tool", Value::string(&row.tool)),
+                    ("files_checked", Value::Int(row.files_checked)),
+                    ("files_with_matches", Value::Int(row.files_with_matches)),
+                    ("searched_at", Value::Float(row.at)),
+                ])
+            })
+            .collect();
+        if rows.is_empty() {
+            // Snapshots written before 2.1.0 kept the patterns on the session.
+            if let Some(item) = self
+                .store
+                .state
+                .sessions
+                .iter()
+                .find(|item| item.id == session)
+            {
+                rows = item
+                    .searches
+                    .iter()
+                    .map(|pattern| Value::object(vec![("pattern", Value::string(pattern))]))
+                    .collect();
+            }
+        }
+        Value::object(vec![
+            ("session_id", Value::string(session)),
+            ("searches", Value::Array(rows)),
+        ])
     }
 
     pub fn read_files(&self, session: &str) -> Value {
-        let rows = self
-            .store
-            .state
-            .sessions
+        let mut rows: Vec<_> = self
+            .file_reads
             .iter()
-            .find(|item| item.id == session)
-            .map(|item| item.reads.clone())
-            .unwrap_or_default();
-        Value::object(vec![(
-            "files",
-            Value::Array(rows.into_iter().map(Value::String).collect()),
-        )])
+            .filter(|row| row.0 == session)
+            .collect();
+        rows.reverse();
+        Value::Array(
+            rows.into_iter()
+                .map(|row| {
+                    Value::object(vec![
+                        ("document_path", Value::string(&row.1)),
+                        (
+                            "chunk_ids",
+                            Value::Array(row.2.iter().cloned().map(Value::String).collect()),
+                        ),
+                        ("read_at", Value::Float(row.3)),
+                        ("staleness_score", Value::Null),
+                    ])
+                })
+                .collect(),
+        )
     }
 
     pub fn register_dynamic(
@@ -410,31 +1747,223 @@ impl Engine {
         kind: &str,
         path: &str,
     ) -> Result<Value, String> {
+        let id = self.take_symbol_id();
         self.store.state.dynamic.push(Dynamic {
             name: name.to_string(),
             kind: kind.to_string(),
+            role: "definition".to_string(),
             path: path.to_string(),
+            agent: String::new(),
+            line: 0,
+            chunk_id: format!("runtime:default:{name}"),
+            id,
         });
         self.store.save("dynamic", &Value::string(name))?;
         Ok(Value::object(vec![("registered", Value::string(name))]))
     }
 
     pub fn store_summary(&mut self, chunk_id: &str, summary: &str) -> Result<Value, String> {
-        let Some(chunk) = self
+        let found = self
             .store
             .state
             .chunks
             .iter_mut()
             .find(|chunk| chunk.id == chunk_id)
-        else {
+            .map(|chunk| {
+                chunk.summary = Some(summary.to_string());
+                chunk.embedding = super::ops::summary_signature(summary);
+            })
+            .is_some();
+        if !found {
             return Err(format!("unknown chunk '{chunk_id}'"));
-        };
-        chunk.summary = Some(summary.to_string());
+        }
+        self.graph_replace(chunk_id);
+        self.note_vector_replace();
         self.store.save("summary", &Value::string(chunk_id))?;
-        Ok(Value::object(vec![("stored", Value::Bool(true))]))
+        Ok(Value::object(vec![
+            ("stored", Value::Bool(true)),
+            ("chunk_id", Value::string(chunk_id)),
+        ]))
     }
 
-    fn rows(&self, hits: &[crate::search::Scored]) -> Vec<Value> {
+    fn symbol_index(&self) -> Value {
+        let sym_n = (self.store.state.symbols.len() + self.store.state.dynamic.len()) as i64;
+        let doc_n = self.store.state.documents.len() as i64;
+        Value::object(vec![
+            (
+                "status",
+                Value::string(if sym_n == 0 { "empty" } else { "ready" }),
+            ),
+            ("indexed_documents", Value::Int(doc_n)),
+            ("symbol_row_count", Value::Int(sym_n)),
+            (
+                "edge_count",
+                Value::Int(self.store.state.edges.len() as i64),
+            ),
+        ])
+    }
+
+    fn definition_rows(&self, name: &str) -> Vec<Value> {
+        let mut defs: Vec<_> = self
+            .store
+            .state
+            .symbols
+            .iter()
+            .filter(|sym| sym.name == name && sym.role == "definition")
+            .collect();
+        defs.sort_by(|left, right| left.path.cmp(&right.path).then(left.line.cmp(&right.line)));
+        let mut by_doc: Vec<(String, Vec<&crate::store::Symbol>)> = Vec::new();
+        for sym in defs {
+            if let Some(group) = by_doc.iter_mut().find(|(path, _)| path == &sym.path) {
+                group.1.push(sym);
+            } else {
+                by_doc.push((sym.path.clone(), vec![sym]));
+            }
+        }
+        let mut rows = Vec::new();
+        for (_, group) in by_doc {
+            let shadowed = group.len() > 1;
+            for (index, sym) in group.iter().enumerate() {
+                let chunk = self
+                    .store
+                    .state
+                    .chunks
+                    .iter()
+                    .find(|chunk| chunk.id == sym.chunk_id);
+                let dynamic = sym.chunk_id.starts_with("runtime:");
+                let content = chunk.map(|chunk| chunk.content.clone()).unwrap_or_else(|| {
+                    if dynamic {
+                        "[dynamic/runtime symbol]".to_string()
+                    } else {
+                        String::new()
+                    }
+                });
+                let mut row = vec![
+                    ("symbol".to_string(), Value::string(&sym.name)),
+                    ("kind".to_string(), Value::string(&sym.kind)),
+                    ("chunk_id".to_string(), Value::string(&sym.chunk_id)),
+                    ("document_path".to_string(), Value::string(&sym.path)),
+                    ("line_number".to_string(), Value::Int(sym.line as i64)),
+                    ("content".to_string(), Value::string(content)),
+                    (
+                        "token_count".to_string(),
+                        Value::Int(chunk.map(|chunk| chunk.tokens as i64).unwrap_or(0)),
+                    ),
+                    ("dynamic".to_string(), Value::Bool(dynamic)),
+                ];
+                if shadowed {
+                    row.push((
+                        "definition_index".to_string(),
+                        Value::Int((index + 1) as i64),
+                    ));
+                    row.push(("shadowed".to_string(), Value::Bool(true)));
+                    row.push(("shadow_count".to_string(), Value::Int(group.len() as i64)));
+                }
+                rows.push(Value::Object(row));
+            }
+        }
+        let mut dynamic: Vec<_> = self
+            .store
+            .state
+            .dynamic
+            .iter()
+            .filter(|sym| sym.name == name)
+            .collect();
+        dynamic.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        for sym in dynamic {
+            rows.push(Value::object(vec![
+                ("symbol", Value::string(&sym.name)),
+                ("kind", Value::string(&sym.kind)),
+                ("chunk_id", Value::string(&sym.chunk_id)),
+                ("document_path", Value::string(&sym.path)),
+                ("line_number", Value::Null),
+                ("content", Value::string("[dynamic/runtime symbol]")),
+                ("token_count", Value::Int(0)),
+                ("dynamic", Value::Bool(true)),
+            ]));
+        }
+        rows
+    }
+
+    fn reference_rows(&self, name: &str, definitions: bool) -> Vec<Value> {
+        let role = if definitions {
+            "definition"
+        } else {
+            "reference"
+        };
+        // 1.5.2 reads the symbols table, where registered dynamic symbols are
+        // rows too (after the indexed ones). They have no chunk to preview.
+        let dynamic = self
+            .store
+            .state
+            .dynamic
+            .iter()
+            .filter(|sym| sym.name == name && sym.role == role)
+            .map(|sym| {
+                Value::object(vec![
+                    ("symbol", Value::string(&sym.name)),
+                    ("kind", Value::string(&sym.kind)),
+                    ("chunk_id", Value::string(&sym.chunk_id)),
+                    ("document_path", Value::string(&sym.path)),
+                    (
+                        "line_number",
+                        if sym.line == 0 {
+                            Value::Null
+                        } else {
+                            Value::Int(sym.line as i64)
+                        },
+                    ),
+                    (
+                        "content_preview",
+                        Value::string("[dynamic/runtime symbol - no static chunk content]"),
+                    ),
+                    ("dynamic", Value::Bool(true)),
+                ])
+            });
+        self.store
+            .state
+            .symbols
+            .iter()
+            .filter(|sym| {
+                sym.name == name
+                    && if definitions {
+                        sym.role == "definition"
+                    } else {
+                        sym.role == "reference"
+                    }
+            })
+            .map(|sym| {
+                let chunk = self
+                    .store
+                    .state
+                    .chunks
+                    .iter()
+                    .find(|chunk| chunk.id == sym.chunk_id);
+                let dynamic = sym.chunk_id.starts_with("runtime:");
+                let preview = chunk
+                    .map(|chunk| chunk.content.chars().take(200).collect::<String>())
+                    .unwrap_or_else(|| {
+                        if dynamic {
+                            "[dynamic/runtime symbol - no static chunk content]".to_string()
+                        } else {
+                            String::new()
+                        }
+                    });
+                Value::object(vec![
+                    ("symbol", Value::string(&sym.name)),
+                    ("kind", Value::string(&sym.kind)),
+                    ("chunk_id", Value::string(&sym.chunk_id)),
+                    ("document_path", Value::string(&sym.path)),
+                    ("line_number", Value::Int(sym.line as i64)),
+                    ("content_preview", Value::string(preview)),
+                    ("dynamic", Value::Bool(dynamic)),
+                ])
+            })
+            .chain(dynamic)
+            .collect()
+    }
+
+    fn rows(&self, hits: &[crate::search::Scored], tier2: bool) -> Vec<Value> {
         hits.iter()
             .filter_map(|hit| {
                 let chunk = self
@@ -445,8 +1974,8 @@ impl Engine {
                     .find(|chunk| chunk.id == hit.id)?;
                 let mut pairs = vec![
                     ("chunk_id".to_string(), Value::string(&chunk.id)),
-                    ("document_path".to_string(), Value::string(&chunk.path)),
                     ("content".to_string(), Value::string(&chunk.content)),
+                    ("document_path".to_string(), Value::string(&chunk.path)),
                     ("relevance_score".to_string(), Value::Float(hit.score)),
                     ("token_count".to_string(), Value::Int(chunk.tokens as i64)),
                     ("start_pos".to_string(), Value::Int(chunk.start as i64)),
@@ -454,7 +1983,7 @@ impl Engine {
                     ("source".to_string(), Value::string(hit.source)),
                     (
                         "tier2_present".to_string(),
-                        Value::Bool(chunk.summary.is_some()),
+                        Value::Bool(tier2 && chunk.has_tier2()),
                     ),
                 ];
                 if let Some(edges) = edge_block(&self.store.state.edges, &chunk.id) {
@@ -465,16 +1994,28 @@ impl Engine {
             .collect()
     }
 
-    fn note_search(&mut self, session: &str, pattern: &str) {
-        let slot = self.session_mut(session);
-        slot.searches.push(pattern.to_string());
-    }
-
     fn note_read(&mut self, session: &str, path: &str) {
-        let slot = self.session_mut(session);
-        if !slot.reads.iter().any(|item| item == path) {
-            slot.reads.push(path.to_string());
+        if self
+            .file_reads
+            .iter()
+            .any(|row| row.0 == session && row.1 == path)
+        {
+            return;
         }
+        let chunks: Vec<String> = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.path == path)
+            .map(|chunk| chunk.id.clone())
+            .collect();
+        self.file_reads.push((
+            session.to_string(),
+            path.to_string(),
+            chunks,
+            super::now_f64(),
+        ));
     }
 
     fn session_mut(&mut self, id: &str) -> &mut Session {
@@ -484,6 +2025,13 @@ impl Engine {
                 searches: Vec::new(),
                 reads: Vec::new(),
                 kv: Vec::new(),
+                created_at: super::now_us(),
+                updated_at: super::now_us(),
+                turn: 0,
+                tokens: 0,
+                agent: String::new(),
+                attached: Vec::new(),
+                kv_state: Vec::new(),
             });
         }
         self.store
@@ -495,27 +2043,60 @@ impl Engine {
     }
 }
 
-fn dependent_chunks(edges: &[crate::store::Edge], seeds: &[String], depth: usize) -> Vec<String> {
-    let mut queue: VecDeque<(String, usize)> = seeds.iter().map(|id| (id.clone(), 0)).collect();
-    let mut seen = HashSet::new();
-    let mut hits = Vec::new();
-    while let Some((id, hop)) = queue.pop_front() {
-        if hop > depth || !seen.insert(id.clone()) {
+/// `{**row, "source": source}`: the key keeps its place.
+fn with_source(row: Value, source: &str) -> Value {
+    let Value::Object(mut pairs) = row else {
+        return row;
+    };
+    if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "source") {
+        *item = Value::string(source);
+    } else {
+        pairs.push(("source".to_string(), Value::string(source)));
+    }
+    Value::Object(pairs)
+}
+
+fn field_owned(value: &Value, key: &str) -> Option<Value> {
+    let Value::Object(pairs) = value else {
+        return None;
+    };
+    pairs
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, item)| item.clone())
+}
+
+fn is_noise(name: &str) -> bool {
+    matches!(
+        name,
+        "push" | "has" | "addEdge" | "add" | "get" | "set" | "len" | "new"
+    )
+}
+
+fn semantic_score(names: &HashSet<String>, symbols: &[crate::store::Symbol]) -> f64 {
+    let mut total = 0.0;
+    for name in names {
+        if name.chars().count() <= 3 {
             continue;
         }
-        if hop > 0 {
-            hits.push(id.clone());
-        }
-        if hop == depth {
-            continue;
-        }
-        for edge in edges {
-            if edge.target == id {
-                queue.push_back((edge.source.clone(), hop + 1));
+        let mut files = HashSet::new();
+        for sym in symbols {
+            if sym.name == *name && sym.role == "definition" {
+                files.insert(sym.path.as_str());
             }
         }
+        let n = (files.len().max(1)) as f64;
+        total += 1.0 / (1.0 + n.log2());
     }
-    hits
+    (total * 100.0).round() / 100.0
+}
+
+fn float_of(value: &Value, key: &str) -> f64 {
+    match field_owned(value, key) {
+        Some(Value::Float(number)) => number,
+        Some(Value::Int(number)) => number as f64,
+        _ => 0.0,
+    }
 }
 
 fn chunk_path(state: &crate::store::State, id: &str) -> Option<String> {
@@ -556,53 +2137,472 @@ fn edge_block(edges: &[crate::store::Edge], id: &str) -> Option<Value> {
     ]))
 }
 
-fn symbol_json(sym: &crate::store::Symbol) -> Value {
-    Value::object(vec![
-        ("name", Value::string(&sym.name)),
-        ("kind", Value::string(&sym.kind)),
-        ("role", Value::string(&sym.role)),
-        ("line", Value::Int(sym.line as i64)),
-        (
-            "container",
-            match &sym.container {
-                Some(text) => Value::string(text),
-                None => Value::Null,
-            },
-        ),
-        ("path", Value::string(&sym.path)),
-        ("chunk_id", Value::string(&sym.chunk_id)),
-        ("chunk_index", Value::Int(sym.chunk_index as i64)),
-    ])
-}
-
-fn is_literal(pattern: &str) -> bool {
-    !pattern.chars().any(|ch| {
-        matches!(
-            ch,
-            '\\' | '.' | '[' | ']' | '(' | ')' | '{' | '}' | '*' | '+' | '?' | '^' | '$' | '|'
-        )
-    })
-}
-
-fn literal_hits(pattern: &str, text: &str) -> Vec<(usize, usize)> {
-    if pattern.is_empty() {
-        return Vec::new();
+fn guidance_empty(index: &Value) -> String {
+    let status = crate::store::string_field(index, "status");
+    let docs = crate::store::int_field(index, "indexed_documents");
+    if status == "ready" {
+        "The symbol graph is populated but this name has no matches. The symbol may be absent from indexed files, not extracted (e.g. highly dynamic code), or spelled differently. Try search_text or agent_grep to confirm text occurrences.".to_string()
+    } else if docs == 0 {
+        "No documents are indexed yet, so the symbol index is empty. Run index on project paths first, then rebuild_symbols if definitions and references stay empty.".to_string()
+    } else {
+        "Chunks are indexed but the symbol table is empty. Run index on source files you need for symbols, then rebuild_symbols to populate the graph.".to_string()
     }
+}
+
+fn group_tokens(key: &str, rows: &[Value]) -> usize {
+    let mut parts = vec![key.to_string()];
+    for row in rows {
+        parts.push(crate::store::string_field(row, "excerpt"));
+        let scope = crate::store::string_field(row, "scope");
+        if !scope.is_empty() {
+            parts.push(scope);
+        }
+        let class = crate::store::string_field(row, "classification");
+        if !class.is_empty() {
+            parts.push(class);
+        }
+        parts.push(format!(":{}", crate::store::int_field(row, "line")));
+    }
+    crate::chunk::estimate_tokens(&parts.join(" "))
+}
+
+/// 1.5.2 proximity nudge: `score * (1 - w) + prox * w`, rounded to six
+/// places, `w` 0.35 for five or more terms and 0.28 otherwise.
+fn apply_proximity(rows: &mut [Value], terms: &[String]) {
+    let weight = if terms.len() >= 5 { 0.35 } else { 0.28 };
+    for row in rows.iter_mut() {
+        let Value::Object(pairs) = row else {
+            continue;
+        };
+        let content = pairs
+            .iter()
+            .find(|(key, _)| key == "content")
+            .and_then(|(_, value)| match value {
+                Value::String(text) => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let prox = proximity_score(&content, terms);
+        if prox <= 0.0 {
+            continue;
+        }
+        let score = score_of(&Value::Object(pairs.clone()));
+        let score = round6(score * (1.0 - weight) + prox * weight);
+        if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "relevance_score") {
+            *item = Value::Float(score);
+        }
+        if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "proximity_boosted") {
+            *item = Value::Bool(true);
+        } else {
+            pairs.push(("proximity_boosted".to_string(), Value::Bool(true)));
+        }
+    }
+}
+
+/// `list.sort(key=relevance_score, reverse=True)`: stable, highest first.
+fn sort_by_score(rows: &mut [Value]) {
+    rows.sort_by(|left, right| {
+        score_of(right)
+            .partial_cmp(&score_of(left))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
+fn set_score(row: &mut Value, score: f64) {
+    if let Value::Object(pairs) = row {
+        if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "relevance_score") {
+            *item = Value::Float(score);
+        }
+    }
+}
+
+/// 1.5.2 `extract_query_identifiers`: camel pieces, acronyms, snake words
+/// and whole identifiers of three or more characters, without stop words.
+/// 1.5.2 returns them from a set, so its order is per process; this keeps
+/// first-appearance order.
+pub(crate) fn py_query_identifiers(query: &str) -> Vec<String> {
+    let chars: Vec<char> = query.chars().collect();
+    let mut out: Vec<String> = Vec::new();
+    let keep = |start: usize, end: usize, out: &mut Vec<String>| {
+        let token: String = chars[start..end].iter().collect();
+        if !STOP_WORDS.contains(&token.to_lowercase().as_str()) && !out.contains(&token) {
+            out.push(token);
+        }
+    };
+    // findall(r"[A-Z]?[a-z]{2,}|[A-Z]{2,}(?=[A-Z][a-z]|)|[a-z_]\w{2,}")
+    let mut at = 0usize;
+    while at < chars.len() {
+        if let Some(end) = camel_piece(&chars, at)
+            .or_else(|| upper_run(&chars, at))
+            .or_else(|| snake_piece(&chars, at))
+        {
+            keep(at, end, &mut out);
+            at = end;
+        } else {
+            at += 1;
+        }
+    }
+    // findall(r"[a-zA-Z_]\w{2,}")
+    let mut at = 0usize;
+    while at < chars.len() {
+        let c = chars[at];
+        if c.is_ascii_alphabetic() || c == '_' {
+            let end = word_end(&chars, at + 1);
+            if end - at >= 3 {
+                keep(at, end, &mut out);
+                at = end;
+                continue;
+            }
+        }
+        at += 1;
+    }
+    out
+}
+
+fn py_word(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+fn word_end(chars: &[char], from: usize) -> usize {
+    let mut end = from;
+    while end < chars.len() && py_word(chars[end]) {
+        end += 1;
+    }
+    end
+}
+
+/// `[A-Z]?[a-z]{2,}`, greedy.
+fn camel_piece(chars: &[char], at: usize) -> Option<usize> {
+    let lower_run = |from: usize| {
+        let mut end = from;
+        while end < chars.len() && chars[end].is_ascii_lowercase() {
+            end += 1;
+        }
+        end
+    };
+    if chars[at].is_ascii_uppercase() {
+        let end = lower_run(at + 1);
+        if end - (at + 1) >= 2 {
+            return Some(end);
+        }
+    }
+    let end = lower_run(at);
+    (end - at >= 2).then_some(end)
+}
+
+/// `[A-Z]{2,}(?=[A-Z][a-z]|)`: the longest uppercase run that is
+/// followed by a capitalised word or a word boundary.
+fn upper_run(chars: &[char], at: usize) -> Option<usize> {
+    let mut max = at;
+    while max < chars.len() && chars[max].is_ascii_uppercase() {
+        max += 1;
+    }
+    let mut end = max;
+    while end >= at + 2 {
+        let camel = end + 1 < chars.len()
+            && chars[end].is_ascii_uppercase()
+            && chars[end + 1].is_ascii_lowercase();
+        let before = py_word(chars[end - 1]);
+        let after = end < chars.len() && py_word(chars[end]);
+        if camel || before != after {
+            return Some(end);
+        }
+        end -= 1;
+    }
+    None
+}
+
+/// `[a-z_]\w{2,}`, greedy.
+fn snake_piece(chars: &[char], at: usize) -> Option<usize> {
+    let c = chars[at];
+    if !(c.is_ascii_lowercase() || c == '_') {
+        return None;
+    }
+    let end = word_end(chars, at + 1);
+    (end - at >= 3).then_some(end)
+}
+
+fn score_of(value: &Value) -> f64 {
+    match object_field(value, "relevance_score") {
+        Some(Value::Float(number)) => *number,
+        Some(Value::Int(number)) => *number as f64,
+        _ => 0.0,
+    }
+}
+
+fn round6(number: f64) -> f64 {
+    (number * 1_000_000.0).round() / 1_000_000.0
+}
+
+fn proximity_terms(query: &str) -> Vec<String> {
+    // 1.5.2 `extract_proximity_terms`: the lowercased query identifiers
+    // plus letter-words of four or more letters, without stop words.
+    // Order does not change the score.
+    let mut terms: Vec<String> = Vec::new();
+    for ident in py_query_identifiers(query) {
+        let lower = ident.to_lowercase();
+        if !terms.contains(&lower) {
+            terms.push(lower);
+        }
+    }
+    let chars: Vec<char> = query.chars().collect();
+    let mut index = 0usize;
+    while index < chars.len() {
+        let bound = index == 0 || !py_word(chars[index - 1]);
+        if bound && chars[index].is_ascii_alphabetic() {
+            let start = index;
+            while index < chars.len() && chars[index].is_ascii_alphabetic() {
+                index += 1;
+            }
+            let at_end = index == chars.len() || !py_word(chars[index]);
+            if index - start >= 4 && at_end {
+                let lower: String = chars[start..index]
+                    .iter()
+                    .collect::<String>()
+                    .to_lowercase();
+                if !STOP_WORDS.contains(&lower.as_str()) && !terms.contains(&lower) {
+                    terms.push(lower);
+                }
+            }
+        } else {
+            index += 1;
+        }
+    }
+    terms
+}
+
+fn proximity_score(content: &str, terms: &[String]) -> f64 {
+    if terms.is_empty() || content.is_empty() {
+        return 0.0;
+    }
+    let lower = content.to_ascii_lowercase();
+    let positions: Vec<Option<usize>> = terms.iter().map(|term| lower.find(term)).collect();
+    let present: Vec<usize> = positions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, pos)| pos.map(|_| index))
+        .collect();
+    if present.is_empty() {
+        return 0.0;
+    }
+    let min_pos = present
+        .iter()
+        .filter_map(|index| positions[*index])
+        .min()
+        .unwrap_or(0);
+    let first_score = 1.0 - (min_pos as f64 / lower.len().max(1) as f64).min(1.0);
+    let weights: Vec<f64> = terms
+        .iter()
+        .map(|term| (term.len() as f64 / 8.0).min(1.0))
+        .collect();
+    let weight_sum = weights.iter().sum::<f64>().max(1.0);
+    let present_weighted = present.iter().map(|index| weights[*index]).sum::<f64>() / weight_sum;
+    let found: Vec<usize> = present
+        .iter()
+        .filter_map(|index| positions[*index])
+        .collect();
+    let max_dist = if found.len() > 1 {
+        found.iter().max().unwrap() - found.iter().min().unwrap()
+    } else {
+        0
+    };
+    let near = 1.0 - (max_dist as f64 / 1000.0).min(1.0);
+    0.4 * present_weighted + 0.3 * first_score + 0.3 * near
+}
+
+const STOP_WORDS: &[&str] = &[
+    "the", "and", "for", "with", "from", "that", "this", "have", "are", "was", "not", "all", "but",
+    "how",
+];
+
+fn object_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    let Value::Object(pairs) = value else {
+        return None;
+    };
+    pairs
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, item)| item)
+}
+
+/// CPython's `st_mtime`: `sec + nsec * 1e-9` in double precision, which
+/// differs in the last digits from `ns / 1e9`.
+fn py_stat_time(ns: i64) -> f64 {
+    let sec = ns.div_euclid(1_000_000_000);
+    let nsec = ns.rem_euclid(1_000_000_000);
+    sec as f64 + nsec as f64 * 1e-9
+}
+
+#[cfg(test)]
+mod identifier_tests {
+    use super::py_query_identifiers;
+
+    /// Same tokens as 1.5.2 `extract_query_identifiers` (as a set).
+    #[test]
+    fn matches_python_identifier_extraction() {
+        let script = r#"
+import json, sys
+from stele_context.search_engine import extract_query_identifiers
+for q in json.loads(sys.stdin.read()):
+    print(json.dumps(sorted(extract_query_identifiers(q))))
+"#;
+        let queries = [
+            "TallowLedger cinder_sum",
+            "wicket yarrow route",
+            "parseHTTPResponse and JSONHighlighter",
+            "how does the HTMLParser handle _private_x2 names",
+            "ABC def GHIjkl MNO_pq r2d2 éclair_x",
+            "the and for",
+            "XMLHttpRequest URLs",
+        ];
+        let body = crate::json::to_string(&crate::json::Value::Array(
+            queries
+                .iter()
+                .map(|q| crate::json::Value::string(*q))
+                .collect(),
+        ));
+        let mut child = std::process::Command::new(crate::oracle::reference())
+            .args(["-c", script])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("python");
+        {
+            use std::io::Write;
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(body.as_bytes())
+                .unwrap();
+        }
+        let done = child.wait_with_output().unwrap();
+        let text = String::from_utf8_lossy(&done.stdout);
+        for (query, line) in queries.iter().zip(text.lines()) {
+            let mut ours = py_query_identifiers(query);
+            ours.sort();
+            let ours = crate::json::to_string(&crate::json::Value::Array(
+                ours.into_iter().map(crate::json::Value::String).collect(),
+            ));
+            let theirs = crate::json::to_string(&crate::json::parse(line).unwrap());
+            assert_eq!(ours, theirs, "{query}");
+        }
+    }
+}
+
+fn entry_text(entry: &[(String, Value)], key: &str) -> String {
+    match entry.iter().find(|(name, _)| name == key) {
+        Some((_, Value::String(text))) => text.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Python `" ".join(text.split())`. `str.split()` also splits on the
+/// information separators U+001C..U+001F, which Rust's whitespace does not
+/// include.
+fn py_split_join(text: &str) -> String {
+    text.split(|ch: char| ch.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&ch))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 1.5.2 `_truncate`: at most `max` characters, ending in `...` when cut.
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        let mut cut: String = text.chars().take(max - 3).collect();
+        cut.push_str("...");
+        cut
+    }
+}
+
+fn classify_line(line: &str) -> String {
+    let stripped = line.trim_start();
+    if stripped.is_empty() {
+        return "blank".to_string();
+    }
+    const COMMENTS: &[&str] = &["#", "//", "--", ";", "%", "/*", "* ", "///", "/**"];
+    const IMPORTS: &[&str] = &[
+        "import ",
+        "from ",
+        "require(",
+        "use ",
+        "include ",
+        "#include",
+        "using ",
+        "extern crate ",
+    ];
+    const DEFS: &[&str] = &[
+        "def ",
+        "async def ",
+        "class ",
+        "function ",
+        "async function ",
+        "fn ",
+        "pub fn ",
+        "func ",
+        "type ",
+        "interface ",
+        "struct ",
+        "enum ",
+        "trait ",
+        "impl ",
+    ];
+    if COMMENTS.iter().any(|prefix| stripped.starts_with(prefix)) {
+        return "comment".to_string();
+    }
+    if IMPORTS.iter().any(|prefix| stripped.starts_with(prefix)) {
+        return "import".to_string();
+    }
+    if DEFS.iter().any(|prefix| stripped.starts_with(prefix)) {
+        return "definition".to_string();
+    }
+    "code".to_string()
+}
+
+fn scope_for(engine: &Engine, chunk_id: &str, line: u32) -> String {
+    engine
+        .store
+        .state
+        .symbols
+        .iter()
+        .filter(|sym| {
+            sym.chunk_id == chunk_id
+                && sym.role == "definition"
+                && matches!(sym.kind.as_str(), "function" | "class" | "method")
+                && sym.line <= line
+        })
+        .max_by_key(|sym| sym.line)
+        .map(|sym| sym.name.clone())
+        .unwrap_or_default()
+}
+
+/// 1.5.2 `content.find(pattern, start)` with `start = idx + 1`: every
+/// occurrence, overlapping ones included, as character offsets. An empty
+/// pattern matches at every position, end included.
+fn literal_hits(pattern: &str, text: &str) -> Vec<(usize, usize)> {
     let width = pattern.chars().count();
     let mut hits = Vec::new();
+    if pattern.is_empty() {
+        let count = text.chars().count();
+        return (0..=count).map(|at| (at, at)).collect();
+    }
+    let mut chars_before = 0usize;
+    let mut counted_to = 0usize;
     let mut from = 0usize;
     while let Some(pos) = text[from..].find(pattern) {
         let byte = from + pos;
-        let start = text[..byte].chars().count();
-        hits.push((start, start + width));
-        if hits.len() >= 100 {
+        chars_before += text[counted_to..byte].chars().count();
+        counted_to = byte;
+        hits.push((chars_before, chars_before + width));
+        // The next search starts one character after this match.
+        let step = text[byte..].chars().next().map(char::len_utf8).unwrap_or(1);
+        from = byte + step;
+        if from > text.len() {
             break;
         }
-        let next = byte + pattern.len();
-        if next <= from {
-            break;
-        }
-        from = next;
     }
     hits
 }
@@ -612,6 +2612,264 @@ fn slice_chars(text: &str, start: usize, end: usize) -> String {
         .skip(start)
         .take(end.saturating_sub(start))
         .collect()
+}
+
+fn cache_diff(chunks: &[(usize, usize, String)], stored_hash: &str, disk: &str) -> Option<Value> {
+    if chunks.is_empty() {
+        return None;
+    }
+    let mut ordered = chunks.to_vec();
+    ordered.sort_by_key(|item| item.0);
+    let mut padded = String::new();
+    let mut cursor = 0usize;
+    for (start, end, content) in &ordered {
+        if *start > cursor {
+            padded.push_str(&"\n".repeat(start - cursor));
+            cursor = *start;
+        }
+        padded.push_str(content);
+        cursor += content.chars().count();
+        if *end > cursor {
+            padded.push_str(&"\n".repeat(end - cursor));
+            cursor = *end;
+        }
+    }
+    let plain: String = ordered.iter().map(|item| item.2.as_str()).collect();
+    let mut candidates = Vec::new();
+    for cand in [padded.clone(), format!("{padded}\n"), plain] {
+        if !candidates.iter().any(|have: &String| have == &cand) {
+            candidates.push(cand);
+        }
+    }
+    let new_lines: Vec<&str> = disk.split('\n').collect();
+    let mut exact = false;
+    let mut diff_lines = None;
+    for cand in &candidates {
+        if hex(&sha256(cand.as_bytes())) == stored_hash {
+            exact = true;
+            diff_lines = Some(unified(cand, &new_lines));
+            break;
+        }
+    }
+    let diff_lines = diff_lines.unwrap_or_else(|| unified(&candidates[0], &new_lines));
+    let added = diff_lines
+        .iter()
+        .filter(|ln| ln.starts_with('+') && !ln.starts_with("+++"))
+        .count();
+    let removed = diff_lines
+        .iter()
+        .filter(|ln| ln.starts_with('-') && !ln.starts_with("---"))
+        .count();
+    let diff_text = diff_lines.join("\n");
+    let diff_tokens = crate::chunk::estimate_tokens(&diff_text);
+    let new_tokens = crate::chunk::estimate_tokens(disk).max(1);
+    let recommendation = if diff_tokens < (new_tokens as f64 * 0.8) as usize {
+        "read_diff"
+    } else {
+        "reread_file"
+    };
+    Some(Value::object(vec![
+        ("diff", Value::string(diff_text)),
+        ("diff_exact", Value::Bool(exact)),
+        ("added_lines", Value::Int(added as i64)),
+        ("removed_lines", Value::Int(removed as i64)),
+        ("diff_tokens", Value::Int(diff_tokens as i64)),
+        ("diff_truncated", Value::Bool(false)),
+        ("recommendation", Value::string(recommendation)),
+    ]))
+}
+
+fn unified(cached: &str, new_lines: &[&str]) -> Vec<String> {
+    let old_owned: Vec<&str> = cached.split('\n').collect();
+    let old_lines = trim_split(&old_owned);
+    let new_lines = trim_split(new_lines);
+    if old_lines == new_lines {
+        return Vec::new();
+    }
+    let groups = grouped_opcodes(&old_lines, &new_lines, 3);
+    let mut out = vec!["--- cached".to_string(), "+++ disk".to_string()];
+    for group in groups {
+        if group.is_empty() {
+            continue;
+        }
+        let i1 = group[0].1;
+        let i2 = group.last().map(|code| code.2).unwrap_or(i1);
+        let j1 = group[0].3;
+        let j2 = group.last().map(|code| code.4).unwrap_or(j1);
+        out.push(format!(
+            "@@ -{},{} +{},{} @@",
+            i1 + 1,
+            i2 - i1,
+            j1 + 1,
+            j2 - j1
+        ));
+        for (tag, a0, a1, b0, b1) in group {
+            if tag == "equal" || tag == "delete" || tag == "replace" {
+                let prefix = if tag == "equal" { " " } else { "-" };
+                for line in &old_lines[a0..a1] {
+                    out.push(format!("{prefix}{line}"));
+                }
+            }
+            if tag == "insert" || tag == "replace" {
+                for line in &new_lines[b0..b1] {
+                    out.push(format!("+{line}"));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn grouped_opcodes<'a>(
+    a: &[&'a str],
+    b: &[&'a str],
+    context: usize,
+) -> Vec<Vec<(&'static str, usize, usize, usize, usize)>> {
+    let mut codes = opcodes(a, b);
+    if codes.is_empty() {
+        return Vec::new();
+    }
+    if codes[0].0 == "equal" {
+        let (tag, i1, i2, j1, j2) = codes[0];
+        codes[0] = (
+            tag,
+            i2.saturating_sub(context).max(i1),
+            i2,
+            j2.saturating_sub(context).max(j1),
+            j2,
+        );
+    }
+    if codes.last().is_some_and(|code| code.0 == "equal") {
+        let last = codes.len() - 1;
+        let (tag, i1, i2, j1, j2) = codes[last];
+        codes[last] = (tag, i1, i2.min(i1 + context), j1, j2.min(j1 + context));
+    }
+    let nn = context + context;
+    let mut groups = Vec::new();
+    let mut group = Vec::new();
+    for code in codes {
+        let (tag, i1, i2, j1, j2) = code;
+        if tag == "equal" && i2 - i1 > nn {
+            group.push((tag, i1, i1 + context, j1, j1 + context));
+            groups.push(std::mem::take(&mut group));
+            group.push((tag, i2 - context, i2, j2 - context, j2));
+        } else {
+            group.push(code);
+        }
+    }
+    if !(group.len() == 1 && group[0].0 == "equal") && !group.is_empty() {
+        groups.push(group);
+    }
+    groups
+        .into_iter()
+        .filter(|group| group.iter().any(|code| code.0 != "equal"))
+        .collect()
+}
+
+fn opcodes<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<(&'static str, usize, usize, usize, usize)> {
+    let blocks = matching_blocks(a, b);
+    let mut codes = Vec::new();
+    let mut i = 0usize;
+    let mut j = 0usize;
+    for (ai, bj, size) in blocks {
+        if i < ai && j < bj {
+            codes.push(("replace", i, ai, j, bj));
+        } else if i < ai {
+            codes.push(("delete", i, ai, j, j));
+        } else if j < bj {
+            codes.push(("insert", i, i, j, bj));
+        }
+        if size > 0 {
+            codes.push(("equal", ai, ai + size, bj, bj + size));
+        }
+        i = ai + size;
+        j = bj + size;
+    }
+    codes
+}
+
+fn matching_blocks<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<(usize, usize, usize)> {
+    let mut blocks = Vec::new();
+    let mut queue = vec![(0usize, a.len(), 0usize, b.len())];
+    while let Some((alo, ahi, blo, bhi)) = queue.pop() {
+        let (i, j, k) = longest_match(a, b, alo, ahi, blo, bhi);
+        if k == 0 {
+            continue;
+        }
+        blocks.push((i, j, k));
+        if alo < i && blo < j {
+            queue.push((alo, i, blo, j));
+        }
+        if i + k < ahi && j + k < bhi {
+            queue.push((i + k, ahi, j + k, bhi));
+        }
+    }
+    blocks.sort_by_key(|block| block.0);
+    let mut merged: Vec<(usize, usize, usize)> = Vec::new();
+    let mut ia = 0usize;
+    let mut ib = 0usize;
+    for (i, j, k) in blocks {
+        if ia == i && ib == j {
+            if let Some(last) = merged.last_mut() {
+                last.2 += k;
+                ia = i + k;
+                ib = j + k;
+                continue;
+            }
+        }
+        merged.push((i, j, k));
+        ia = i + k;
+        ib = j + k;
+    }
+    merged.push((a.len(), b.len(), 0));
+    merged
+}
+
+fn longest_match<'a>(
+    a: &[&'a str],
+    b: &[&'a str],
+    alo: usize,
+    ahi: usize,
+    blo: usize,
+    bhi: usize,
+) -> (usize, usize, usize) {
+    let mut index: std::collections::HashMap<&str, Vec<usize>> = std::collections::HashMap::new();
+    for (j, line) in b.iter().enumerate().take(bhi).skip(blo) {
+        index.entry(*line).or_default().push(j);
+    }
+    let mut best_i = alo;
+    let mut best_j = blo;
+    let mut best = 0usize;
+    let mut j2len: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for i in alo..ahi {
+        let mut next: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        if let Some(hits) = index.get(a[i]) {
+            for &j in hits {
+                let k = j
+                    .checked_sub(1)
+                    .and_then(|prev| j2len.get(&prev))
+                    .copied()
+                    .unwrap_or(0)
+                    + 1;
+                next.insert(j, k);
+                if k > best {
+                    best = k;
+                    best_i = i + 1 - k;
+                    best_j = j + 1 - k;
+                }
+            }
+        }
+        j2len = next;
+    }
+    (best_i, best_j, best)
+}
+
+fn trim_split<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    let mut lines = lines.to_vec();
+    if lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    lines
 }
 
 fn fs_meta(path: &std::path::Path) -> Option<std::fs::Metadata> {

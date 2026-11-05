@@ -10,7 +10,7 @@ use crate::store::{Conflict, State};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const TTL: i64 = 300;
+pub const TTL: i64 = 300;
 
 pub fn apply(
     state: &mut State,
@@ -21,13 +21,15 @@ pub fn apply(
     now: i64,
     force: bool,
 ) -> Result<Value, String> {
+    let stored = crate::walk::native_sep(path);
+    let path = stored.as_str();
     let mut shared = coordination_dir(cwd).and_then(|dir| Shared::load(&dir));
     let outcome = match action {
         "acquire" => acquire(state, shared.as_mut(), path, agent, now, force),
         "refresh" => refresh(state, shared.as_mut(), path, agent, now),
         "release" => Ok(release(state, shared.as_mut(), path, agent, false, now)),
         "release_all" => Ok(release(state, shared.as_mut(), path, agent, true, now)),
-        "status" => Ok(status(state, shared.as_ref(), path, now)),
+        "status" => Ok(status(state, shared.as_ref(), path, now, cwd)),
         "conflicts" => Ok(conflicts(state, shared.as_ref(), path)),
         "reap" => Ok(reap(state, shared.as_mut(), now)),
         _ => Err(format!("unknown document_lock action '{action}'")),
@@ -52,13 +54,17 @@ fn acquire(
     };
     if let Some((holder, until)) = existing {
         if holder != agent && !force {
-            return Ok(refused(&holder, until));
+            return Ok(refused(shared.as_deref(), &holder, until));
         }
         if holder != agent && force {
             record_conflict(state, &mut shared, path, &holder, agent, now);
         }
     }
+    let coordinated = shared.is_some();
     write_lock(state, shared, path, agent, now + TTL);
+    if coordinated {
+        return Ok(Value::object(vec![("acquired", Value::Bool(true))]));
+    }
     let version = state
         .documents
         .iter()
@@ -68,7 +74,6 @@ fn acquire(
     Ok(Value::object(vec![
         ("acquired", Value::Bool(true)),
         ("doc_version", Value::Int(version)),
-        ("locked_by", Value::string(agent)),
     ]))
 }
 
@@ -86,7 +91,10 @@ fn refresh(
     match existing {
         Some((holder, _)) if holder == agent => {
             write_lock(state, shared, path, agent, now + TTL);
-            Ok(Value::object(vec![("refreshed", Value::Bool(true))]))
+            Ok(Value::object(vec![
+                ("refreshed", Value::Bool(true)),
+                ("expires_at", Value::Float((now + TTL) as f64)),
+            ]))
         }
         Some(_) => Ok(Value::object(vec![
             ("refreshed", Value::Bool(false)),
@@ -124,15 +132,23 @@ fn record_conflict(
     agent: &str,
     now: i64,
 ) {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or(now as f64);
     let row = Conflict {
         path: path.to_string(),
         holder: holder.to_string(),
         requester: agent.to_string(),
-        at: now,
+        at: (stamp * 1_000_000.0).round() as i64,
+        kind: "lock_stolen".to_string(),
     };
-    state.conflicts.push(row.clone());
+    // 1.5.2 writes a force-steal to the shared conflict log. stats counts
+    // document_conflicts only, which stays empty for that event.
     if let Some(shared) = shared.as_mut() {
         shared.conflicts.push(row);
+    } else {
+        state.conflicts.push(row);
     }
 }
 
@@ -145,18 +161,29 @@ fn release(
     now: i64,
 ) -> Value {
     if all {
-        let released = state
-            .locks
-            .iter()
-            .filter(|lock| lock.agent == agent)
-            .count();
+        let documents: Vec<Value> = if let Some(shared) = shared.as_ref() {
+            shared
+                .locks
+                .iter()
+                .filter(|lock| lock.agent == agent)
+                .map(|lock| Value::string(&lock.path))
+                .collect()
+        } else {
+            state
+                .locks
+                .iter()
+                .filter(|lock| lock.agent == agent)
+                .map(|lock| Value::string(&lock.path))
+                .collect()
+        };
+        let released_count = documents.len() as i64;
         state.locks.retain(|lock| lock.agent != agent);
         if let Some(shared) = shared {
             shared.locks.retain(|lock| lock.agent != agent);
         }
         return Value::object(vec![
-            ("released", Value::Bool(true)),
-            ("count", Value::Int(released as i64)),
+            ("released_count", Value::Int(released_count)),
+            ("documents", Value::Array(documents)),
         ]);
     }
     let holder = {
@@ -182,28 +209,29 @@ fn release(
     }
 }
 
-fn status(state: &State, shared: Option<&Shared>, path: &str, now: i64) -> Value {
+fn status(state: &State, shared: Option<&Shared>, path: &str, now: i64, _cwd: &Path) -> Value {
     match live_holder(state, shared, path, now) {
-        None => Value::object(vec![
-            ("locked", Value::Bool(false)),
-            (
-                "doc_version",
-                Value::Int(
-                    state
-                        .documents
-                        .iter()
-                        .find(|doc| doc.path == path)
-                        .map(|doc| doc.doc_version as i64)
-                        .unwrap_or(0),
-                ),
-            ),
-        ]),
-        Some((holder, until)) => Value::object(vec![
-            ("locked", Value::Bool(true)),
-            ("locked_by", Value::string(holder)),
-            ("locked_at", Value::Int(until - TTL)),
-            ("expires_at", Value::Int(until)),
-        ]),
+        None => Value::object(vec![("locked", Value::Bool(false))]),
+        Some((holder, until)) => {
+            let worktree = shared
+                .and_then(|shared| {
+                    shared.agents.iter().find_map(|row| {
+                        if text_field(row, "agent_id") == holder {
+                            Some(Value::string(text_field(row, "worktree_root")))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or(Value::Null);
+            Value::object(vec![
+                ("locked", Value::Bool(true)),
+                ("locked_by", Value::string(holder)),
+                ("locked_at", Value::Float((until - TTL) as f64)),
+                ("expires_at", Value::Float(until as f64)),
+                ("worktree", worktree),
+            ])
+        }
     }
 }
 
@@ -216,13 +244,30 @@ fn conflicts(state: &State, shared: Option<&Shared>, path: &str) -> Value {
     let rendered = rows
         .into_iter()
         .filter(|row| path.is_empty() || row.path == path)
-        .map(|row| {
+        .enumerate()
+        .map(|(index, row)| {
+            let resolution = if row.kind == "lock_stolen" {
+                "force_overwritten"
+            } else {
+                "rejected"
+            };
             Value::object(vec![
-                ("path", Value::string(row.path)),
-                ("holder", Value::string(row.holder)),
-                ("requester", Value::string(row.requester)),
-                ("at", Value::Int(row.at)),
-                ("conflict_type", Value::string("lock_stolen")),
+                ("id", Value::Int(index as i64 + 1)),
+                ("document_path", Value::string(row.path)),
+                ("agent_a", Value::string(row.holder)),
+                ("agent_b", Value::string(row.requester)),
+                ("conflict_type", Value::string(row.kind)),
+                ("expected_version", Value::Null),
+                ("actual_version", Value::Null),
+                ("resolution", Value::string(resolution)),
+                (
+                    "created_at",
+                    Value::Float(if row.at > 1_000_000_000_000 {
+                        row.at as f64 / 1_000_000.0
+                    } else {
+                        row.at as f64
+                    }),
+                ),
             ])
         })
         .collect();
@@ -230,23 +275,45 @@ fn conflicts(state: &State, shared: Option<&Shared>, path: &str) -> Value {
 }
 
 fn reap(state: &mut State, shared: Option<&mut Shared>, now: i64) -> Value {
-    let before = state.locks.len();
-    state.locks.retain(|lock| lock.until > now);
-    let mut reaped = before - state.locks.len();
-    if let Some(shared) = shared {
-        let shared_before = shared.locks.len();
+    let reaped = if let Some(shared) = shared {
+        let before = shared.locks.len();
         shared.locks.retain(|lock| lock.until > now);
-        reaped += shared_before - shared.locks.len();
-    }
-    Value::object(vec![("reaped", Value::Int(reaped as i64))])
+        state.locks.retain(|lock| lock.until > now);
+        before - shared.locks.len()
+    } else {
+        let before = state.locks.len();
+        state.locks.retain(|lock| lock.until > now);
+        before - state.locks.len()
+    };
+    Value::object(vec![
+        ("reaped_count", Value::Int(reaped as i64)),
+        ("documents", Value::Array(Vec::new())),
+    ])
 }
 
-fn refused(holder: &str, until: i64) -> Value {
+fn refused(shared: Option<&Shared>, holder: &str, until: i64) -> Value {
+    let worktree = shared
+        .and_then(|shared| {
+            shared.agents.iter().find_map(|row| {
+                if text_field(row, "agent_id") == holder {
+                    let root = text_field(row, "worktree_root");
+                    if root.is_empty() {
+                        None
+                    } else {
+                        Some(Value::string(root))
+                    }
+                } else {
+                    None
+                }
+            })
+        })
+        .unwrap_or(Value::Null);
     Value::object(vec![
         ("acquired", Value::Bool(false)),
         ("locked_by", Value::string(holder)),
-        ("locked_at", Value::Int(until - TTL)),
-        ("expires_at", Value::Int(until)),
+        ("locked_at", Value::Float((until - TTL) as f64)),
+        ("expires_at", Value::Float(until as f64)),
+        ("worktree", worktree),
     ])
 }
 
@@ -353,6 +420,8 @@ struct Shared {
     path: PathBuf,
     locks: Vec<crate::store::Lock>,
     conflicts: Vec<Conflict>,
+    notifications: Vec<Value>,
+    agents: Vec<Value>,
 }
 
 impl Shared {
@@ -373,14 +442,32 @@ impl Shared {
                     holder: text_field(row, "holder"),
                     requester: text_field(row, "requester"),
                     at: int_field(row, "at"),
+                    kind: {
+                        let kind = text_field(row, "kind");
+                        if kind.is_empty() {
+                            "lock_stolen".to_string()
+                        } else {
+                            kind
+                        }
+                    },
                 })
                 .collect(),
+            _ => Vec::new(),
+        };
+        let notifications = match field(&value, "notifications") {
+            Some(Value::Array(rows)) => rows.clone(),
+            _ => Vec::new(),
+        };
+        let agents = match field(&value, "agents") {
+            Some(Value::Array(rows)) => rows.clone(),
             _ => Vec::new(),
         };
         Some(Shared {
             path,
             locks,
             conflicts,
+            notifications,
+            agents,
         })
     }
 
@@ -419,11 +506,14 @@ impl Shared {
                                 ("holder", Value::string(&row.holder)),
                                 ("requester", Value::string(&row.requester)),
                                 ("at", Value::Int(row.at)),
+                                ("kind", Value::string(&row.kind)),
                             ])
                         })
                         .collect(),
                 ),
             ),
+            ("notifications", Value::Array(self.notifications.clone())),
+            ("agents", Value::Array(self.agents.clone())),
         ]));
         let _ = fs::write(&self.path, body);
     }
@@ -461,14 +551,125 @@ fn int_field(value: &Value, key: &str) -> i64 {
     }
 }
 
+pub fn hold_shared(start: &Path, path: &str, agent: &str, now: i64) {
+    let Some(dir) = coordination_dir(start) else {
+        return;
+    };
+    let Some(mut shared) = Shared::load(&dir) else {
+        return;
+    };
+    shared.locks.retain(|lock| lock.path != path);
+    shared.locks.push(crate::store::Lock {
+        path: path.to_string(),
+        agent: agent.to_string(),
+        until: now + TTL,
+    });
+    shared.save();
+}
+
+pub fn register_agent(start: &Path, agent: &str, worktree: &str) {
+    let Some(dir) = coordination_dir(start) else {
+        return;
+    };
+    let Some(mut shared) = Shared::load(&dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    if let Some(row) = shared
+        .agents
+        .iter_mut()
+        .find(|row| text_field(row, "agent_id") == agent)
+    {
+        if let Value::Object(pairs) = row {
+            for (key, value) in [
+                ("status", Value::string("active")),
+                ("worktree_root", Value::string(worktree)),
+                ("last_heartbeat", Value::Float(now)),
+            ] {
+                if let Some((_, item)) = pairs.iter_mut().find(|(name, _)| name == key) {
+                    *item = value;
+                } else {
+                    pairs.push((key.to_string(), value));
+                }
+            }
+        }
+    } else {
+        shared.agents.push(Value::object(vec![
+            ("agent_id", Value::string(agent)),
+            ("worktree_root", Value::string(worktree)),
+            ("status", Value::string("active")),
+            ("last_heartbeat", Value::Float(now)),
+            ("started_at", Value::Float(now)),
+            ("pid", Value::Int(std::process::id() as i64)),
+        ]));
+    }
+    shared.save();
+}
+
+pub fn note_indexed(start: &Path, paths: &[String], agent: &str) {
+    note_change(start, paths, agent, "indexed")
+}
+
+pub fn note_change(start: &Path, paths: &[String], agent: &str, change_type: &str) {
+    if paths.is_empty() {
+        return;
+    }
+    let Some(dir) = coordination_dir(start) else {
+        return;
+    };
+    let _ = fs::create_dir_all(&dir);
+    let path = dir.join("coordination.json");
+    let text = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
+    let mut value = json::parse(&text).unwrap_or(Value::object(vec![]));
+    let Value::Object(pairs) = &mut value else {
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    let worktree = start.display().to_string();
+    let mut notes = match pairs.iter().find(|(key, _)| key == "notifications") {
+        Some((_, Value::Array(rows))) => rows.clone(),
+        _ => Vec::new(),
+    };
+    for (offset, doc) in paths.iter().enumerate() {
+        notes.push(Value::object(vec![
+            ("id", Value::Int((notes.len() + 1) as i64)),
+            ("document_path", Value::string(doc)),
+            ("change_type", Value::string(change_type)),
+            ("agent_id", Value::string(agent)),
+            (
+                "worktree_root",
+                if agent.is_empty() {
+                    Value::Null
+                } else {
+                    Value::string(&worktree)
+                },
+            ),
+            ("created_at", Value::Float(now + offset as f64 * 0.000001)),
+        ]));
+    }
+    if let Some((_, item)) = pairs.iter_mut().find(|(key, _)| key == "notifications") {
+        *item = Value::Array(notes);
+    } else {
+        pairs.push(("notifications".to_string(), Value::Array(notes)));
+    }
+    let _ = fs::write(&path, json::to_string(&value));
+}
+
 pub fn coordination_dir(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
         let git = dir.join(".git");
-        if git.is_dir() {
+        let kind = fs::metadata(&git).ok();
+        if kind.as_ref().is_some_and(|meta| meta.is_dir()) {
             return Some(common_of(&git).join("stele-context"));
         }
-        if git.is_file() {
+        if kind.as_ref().is_some_and(|meta| meta.is_file()) {
             let text = fs::read_to_string(&git).ok()?;
             let rest = text.trim().strip_prefix("gitdir:")?;
             let gitdir = PathBuf::from(rest.trim());

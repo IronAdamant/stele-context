@@ -14,7 +14,10 @@ pub mod lang;
 pub mod locks;
 pub mod mcp;
 pub mod media;
+#[cfg(test)]
+pub(crate) mod oracle;
 pub mod pyre;
+pub mod pyver;
 pub mod root;
 pub mod search;
 pub mod store;
@@ -23,7 +26,7 @@ pub mod syntax;
 pub mod walk;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const SCHEMA_VERSION: &str = "2.0.0";
+pub const SCHEMA_VERSION: &str = "2.1.0";
 
 #[cfg(test)]
 mod zero_deps {

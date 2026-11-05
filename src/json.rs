@@ -48,6 +48,41 @@ pub fn parse(input: &str) -> Result<Value, ParseError> {
     Ok(value)
 }
 
+/// `json.dumps` default separators and ASCII escapes, for zlib KV files.
+pub fn dumps_python(value: &Value) -> String {
+    let mut out = String::new();
+    write_python(&mut out, value);
+    out
+}
+
+fn write_python(out: &mut String, value: &Value) {
+    match value {
+        Value::Array(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                write_python(out, item);
+            }
+            out.push(']');
+        }
+        Value::Object(pairs) => {
+            out.push('{');
+            for (index, (key, item)) in pairs.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                write_string(out, key);
+                out.push_str(": ");
+                write_python(out, item);
+            }
+            out.push('}');
+        }
+        other => write_value(out, other),
+    }
+}
+
 pub fn to_string(value: &Value) -> String {
     let mut out = String::new();
     write_value(&mut out, value);
@@ -291,7 +326,15 @@ fn write_value(out: &mut String, value: &Value) {
             let _ = write!(out, "{integer}");
         }
         Value::Float(float) => {
-            let _ = write!(out, "{float}");
+            if !float.is_finite() {
+                out.push_str("null");
+            } else {
+                let text = format!("{float}");
+                out.push_str(&text);
+                if !text.contains('.') && !text.contains('e') && !text.contains('E') {
+                    out.push_str(".0");
+                }
+            }
         }
         Value::String(text) => write_string(out, text),
         Value::Array(items) => {
@@ -362,4 +405,86 @@ mod tests {
         let value = parse(r#""a\"b\n\u0041""#).unwrap();
         assert_eq!(value, Value::String("a\"b\nA".to_string()));
     }
+}
+
+/// Python `repr()` of a value parsed from JSON: `{'k': 'v'}`, `True`,
+/// `None`, floats the way `float.__repr__` writes them. Used where 1.5.2
+/// formats an argument into an error string.
+pub fn py_repr(value: &Value) -> String {
+    match value {
+        Value::Null => "None".to_string(),
+        Value::Bool(true) => "True".to_string(),
+        Value::Bool(false) => "False".to_string(),
+        Value::Int(number) => number.to_string(),
+        Value::Float(number) => py_float_repr(*number),
+        Value::String(text) => py_str_repr(text),
+        Value::Array(rows) => {
+            let parts: Vec<String> = rows.iter().map(py_repr).collect();
+            format!("[{}]", parts.join(", "))
+        }
+        Value::Object(pairs) => {
+            let parts: Vec<String> = pairs
+                .iter()
+                .map(|(key, item)| format!("{}: {}", py_str_repr(key), py_repr(item)))
+                .collect();
+            format!("{{{}}}", parts.join(", "))
+        }
+    }
+}
+
+fn py_float_repr(number: f64) -> String {
+    if number.is_nan() {
+        return "nan".to_string();
+    }
+    if number.is_infinite() {
+        return if number > 0.0 { "inf" } else { "-inf" }.to_string();
+    }
+    let abs = number.abs();
+    if abs != 0.0 && !(1e-4..1e16).contains(&abs) {
+        // Shortest round-trip digits in Python's exponent form: 1e-05, 1.5e+16.
+        let text = format!("{number:e}");
+        let (mantissa, exponent) = text.split_once('e').unwrap_or((&text, "0"));
+        let exponent: i32 = exponent.parse().unwrap_or(0);
+        let sign = if exponent < 0 { '-' } else { '+' };
+        return format!("{mantissa}e{sign}{:02}", exponent.abs());
+    }
+    let text = format!("{number}");
+    if text.contains('.') {
+        text
+    } else {
+        format!("{text}.0")
+    }
+}
+
+/// `str.__repr__`: single quotes unless the text has a single quote and no
+/// double quote; backslash escapes for control characters.
+fn py_str_repr(text: &str) -> String {
+    let quote = if text.contains('\'') && !text.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push(quote);
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c == quote => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+                out.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c if (0x80..0xa0).contains(&(c as u32)) => {
+                out.push_str(&format!("\\x{:02x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push(quote);
+    out
 }

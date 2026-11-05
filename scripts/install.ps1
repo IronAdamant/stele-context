@@ -1,5 +1,5 @@
 # Install a stele-context 2.x Windows binary from a GitHub Release.
-$Version = if ($env:STELE_VERSION) { $env:STELE_VERSION } else { "2.0.0" }
+$Version = if ($env:STELE_VERSION) { $env:STELE_VERSION } else { "2.1.0" }
 $Prefix = if ($env:STELE_PREFIX) { $env:STELE_PREFIX } else { Join-Path $env:LOCALAPPDATA "stele-context" }
 $Repo = if ($env:STELE_REPO) { $env:STELE_REPO } else { "IronAdamant/stele-context" }
 $Arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq "Arm64") {

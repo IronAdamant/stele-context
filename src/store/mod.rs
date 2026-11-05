@@ -2,7 +2,15 @@
 //!
 //! The snapshot is the readable state. The journal records each successful
 //! mutation. A crash while writing the temp snapshot leaves the previous
-//! snapshot in place. The legacy SQLite file is never opened here.
+//! snapshot in place. The legacy SQLite file is not opened by the snapshot
+//! loader. `sqlite` reads a 1.5 database when `migrate` asks it to.
+
+mod sqlite;
+mod zlib;
+
+pub(crate) use zlib::compress;
+
+pub use sqlite::{blob as sql_blob, number as sql_number, text as sql_text, SqliteDb};
 
 use crate::json::{self, Value};
 use std::fs::{self, File};
@@ -16,6 +24,9 @@ pub struct Document {
     pub size: u64,
     pub sha256: String,
     pub doc_version: u64,
+    pub chunk_count: u32,
+    /// Unix seconds when this document was last indexed. Not the file mtime.
+    pub indexed_at: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -32,6 +43,19 @@ pub struct Chunk {
     pub language: Option<String>,
     pub summary: Option<String>,
     pub notes: Option<String>,
+    pub version: u64,
+    pub staleness: f64,
+    pub stale_since: Option<i64>,
+    /// Caller-supplied vector. Empty means none. Any positive length is kept.
+    pub embedding: Vec<f32>,
+}
+
+impl Chunk {
+    /// 1.5.2 Tier 2: the chunk has an `agent_signature`. A summary, a stored
+    /// embedding, and `llm_embed` all write one.
+    pub fn has_tier2(&self) -> bool {
+        self.summary.is_some() || !self.embedding.is_empty()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +76,9 @@ pub struct Annotation {
     pub path: String,
     pub body: String,
     pub tags: Vec<String>,
+    pub target_type: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -67,6 +94,7 @@ pub struct Conflict {
     pub holder: String,
     pub requester: String,
     pub at: i64,
+    pub kind: String,
 }
 
 #[derive(Clone, Debug)]
@@ -83,13 +111,87 @@ pub struct Session {
     pub searches: Vec<String>,
     pub reads: Vec<String>,
     pub kv: Vec<(String, String)>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub turn: i64,
+    pub tokens: i64,
+    pub agent: String,
+    pub attached: Vec<(String, i64, f64)>,
+    /// JSON payload saved with each chunk, keyed by chunk id and turn.
+    pub kv_state: Vec<(String, i64, String)>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchRow {
+    pub pattern: String,
+    pub tool: String,
+    pub files_checked: i64,
+    pub files_with_matches: i64,
+    /// Seconds since the epoch, fractional (1.5.2 `searched_at`).
+    pub at: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ChunkHist {
+    pub chunk_id: String,
+    pub version: u64,
+    pub hash: String,
+    pub at: i64,
+    pub path: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ChangeRow {
+    pub at: i64,
+    pub session: String,
+    pub summary: String,
+    pub reason: String,
+}
+
+impl ChangeRow {
+    pub(crate) fn to_line(&self) -> String {
+        crate::json::to_string(&self.to_json())
+    }
+
+    fn to_json(&self) -> Value {
+        Value::object(vec![
+            ("at", Value::Int(self.at)),
+            ("session", Value::string(&self.session)),
+            ("summary", Value::string(&self.summary)),
+            ("reason", Value::string(&self.reason)),
+        ])
+    }
+
+    pub(crate) fn load_file(storage: &Path) -> Vec<ChangeRow> {
+        let text =
+            fs::read_to_string(storage.join("store").join("changes.jsonl")).unwrap_or_default();
+        text.lines()
+            .filter_map(|line| json::parse(line).ok())
+            .map(|value| ChangeRow::from_json(&value))
+            .collect()
+    }
+
+    fn from_json(value: &Value) -> ChangeRow {
+        ChangeRow {
+            at: int_field(value, "at"),
+            session: string_field(value, "session"),
+            summary: string_field(value, "summary"),
+            reason: string_field(value, "reason"),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Dynamic {
     pub name: String,
     pub kind: String,
+    pub role: String,
     pub path: String,
+    pub agent: String,
+    pub line: u32,
+    pub chunk_id: String,
+    /// Stable id assigned at registration. Listing does not renumber it.
+    pub id: i64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -103,9 +205,22 @@ pub struct State {
     pub edges: Vec<Edge>,
     pub sessions: Vec<Session>,
     pub dynamic: Vec<Dynamic>,
+    pub chunk_history: Vec<ChunkHist>,
+    pub change_log: Vec<ChangeRow>,
+    pub next_annotation: i64,
     pub seq: u64,
+    /// HNSW inserts. Grows on every vector add and does not shrink on remove.
+    pub inserts: u64,
+    /// Next symbol id. SQLite row ids keep climbing after a rebuild.
+    pub next_symbol_id: i64,
     /// Parallel to `chunks`. Not part of the JSON snapshot; `signatures.bin`.
     pub sigs: Vec<[f32; 128]>,
+    /// agent_grep / search_text runs per session id (1.5.2
+    /// `session_searches`). Recording one does not create a session.
+    pub search_log: Vec<(String, SearchRow)>,
+    /// Documents-only load: the snapshot may hold a `memory:` chunk, which
+    /// has no document row. Not serialised.
+    pub memory_hint: bool,
 }
 
 pub struct Store {
@@ -134,16 +249,68 @@ impl Store {
         })
     }
 
-    pub fn save(&mut self, op: &str, detail: &Value) -> Result<(), String> {
-        self.state.seq = self.state.seq.saturating_add(1);
-        if self.state.sigs.len() != self.state.chunks.len() {
-            self.state.sigs = self
-                .state
+    /// Document rows only. `detect` uses this while mtime and size still match,
+    /// so it does not parse chunk bodies or the signature file.
+    pub fn open_documents(storage: &Path) -> Result<Store, String> {
+        let dir = storage.join("store");
+        fs::create_dir_all(&dir).map_err(|err| format!("create store: {err}"))?;
+        let lock_path = dir.join("lock");
+        let lock = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&lock_path)
+            .map_err(|err| format!("open lock: {err}"))?;
+        lock.lock().map_err(|err| format!("lock store: {err}"))?;
+        let state = load_documents_only(&dir.join("snapshot.json"))
+            .unwrap_or_else(|| load_snapshot(&dir.join("snapshot.json")).unwrap_or_default());
+        Ok(Store {
+            dir,
+            state,
+            _lock: lock,
+        })
+    }
+
+    pub fn reload_full(&mut self) -> Result<(), String> {
+        self.state = load_snapshot(&self.dir.join("snapshot.json")).unwrap_or_default();
+        Ok(())
+    }
+
+    /// Keyword search does not read signatures. Load the side file on the
+    /// first hybrid query or save, and keep a hex signature if the file is absent.
+    pub fn signature_rows(&self) -> Vec<[f32; 128]> {
+        let loaded = read_sigs(&self.dir.join("signatures.bin"), self.state.chunks.len());
+        if loaded.len() == self.state.chunks.len() {
+            loaded
+        } else {
+            self.state
                 .chunks
                 .iter()
                 .map(|chunk| decode_hex_sig(&chunk.signature))
-                .collect();
+                .collect()
         }
+    }
+
+    pub fn ensure_sigs(&mut self) {
+        if self.state.sigs.len() == self.state.chunks.len() {
+            return;
+        }
+        let loaded = read_sigs(&self.dir.join("signatures.bin"), self.state.chunks.len());
+        if loaded.len() == self.state.chunks.len() {
+            self.state.sigs = loaded;
+            return;
+        }
+        self.state.sigs = self
+            .state
+            .chunks
+            .iter()
+            .map(|chunk| decode_hex_sig(&chunk.signature))
+            .collect();
+    }
+
+    pub fn save(&mut self, op: &str, detail: &Value) -> Result<(), String> {
+        self.state.seq = self.state.seq.saturating_add(1);
+        self.ensure_sigs();
         write_sigs(&self.dir.join("signatures.bin"), &self.state)?;
         let body = json::to_vec(&self.state.to_json());
         let tmp = self.dir.join("snapshot.json.tmp");
@@ -152,7 +319,8 @@ impl Store {
             let mut file = File::create(&tmp).map_err(|err| format!("write snapshot: {err}"))?;
             file.write_all(&body)
                 .map_err(|err| format!("write snapshot: {err}"))?;
-            file.sync_all().ok();
+            // rename replaces the previous snapshot. The index is rebuilt
+            // from the source files, so this write is not fsynced.
         }
         fs::rename(&tmp, &final_path).map_err(|err| format!("rename snapshot: {err}"))?;
         let mut line = json::to_string(&Value::object(vec![
@@ -238,6 +406,35 @@ impl State {
                 "dynamic",
                 Value::Array(self.dynamic.iter().map(Dynamic::to_json).collect()),
             ),
+            (
+                "change_log",
+                Value::Array(self.change_log.iter().map(ChangeRow::to_json).collect()),
+            ),
+            ("next_annotation", Value::Int(self.next_annotation)),
+            ("inserts", Value::Int(self.inserts as i64)),
+            ("next_symbol_id", Value::Int(self.next_symbol_id)),
+            (
+                "chunk_history",
+                Value::Array(self.chunk_history.iter().map(ChunkHist::to_json).collect()),
+            ),
+            (
+                "search_log",
+                Value::Array(
+                    self.search_log
+                        .iter()
+                        .map(|(session, row)| {
+                            Value::object(vec![
+                                ("session_id", Value::string(session)),
+                                ("pattern", Value::string(&row.pattern)),
+                                ("tool", Value::string(&row.tool)),
+                                ("files_checked", Value::Int(row.files_checked)),
+                                ("files_with_matches", Value::Int(row.files_with_matches)),
+                                ("searched_at", Value::Float(row.at)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
         ])
     }
 }
@@ -245,11 +442,62 @@ impl State {
 fn load_snapshot(path: &Path) -> Option<State> {
     let text = fs::read_to_string(path).ok()?;
     let value = json::parse(&text).ok()?;
-    let mut state = State::from_json(&value);
-    if let Some(dir) = path.parent() {
-        state.sigs = read_sigs(&dir.join("signatures.bin"), state.chunks.len());
-    }
+    Some(State::from_json(&value))
+}
+
+fn load_documents_only(path: &Path) -> Option<State> {
+    let text = fs::read_to_string(path).ok()?;
+    let slice = documents_array(&text)?;
+    let value = json::parse(slice).ok()?;
+    let crate::json::Value::Array(rows) = value else {
+        return None;
+    };
+    let mut state = State::default();
+    state.documents = rows.iter().map(Document::from_json).collect();
+    state.memory_hint = text.contains("\"memory:");
     Some(state)
+}
+
+/// The top-level `documents` array. It is written before chunk bodies, so the
+/// first match is the key rather than a string inside a chunk.
+fn documents_array(text: &str) -> Option<&str> {
+    let key = "\"documents\":";
+    let start = text.find(key)? + key.len();
+    let bytes = text.as_bytes();
+    let mut index = start;
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    if bytes.get(index) != Some(&b'[') {
+        return None;
+    }
+    let begin = index;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if escape {
+                escape = false;
+            } else if byte == b'\\' {
+                escape = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+        } else if byte == b'"' {
+            in_string = true;
+        } else if byte == b'[' {
+            depth += 1;
+        } else if byte == b']' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(&text[begin..=index]);
+            }
+        }
+        index += 1;
+    }
+    None
 }
 
 fn write_sigs(path: &Path, state: &State) -> Result<(), String> {
@@ -289,7 +537,7 @@ fn read_sigs(path: &Path, count: usize) -> Vec<[f32; 128]> {
     out
 }
 
-fn decode_hex_sig(hex: &str) -> [f32; 128] {
+pub(crate) fn decode_hex_sig(hex: &str) -> [f32; 128] {
     let mut out = [0f32; 128];
     let bytes = hex.as_bytes();
     for lane in 0..128 {
@@ -331,7 +579,35 @@ impl State {
             edges: array(value, "edges").map(Edge::from_json).collect(),
             sessions: array(value, "sessions").map(Session::from_json).collect(),
             dynamic: array(value, "dynamic").map(Dynamic::from_json).collect(),
+            chunk_history: array(value, "chunk_history")
+                .map(ChunkHist::from_json)
+                .collect(),
+            change_log: array(value, "change_log")
+                .map(ChangeRow::from_json)
+                .collect(),
+            next_annotation: int_field(value, "next_annotation"),
+            inserts: int_field(value, "inserts") as u64,
+            next_symbol_id: int_field(value, "next_symbol_id"),
             sigs: Vec::new(),
+            search_log: array(value, "search_log")
+                .map(|item| {
+                    (
+                        string_field(item, "session_id"),
+                        SearchRow {
+                            pattern: string_field(item, "pattern"),
+                            tool: string_field(item, "tool"),
+                            files_checked: int_field(item, "files_checked"),
+                            files_with_matches: int_field(item, "files_with_matches"),
+                            at: match field(item, "searched_at") {
+                                Some(Value::Float(at)) => *at,
+                                Some(Value::Int(at)) => *at as f64,
+                                _ => 0.0,
+                            },
+                        },
+                    )
+                })
+                .collect(),
+            memory_hint: false,
         }
     }
 }
@@ -344,6 +620,8 @@ impl Document {
             ("size", Value::Int(self.size as i64)),
             ("sha256", Value::string(&self.sha256)),
             ("doc_version", Value::Int(self.doc_version as i64)),
+            ("chunk_count", Value::Int(self.chunk_count as i64)),
+            ("indexed_at", Value::Float(self.indexed_at)),
         ])
     }
     fn from_json(value: &Value) -> Document {
@@ -353,6 +631,8 @@ impl Document {
             size: int_field(value, "size") as u64,
             sha256: string_field(value, "sha256"),
             doc_version: int_field(value, "doc_version") as u64,
+            chunk_count: int_field(value, "chunk_count") as u32,
+            indexed_at: float_field(value, "indexed_at"),
         }
     }
 }
@@ -371,6 +651,15 @@ impl Chunk {
             ("language", opt_string(&self.language)),
             ("summary", opt_string(&self.summary)),
             ("notes", opt_string(&self.notes)),
+            (
+                "embedding",
+                Value::Array(
+                    self.embedding
+                        .iter()
+                        .map(|lane| Value::Float(*lane as f64))
+                        .collect(),
+                ),
+            ),
         ])
     }
     fn from_json(value: &Value) -> Chunk {
@@ -387,6 +676,23 @@ impl Chunk {
             language: opt_string_field(value, "language"),
             summary: opt_string_field(value, "summary"),
             notes: opt_string_field(value, "notes"),
+            version: match int_field(value, "version") {
+                0 => 1,
+                number => number as u64,
+            },
+            staleness: float_field(value, "staleness"),
+            stale_since: opt_int_field(value, "stale_since"),
+            embedding: match field(value, "embedding") {
+                Some(Value::Array(rows)) => rows
+                    .iter()
+                    .map(|item| match item {
+                        Value::Float(number) => *number as f32,
+                        Value::Int(number) => *number as f32,
+                        _ => 0.0,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
         }
     }
 }
@@ -428,6 +734,9 @@ impl Annotation {
                 "tags",
                 Value::Array(self.tags.iter().cloned().map(Value::String).collect()),
             ),
+            ("target_type", Value::string(&self.target_type)),
+            ("created_at", Value::Int(self.created_at)),
+            ("updated_at", Value::Int(self.updated_at)),
         ])
     }
     fn from_json(value: &Value) -> Annotation {
@@ -441,6 +750,9 @@ impl Annotation {
                     _ => None,
                 })
                 .collect(),
+            target_type: string_field(value, "target_type"),
+            created_at: int_field(value, "created_at"),
+            updated_at: int_field(value, "updated_at"),
         }
     }
 }
@@ -452,6 +764,7 @@ impl Conflict {
             ("holder", Value::string(&self.holder)),
             ("requester", Value::string(&self.requester)),
             ("at", Value::Int(self.at)),
+            ("kind", Value::string(&self.kind)),
         ])
     }
     fn from_json(value: &Value) -> Conflict {
@@ -460,6 +773,14 @@ impl Conflict {
             holder: string_field(value, "holder"),
             requester: string_field(value, "requester"),
             at: int_field(value, "at"),
+            kind: {
+                let kind = string_field(value, "kind");
+                if kind.is_empty() {
+                    "lock_stolen".to_string()
+                } else {
+                    kind
+                }
+            },
         }
     }
 }
@@ -526,9 +847,42 @@ impl Session {
                         .collect(),
                 ),
             ),
+            ("created_at", Value::Int(self.created_at)),
+            ("updated_at", Value::Int(self.updated_at)),
+            ("turn", Value::Int(self.turn)),
+            ("tokens", Value::Int(self.tokens)),
+            ("agent", Value::string(&self.agent)),
+            (
+                "kv_state",
+                Value::Array(
+                    self.kv_state
+                        .iter()
+                        .map(|(chunk_id, turn, data)| {
+                            Value::object(vec![
+                                ("chunk_id", Value::string(chunk_id)),
+                                ("turn", Value::Int(*turn)),
+                                ("data", Value::string(data)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
         ])
     }
     fn from_json(value: &Value) -> Session {
+        let kv_state: Vec<(String, i64, String)> = array(value, "kv_state")
+            .map(|item| {
+                (
+                    string_field(item, "chunk_id"),
+                    int_field(item, "turn"),
+                    string_field(item, "data"),
+                )
+            })
+            .collect();
+        let attached = kv_state
+            .iter()
+            .map(|(chunk_id, turn, _)| (chunk_id.clone(), *turn, 1.0))
+            .collect();
         Session {
             id: string_field(value, "id"),
             searches: strings(value, "searches"),
@@ -536,6 +890,13 @@ impl Session {
             kv: array(value, "kv")
                 .map(|item| (string_field(item, "k"), string_field(item, "v")))
                 .collect(),
+            created_at: int_field(value, "created_at"),
+            updated_at: int_field(value, "updated_at"),
+            turn: int_field(value, "turn"),
+            tokens: int_field(value, "tokens"),
+            agent: string_field(value, "agent"),
+            attached,
+            kv_state,
         }
     }
 }
@@ -545,15 +906,69 @@ impl Dynamic {
         Value::object(vec![
             ("name", Value::string(&self.name)),
             ("kind", Value::string(&self.kind)),
+            ("role", Value::string(&self.role)),
             ("path", Value::string(&self.path)),
+            ("agent", Value::string(&self.agent)),
+            ("line", Value::Int(self.line as i64)),
+            ("chunk_id", Value::string(&self.chunk_id)),
+            ("id", Value::Int(self.id)),
         ])
     }
     fn from_json(value: &Value) -> Dynamic {
         Dynamic {
             name: string_field(value, "name"),
             kind: string_field(value, "kind"),
+            role: {
+                let role = string_field(value, "role");
+                if role.is_empty() {
+                    "definition".to_string()
+                } else {
+                    role
+                }
+            },
+            path: string_field(value, "path"),
+            agent: string_field(value, "agent"),
+            line: int_field(value, "line") as u32,
+            chunk_id: string_field(value, "chunk_id"),
+            id: int_field(value, "id"),
+        }
+    }
+}
+
+impl ChunkHist {
+    fn to_json(&self) -> Value {
+        Value::object(vec![
+            ("chunk_id", Value::string(&self.chunk_id)),
+            ("version", Value::Int(self.version as i64)),
+            ("hash", Value::string(&self.hash)),
+            ("at", Value::Int(self.at)),
+            ("path", Value::string(&self.path)),
+        ])
+    }
+    fn from_json(value: &Value) -> ChunkHist {
+        ChunkHist {
+            chunk_id: string_field(value, "chunk_id"),
+            version: int_field(value, "version") as u64,
+            hash: string_field(value, "hash"),
+            at: int_field(value, "at"),
             path: string_field(value, "path"),
         }
+    }
+}
+
+pub(crate) fn float_field(value: &Value, key: &str) -> f64 {
+    match field(value, key) {
+        Some(Value::Float(number)) => *number,
+        Some(Value::Int(number)) => *number as f64,
+        _ => 0.0,
+    }
+}
+
+fn opt_int_field(value: &Value, key: &str) -> Option<i64> {
+    match field(value, key) {
+        Some(Value::Int(number)) => Some(*number),
+        Some(Value::Float(number)) => Some(*number as i64),
+        _ => None,
     }
 }
 

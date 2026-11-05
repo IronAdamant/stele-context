@@ -36,10 +36,12 @@ pub fn load(project_root: Option<&Path>) -> Config {
         Ok(text) => text,
         Err(_) => return Config::default(),
     };
-    let Ok(section) = parse_section(&text, "stele-context") else {
+    let Ok((top, section)) = parse_section(&text, "stele-context") else {
         return Config::default();
     };
-    config_from_section(&section)
+    // 1.5.2 `data.get("stele-context", data)`: the section when the file
+    // has one, otherwise the top-level keys.
+    config_from_section(section.as_deref().unwrap_or(&top))
 }
 
 fn config_from_section(section: &[(String, TomlValue)]) -> Config {
@@ -104,28 +106,39 @@ fn as_float(value: &TomlValue) -> Option<f64> {
     }
 }
 
-fn parse_section(text: &str, wanted: &str) -> Result<Vec<(String, TomlValue)>, ()> {
+type Pairs = Vec<(String, TomlValue)>;
+
+/// The keys before the first table header, and the `wanted` table when the
+/// file declares it.
+fn parse_section(text: &str, wanted: &str) -> Result<(Pairs, Option<Pairs>), ()> {
     let mut current: Option<String> = None;
-    let mut pairs = Vec::new();
+    let mut top = Vec::new();
+    let mut section: Option<Pairs> = None;
     for raw in text.lines() {
         let line = strip_comment(raw).trim();
         if line.is_empty() {
             continue;
         }
         if line.starts_with('[') && line.ends_with(']') {
-            current = Some(line[1..line.len() - 1].trim().to_string());
+            let name = line[1..line.len() - 1].trim().to_string();
+            if name == wanted && section.is_none() {
+                section = Some(Vec::new());
+            }
+            current = Some(name);
             continue;
         }
-        if current.as_deref() != Some(wanted) {
-            continue;
-        }
+        let target = match current.as_deref() {
+            None => &mut top,
+            Some(name) if name == wanted => section.get_or_insert_with(Vec::new),
+            Some(_) => continue,
+        };
         let Some((key, raw_value)) = line.split_once('=') else {
             return Err(());
         };
         let value = parse_value(raw_value.trim()).map_err(|_| ())?;
-        pairs.push((key.trim().to_string(), value));
+        target.push((key.trim().to_string(), value));
     }
-    Ok(pairs)
+    Ok((top, section))
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -246,8 +259,8 @@ merge_threshold = 0.7
 respect_gitignore = false
 skip_dirs = ["dist", "build"] # inline
 "#;
-        let section = parse_section(text, "stele-context").unwrap();
-        let config = config_from_section(&section);
+        let (_, section) = parse_section(text, "stele-context").unwrap();
+        let config = config_from_section(&section.unwrap());
         assert_eq!(config.storage_dir.as_deref(), Some("mem"));
         assert_eq!(config.chunk_size, Some(256));
         assert_eq!(config.merge_threshold, Some(0.7));
@@ -256,5 +269,28 @@ skip_dirs = ["dist", "build"] # inline
             config.skip_dirs,
             Some(vec!["dist".to_string(), "build".to_string()])
         );
+    }
+
+    /// 1.5.2 reads top-level keys when there is no `[stele-context]` table,
+    /// and the table alone when there is one.
+    #[test]
+    fn top_level_keys_without_the_section() {
+        let bare = "chunk_size = 80
+max_chunk_size = 260
+skip_dirs = [\"thirdparty\"]
+";
+        let (top, section) = parse_section(bare, "stele-context").unwrap();
+        assert!(section.is_none());
+        let config = config_from_section(section.as_deref().unwrap_or(&top));
+        assert_eq!(config.chunk_size, Some(80));
+        assert_eq!(config.max_chunk_size, Some(260));
+        assert_eq!(config.skip_dirs, Some(vec!["thirdparty".to_string()]));
+        let both = "chunk_size = 80
+[stele-context]
+chunk_size = 300
+";
+        let (top, section) = parse_section(both, "stele-context").unwrap();
+        let config = config_from_section(section.as_deref().unwrap_or(&top));
+        assert_eq!(config.chunk_size, Some(300));
     }
 }

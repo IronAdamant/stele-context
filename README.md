@@ -1,68 +1,40 @@
 # Stele Context
 
-**Persistent memory for AI coding agents. A zero-dependency MCP server that lets Claude Code, Claude Desktop, Cursor, and any MCP-compatible assistant remember your codebase between conversations.**
-
-The old Python 1.x version lives on the `python-legacy` branch and on PyPI (1.5.x).
+**A local, persistent code index for AI coding agents, served over MCP.** One static binary, no dependencies, no network.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust 1.83+](https://img.shields.io/badge/rust-1.83+-orange.svg)](https://www.rust-lang.org/)
+[![Rust 1.89+](https://img.shields.io/badge/rust-1.89+-orange.svg)](https://www.rust-lang.org/)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-green.svg)](https://github.com/IronAdamant/stele-context)
 [![CI](https://github.com/IronAdamant/stele-context/actions/workflows/rust.yml/badge.svg)](https://github.com/IronAdamant/stele-context/actions/workflows/rust.yml)
 
-## The problem
+## What it is
 
-Every new conversation with Claude Code, Cursor, or another coding agent starts from zero. The agent re-reads the same files it read yesterday. On a medium-sized project that spends real tokens and real context on code that has not changed.
+Stele indexes a project once and keeps that index on disk. An agent (Claude Code, Cursor, any MCP client) then asks it for what it needs instead of re-reading the tree every session:
 
-Stele Context is a local context cache: index once, then pay only for what changed.
+- **Search**: keyword (BM25) by default, exact text or regex, and a hybrid rank when an agent has stored summaries or vectors.
+- **Symbols**: where a name is defined, who references it, what an edit would touch.
+- **Change detection**: size and mtime first, SHA-256 when they differ; `get_context` returns a diff when a cached file changed.
+- **Shared memory between agents and sessions**: annotations, document locks, notifications, search history, and summaries live in the project's `.stele-context/` store, so a second agent or tomorrow's session picks up where the first left off.
 
-## What it does
+Everything runs offline. Stele does not bundle a model and never calls one; Tier-2 summaries and vectors are supplied by the agent.
 
-1. **Indexes your project once.** Code, docs, configs, images, audio, video, and PDF go into a local SQLite database. Media is decoded with the Rust standard library. There is no optional native library.
-2. **Detects file changes** with an mtime and size fast path, then SHA-256. Unchanged files cost nothing to re-read.
-3. **Returns a diff instead of the whole file** when something did change.
-4. **Searches** by keyword (BM25, the default), hybrid rank when you supply Tier 2 summaries, or exact text.
-5. **Maps symbols** for find-definition, find-references, impact, and coupling.
-
-Everything runs offline. No API keys, no cloud, no telemetry. The crate has an empty `[dependencies]` table.
-
-## Quick start
-
-### Install
-
-The product is the Rust 2.0.0 binary from the [v2.0.0 GitHub Release](https://github.com/IronAdamant/stele-context/releases/tag/v2.0.0).
+## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.0.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.1.0/scripts/install.sh | sh
 ```
 
-Windows: `scripts/install.ps1`, or download `stele-context-<target>` from the release assets. Build from this repo with `cargo build --release`. The binaries are `stele-context` and `stele-context-mcp`.
+On Windows run `scripts/install.ps1`, or download `stele-context-<target>` from the [releases](https://github.com/IronAdamant/stele-context/releases). From source: `cargo build --release` (Rust 1.89+). The binaries are `stele-context` and `stele-context-mcp`.
 
-### First run
+## Connect an MCP client
+
+**Claude Code**:
 
 ```bash
-stele-context init .
+claude mcp add stele-context -- stele-context serve-mcp
 ```
 
-This indexes the project (respecting `.gitignore`), prints an MCP lite client config, and shows `doctor` next steps.
-
-### Index and search
-
-```bash
-stele-context index src/ docs/ README.md
-stele-context search "how does authentication work"
-stele-context search-text "TODO"
-stele-context agent-grep "createApp"
-```
-
-The index lives in `.stele-context/` at the project root.
-
-### Connect an MCP client
-
-```bash
-stele-context serve-mcp
-```
-
-**Claude Code** (`~/.claude/settings.json`):
+or in a settings file:
 
 ```json
 {
@@ -76,56 +48,102 @@ stele-context serve-mcp
 }
 ```
 
-**Claude Desktop** uses the same shape in `~/.config/Claude/claude_desktop_config.json` (Linux or Mac) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows). Cursor and other MCP clients use the same command. `stele-context init` prints a snippet.
+Other clients use the same command. `lite` (the default) exposes 25 tools; `standard` adds sessions, history and bulk embeddings (43); `full` adds the 1.x singleton names (61). Lite's `tools/list` carries names only; `standard` and `full` list each tool's parameters.
 
-Default mode is **lite**. Set `STELE_MCP_MODE=standard` or `full` for the wider tool list. `stele-context-mcp` is the same server, selected by the binary name.
+## Tool groups
 
-### Agent ritual
+Every MCP tool is in one group. `core` is always on; the others can be switched off so an agent that also runs another IronAdamant tool sees each feature once. Groups only shape the MCP tool list. The CLI is not affected.
 
+| Group | Tools (lite, then the extra ones in standard/full) | Overlaps with |
+|---|---|---|
+| `core` | doctor, map, get_context, detect_modality, get_supported_formats; environment_check, clean_bytecache, batch, stats, project_brief | always on |
+| `index` | index, remove, detect_changes; history, prune_history, get_chunk_history, stale_chunks | |
+| `search` | search, search_text, agent_grep, query, get_search_history, get_session_read_files | |
+| `symbols` | find_definition, find_references, impact_radius, coupling, register_dynamic_symbols, remove_dynamic_symbols; rebuild_symbols, get_dynamic_symbols | |
+| `embeddings` | llm_embed, bulk_store_summaries, enrichment_plan; bulk_store_embeddings, store_semantic_summary, store_embedding | |
+| `notes` | annotations; bulk_store_chunk_agent_notes, annotate, get_annotations, update_annotation, delete_annotation, search_annotations, bulk_annotate, store_chunk_agent_notes | Trammel notes, Wikifier notes |
+| `locks` | document_lock; list_agents, acquire_document_lock, refresh_document_lock, release_document_lock, get_document_lock_status, release_agent_locks, get_conflicts, reap_expired_locks | Chisel locks, Trammel claims, CoordinationHub leases |
+| `messages` | get_notifications (standard/full) | CoordinationHub messages |
+| `kv` | save_kv_state, get_relevant_kv, rollback, prune_chunks, list_sessions (standard/full) | |
+
+The agent picks the groups for a project in its AGENTS.md (see [Choosing groups](#choosing-groups)). An operator can override that in the client's `env` block:
+
+```json
+"env": { "STELE_DISABLE": "locks,notes" }
 ```
-doctor -> query (session_id) -> agent_grep / find_* -> get_context (trust/diff)
+
+- `STELE_TOOLS`: comma-separated groups and/or tool names to keep (plus `core`); `all` keeps everything.
+- `STELE_DISABLE`: groups and/or tool names to hide, applied after `STELE_TOOLS`.
+- Case and spaces are ignored and a blank value counts as unset. They combine with `STELE_MCP_MODE`, which still picks lite, standard or full.
+- An unknown name, or `core` or a core tool in `STELE_DISABLE`, stops the server with one line on stderr and exit code 2, so the client shows it as failed.
+- A hidden tool is absent from `tools/list`; calling it anyway returns `isError` with the line to change, e.g. `tool "document_lock" is disabled (group "locks") by STELE_DISABLE; remove "locks" from it to enable`.
+- `initialize` instructions (and `doctor`, when anything is hidden) carry one line with the groups that are on and off.
+
+`tools/list` size with everything on, then with `locks`, `notes` or `messages` off: lite 2,556 / 2,455 / 2,459 bytes (no `messages` in lite); standard 17,009 / 16,131 / 15,995 / 16,667; full 23,099 / 19,847 / 19,755 / 22,757.
+
+## Choosing groups
+
+An agent sets Stele's groups for a project with `stele:` lines in the first `agent-tools` fenced block of the project's AGENTS.md (in the project root: the directory with `.git` or `.stele-context.toml`, else the server's working directory):
+
+````markdown
+```agent-tools
+# one agent works here; CoordinationHub owns leases
+stele: disable locks, notes
+```
+````
+
+Turn a group off when something else does its job:
+
+| Group | Turn it off when | Line |
+|---|---|---|
+| `locks` | one agent works on the project, or CoordinationHub, Trammel or Chisel coordinates the agents | `stele: disable locks` |
+| `notes` | Trammel or Wikifier keeps the notes and handoffs | `stele: disable notes` |
+| `messages` | CoordinationHub carries agent messages (standard/full only) | `stele: disable messages` |
+| `embeddings` | no agent writes Tier-2 summaries or vectors; keyword search is enough | `stele: disable embeddings` |
+| `kv` | you never save or restore session state (standard/full only) | `stele: disable kv` |
+| `symbols` | the project has no code (docs, data) | `stele: disable symbols` |
+| `index`, `search` | keep on: they are the cache and the lookups | |
+
+To keep only a few groups instead, list them: `stele: tools search, symbols` (`core` stays on). Lists take commas or spaces, and `#` starts a comment. Stele reads only its own lines, so other tools' lines can share the block.
+
+Stele checks the file's size and mtime on every request. When an edit changes the tool list it sends `notifications/tools/list_changed` and the client refetches the list; no restart. A line with an unknown name, or one that tries to switch off `core`, is ignored and reported as a warning in the `initialize` instructions and `doctor`. An env var beats the matching line: `STELE_TOOLS` replaces `stele: tools`, `STELE_DISABLE` replaces `stele: disable`.
+
+## A short session
+
+```text
+doctor                                    -> index health and next steps
+index {"paths": ["."]}                    -> chunks, symbols, keyword index
+query {"query": "how is auth checked", "session_id": "s1"}
+find_references {"symbol": "check_token"}
+get_context {"document_paths": ["src/auth.py"], "session_id": "s1"}
+annotations {"action": "create", "target": "src/auth.py", "target_type": "document",
+             "content": "token refresh is racy; see issue 12", "tags": ["handoff"]}
 ```
 
-After edits: `detect`. For better hybrid search: `enrichment-plan`, then store summaries with the MCP tools.
+A second agent, or the next session, starts with `doctor`, then `annotations {"action": "get", "tags": ["handoff"]}`, `get_search_history`, and `detect_changes`. The same commands exist on the CLI:
 
-## Configuration
-
-A `.stele-context.toml` in the project root is also the project-root marker. Stele walks upward and stops at the nearest `.git` or `.stele-context.toml`. An empty file is enough for a folder that is not a git checkout. With neither, storage falls back to `~/.stele-context/`.
-
-```toml
-[stele-context]
-chunk_size = 512
-skip_dirs = [".git", "node_modules", "dist", "vendor"]
-respect_gitignore = true
+```bash
+stele-context index .
+stele-context query "how is auth checked"
+stele-context find-references check_token
+stele-context detect
 ```
 
-You can also set `STELE_CONTEXT_STORAGE_DIR` or pass `--storage-dir`. Flag, then config, then the environment variable, then the default.
+CLI output is JSON (`--human` for text).
 
-## Supported files
+## How it works
 
-Code and text: `.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.kt`, `.scala`, `.c`, `.cpp`, `.cs`, `.go`, `.rs`, `.rb`, `.php`, `.swift`, `.sh`, `.sql`, `.html`, `.css`, `.json`, `.yaml`, `.toml`, `.ini`, `.md`, `.txt`, `.rst`, `.csv`, `.log`, and the other extensions in `src/walk.rs`.
+1. **Walk.** The project root is the nearest directory with `.git` or `.stele-context.toml` (an empty file is enough). `.gitignore`, dot-directories and the usual build/vendor folders are skipped. With no marker, paths are stored as absolute paths and the store lives in `~/.stele-context/`.
+2. **Chunk.** Code is split at definitions and text into passages near `chunk_size` tokens; similar neighbours merge. PDFs are read page by page. Images, audio and video become metadata chunks.
+3. **Index.** Each chunk gets a 128-value signature, BM25 postings, and symbol rows (definitions and references for Python, JS/TS, Go, Rust, Java, C#, Swift and more), linked into a cross-file edge graph.
+4. **Store.** Everything is JSON under `<project>/.stele-context/store/` (`snapshot.json`, `signatures.bin`, `bm25.bin`). Cross-worktree locks live in `<git-common-dir>/stele-context/coordination.json`.
+5. **Serve.** `serve-mcp` speaks newline JSON-RPC on stdio; `serve` exposes the lite tools over local HTTP.
 
-Media, with no extra packages: PNG, JPEG, GIF, WAV, MP3, MP4, and PDF. Image and audio chunks are header metadata. PDF text is taken from the file bytes.
+`.stele-context.toml` keys (`chunk_size`, `max_chunk_size`, `skip_dirs`, `respect_gitignore`, `storage_dir`, ...) are listed in [MIGRATION.md](MIGRATION.md#configuration-keys).
 
-## Troubleshooting
+## Coming from the Python 1.5 package
 
-**MCP server not connecting.** Use the full path to the binary.
-
-**A lock is stuck.** Use the `document_lock` tool to reap expired locks.
-
-**Cached text looks stale.** `doctor` and `get_context` report trust. Re-index with `stele-context index <file>` or `stele-context detect`.
-
-## FAQ
-
-**Does this work with Cursor and other MCP tools?** Yes. Any MCP client can launch `stele-context serve-mcp`.
-
-**Does it replace grep?** No. Use grep for a one-off lookup. Stele remembers what was indexed, what changed, and how symbols connect.
-
-**Does it need a network or an API key?** No. Summaries and embedding vectors are supplied by the caller. No model is bundled.
-
-**Is the code local?** Yes. The index stays on the machine. There is no dependency crate and no pickle.
-
-**Can several agents share an index?** Yes. Document locks, versions, and a conflict log cover one index, including across git worktrees.
+The Python package stays on PyPI (`pip install stele-context` installs 1.5.x) and on the `python-legacy` branch. 2.x is this Rust binary: same tools, same results, faster. A 1.5 `stele_context.db` is copied into the native store on first open and left unmodified. [MIGRATION.md](MIGRATION.md) lists every difference.
 
 ## Benchmarks
 
@@ -158,20 +176,12 @@ Recorded on Linux 6.12.94+ x86_64, 4 vCPU, rustc 1.99.1, release build, 5 runs, 
 
 ```bash
 cargo fmt --check
-cargo test
-bash scripts/fetch_corpora.sh   # optional rich and flask round-trip corpus
+cargo test        # parity tests need PyPI stele-context==1.5.2 + pymupdf (see CONTRIBUTING.md)
 cargo build --release
-./target/release/stele-bench floor \
-  --binary ./target/release/stele-context --group b1 --runs 10 --check-floor
+./target/release/stele-bench versus --binary ./target/release/stele-context --runs 3
 ```
 
-`[dependencies]` and `[dev-dependencies]` stay empty. `cargo test` includes `cargo_manifest_and_lock_are_std_only`, which fails if `Cargo.lock` lists anything other than this crate.
-
-Rust 2.x tags run `.github/workflows/release-rust.yml` and attach binaries to a GitHub Release. They do not publish to PyPI. A future 1.x tag is cut from `python-legacy`, where `publish.yml` still lives.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+`[dependencies]`, `[dev-dependencies]` and `[build-dependencies]` stay empty; `cargo_manifest_and_lock_are_std_only` enforces it. Python 1.5.2 is used only as the reference in tests and `stele-bench versus`; the binaries never start Python. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

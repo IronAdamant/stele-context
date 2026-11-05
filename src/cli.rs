@@ -15,6 +15,20 @@ pub fn run() -> i32 {
     dispatch(&args).emit()
 }
 
+pub fn dispatch_in(cwd: PathBuf, args: &[String]) -> Response {
+    match parse(args) {
+        Ok(mut parsed) => {
+            parsed.cwd = Some(cwd);
+            parsed.run()
+        }
+        Err(message) => Response::failure(
+            "",
+            EXIT_USAGE,
+            ErrorBody::new("usage", message, "run stele-context --help"),
+        ),
+    }
+}
+
 pub fn dispatch(args: &[String]) -> Response {
     if invoked_as_mcp() {
         return crate::mcp::serve();
@@ -45,6 +59,30 @@ struct Parsed {
     scan_new: bool,
     port: u16,
     host: String,
+    regex: bool,
+    working_tree: bool,
+    confirm: bool,
+    compact: Option<bool>,
+    path_prefix: Option<String>,
+    document: Option<String>,
+    limit: Option<usize>,
+    depth: Option<usize>,
+    significance: Option<f64>,
+    mode: Option<String>,
+    summary_mode: bool,
+    chunk_id: Option<String>,
+    top_n: Option<usize>,
+    min_tokens: Option<usize>,
+    max_tokens: Option<i64>,
+    max_result_tokens: Option<i64>,
+    context_lines: Option<i64>,
+    meta: bool,
+    group_by: Option<String>,
+    no_index: bool,
+    tags: Vec<String>,
+    ann_type: Option<String>,
+    note_body: Option<String>,
+    cwd: Option<PathBuf>,
 }
 
 impl Parsed {
@@ -65,9 +103,27 @@ impl Parsed {
             return doctor::report(self.storage.as_deref(), self.human);
         }
         if command == "serve-mcp" {
-            return crate::mcp::serve();
+            return crate::mcp::serve_with(self.storage.as_deref());
         }
-        let mut engine = match Engine::open(self.storage.as_deref()) {
+        let cwd = match self.cwd.clone() {
+            Some(path) => path,
+            None => match env::current_dir() {
+                Ok(path) => path,
+                Err(err) => {
+                    return Response::failure(
+                        &command,
+                        EXIT_ERROR,
+                        ErrorBody::new("storage", format!("cwd: {err}"), "pass --storage-dir"),
+                    );
+                }
+            },
+        };
+        let opened = if command == "detect" || command == "index" {
+            Engine::open_detect(cwd, self.storage.as_deref())
+        } else {
+            Engine::open_from(cwd, self.storage.as_deref())
+        };
+        let mut engine = match opened {
             Ok(engine) => engine,
             Err(message) => {
                 return Response::failure(
@@ -89,6 +145,32 @@ impl Parsed {
                     ErrorBody::new("command_failed", message, "pass --port"),
                 ),
             };
+        }
+        if self.command.as_deref() == Some("search-text") && self.path_prefix.is_some() {
+            return Response::failure(
+                "search-text",
+                EXIT_USAGE,
+                ErrorBody::new(
+                    "usage",
+                    "unrecognized arguments: --path-prefix",
+                    "search-text has no --path-prefix; pass --document",
+                ),
+            );
+        }
+        if self.command.as_deref() == Some("annotate")
+            && (self.ann_type.is_none() || self.note_body.is_none())
+        {
+            // 1.5.2's argparse requires both flags (exit 2). The content is
+            // not taken from a second positional.
+            return Response::failure(
+                "annotate",
+                EXIT_USAGE,
+                ErrorBody::new(
+                    "usage",
+                    "annotate needs --type (document or chunk) and --content",
+                    "stele-context annotate TARGET --type document --content \"note\" [--tags a b]",
+                ),
+            );
         }
         let result = self.execute(&mut engine);
         match result {
@@ -112,29 +194,206 @@ impl Parsed {
         match self.command.as_deref().unwrap_or("") {
             "index" => engine.index(&self.positionals, self.force),
             "remove" => engine.remove(positional),
-            "detect" => engine.detect(self.scan_new),
-            "stats" => Ok(engine.stats()),
-            "map" => Ok(engine.map()),
+            "detect" => engine.detect_with(
+                self.scan_new,
+                None,
+                self.limit.unwrap_or(200),
+                self.session.as_deref().unwrap_or(""),
+            ),
+            "stats" => {
+                let value = engine.stats();
+                if self.compact == Some(true) {
+                    let storage = object_field(&value, "storage");
+                    let index = object_field(&value, "index");
+                    let config = object_field(&value, "config");
+                    return Ok(crate::json::Value::object(vec![
+                        (
+                            "version",
+                            field_clone(&value, "version").unwrap_or(crate::json::Value::Null),
+                        ),
+                        (
+                            "project_root",
+                            field_clone(&value, "project_root").unwrap_or(crate::json::Value::Null),
+                        ),
+                        ("compact", crate::json::Value::Bool(true)),
+                        (
+                            "storage",
+                            crate::json::Value::object(vec![
+                                (
+                                    "storage_dir",
+                                    field_clone(&storage, "storage_dir")
+                                        .unwrap_or(crate::json::Value::Null),
+                                ),
+                                (
+                                    "document_count",
+                                    field_clone(&storage, "document_count")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                                (
+                                    "chunk_count",
+                                    field_clone(&storage, "chunk_count")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                                (
+                                    "total_tokens",
+                                    field_clone(&storage, "total_tokens")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                            ]),
+                        ),
+                        (
+                            "index",
+                            crate::json::Value::object(vec![
+                                (
+                                    "chunk_count",
+                                    field_clone(&index, "chunk_count")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                                (
+                                    "node_count",
+                                    field_clone(&index, "node_count")
+                                        .unwrap_or(crate::json::Value::Int(0)),
+                                ),
+                            ]),
+                        ),
+                        (
+                            "config",
+                            crate::json::Value::object(vec![
+                                (
+                                    "chunk_size",
+                                    field_clone(&config, "chunk_size")
+                                        .unwrap_or(crate::json::Value::Null),
+                                ),
+                                (
+                                    "search_alpha",
+                                    field_clone(&config, "search_alpha")
+                                        .unwrap_or(crate::json::Value::Null),
+                                ),
+                            ]),
+                        ),
+                        (
+                            "index_health",
+                            field_clone(&value, "index_health").unwrap_or(crate::json::Value::Null),
+                        ),
+                    ]));
+                }
+                Ok(value)
+            }
+            "map" => Ok(engine.map_with(self.path_prefix.as_deref(), None, None)),
             "project-brief" => Ok(engine.project_brief()),
-            "enrichment-plan" => Ok(engine.enrichment_plan()),
+            "enrichment-plan" => Ok(engine.enrichment_plan_with(
+                self.top_n.unwrap_or(15),
+                self.min_tokens.unwrap_or(20) as i64,
+            )),
             "history" => engine.history(),
-            "clear" => engine.clear(),
+            "clear" => {
+                if !self.confirm {
+                    return Ok(Value::object(vec![
+                        ("cancelled", Value::Bool(true)),
+                        ("reason", Value::string("pass --confirm to clear the store")),
+                    ]));
+                }
+                engine.clear()
+            }
             "migrate" => engine.migrate(),
-            "search" => Ok(engine.search(positional, &self.search_mode, self.top_k)),
-            "search-text" => engine.search_text(positional),
-            "agent-grep" => engine.agent_grep(positional, self.session.as_deref()),
-            "query" => engine.query(positional),
+            "search" => {
+                // 1.5.2 `cmd_search`: --compact, --max-result-tokens or
+                // --meta return {results, meta}.
+                if self.working_tree {
+                    engine.index_working_tree();
+                }
+                let compact = self.compact == Some(true);
+                let want_meta = self.meta || compact || self.max_result_tokens.is_some();
+                Ok(engine.search_full(
+                    positional,
+                    &self.search_mode,
+                    self.top_k,
+                    self.path_prefix.as_deref(),
+                    compact,
+                    self.max_result_tokens,
+                    want_meta,
+                ))
+            }
+            "search-text" => engine.text_search(
+                positional,
+                self.regex,
+                self.document.as_deref(),
+                self.limit.unwrap_or(50),
+                self.session.as_deref(),
+                self.working_tree,
+            ),
+            "agent-grep" => engine.grep_full(
+                positional,
+                self.regex,
+                self.document.as_deref(),
+                true,
+                true,
+                self.group_by.as_deref().unwrap_or("file"),
+                self.max_tokens.unwrap_or(4000),
+                true,
+                self.context_lines.unwrap_or(0),
+                self.session.as_deref(),
+                self.working_tree,
+            ),
+            "query" => engine.query_full(
+                positional,
+                self.top_k,
+                self.path_prefix.as_deref(),
+                self.working_tree,
+                self.session.as_deref(),
+                &self.search_mode,
+                self.compact.unwrap_or(true),
+                self.max_result_tokens,
+            ),
             "find-definition" => Ok(engine.find_definition(positional)),
             "find-references" => Ok(engine.find_references(positional)),
-            "impact-radius" => Ok(engine.impact(self.symbol.as_deref().unwrap_or(positional))),
-            "coupling" => Ok(engine.coupling(positional)),
+            "impact-radius" => Ok(engine.impact_radius(
+                self.symbol.as_deref().unwrap_or(positional),
+                self.document.as_deref(),
+                self.chunk_id.as_deref(),
+                self.depth.unwrap_or(2),
+                self.summary_mode,
+            )),
+            "coupling" => Ok(engine.coupling_mode(
+                positional,
+                self.mode.as_deref().unwrap_or("edges"),
+                self.significance.unwrap_or(0.0),
+            )),
             "get-context" => engine.get_context(positional, self.session.as_deref()),
             "init" => init_marker(&engine.cwd),
-            "annotations" => engine.annotations(
-                self.action.as_deref().unwrap_or("get"),
+            "annotate" => {
+                let target_type = self.ann_type.as_deref().unwrap_or("document");
+                let body = self.note_body.clone().unwrap_or_default();
+                engine.annotations_tagged("create", positional, &body, &self.tags, target_type)
+            }
+            "delete-annotation" => engine.annotations("delete", positional, ""),
+            "update-annotation" => engine.annotations_tagged(
+                "update",
                 positional,
-                self.positionals.get(1).map(String::as_str).unwrap_or(""),
+                self.note_body.as_deref().unwrap_or(""),
+                &self.tags,
+                "",
             ),
+            "annotations" | "get-annotations" => {
+                let target = if self.command.as_deref() == Some("get-annotations") {
+                    self.document
+                        .clone()
+                        .unwrap_or_else(|| positional.to_string())
+                } else {
+                    positional.to_string()
+                };
+                engine.annotations_tagged(
+                    if self.command.as_deref() == Some("get-annotations") {
+                        "get"
+                    } else {
+                        self.action.as_deref().unwrap_or("get")
+                    },
+                    &target,
+                    self.positionals.get(1).map(String::as_str).unwrap_or(""),
+                    &self.tags,
+                    self.ann_type.as_deref().unwrap_or(""),
+                )
+            }
             "document-lock" => engine.document_lock(
                 self.action.as_deref().unwrap_or("status"),
                 positional,
@@ -174,6 +433,30 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         scan_new: true,
         port: 9876,
         host: "127.0.0.1".to_string(),
+        regex: false,
+        working_tree: false,
+        confirm: false,
+        compact: None,
+        path_prefix: None,
+        document: None,
+        limit: None,
+        depth: None,
+        significance: None,
+        mode: None,
+        summary_mode: false,
+        chunk_id: None,
+        top_n: None,
+        min_tokens: None,
+        max_tokens: None,
+        max_result_tokens: None,
+        context_lines: None,
+        meta: false,
+        group_by: None,
+        no_index: false,
+        tags: Vec::new(),
+        ann_type: None,
+        note_body: None,
+        cwd: None,
     };
     let mut index = 0usize;
     let mut command_seen = false;
@@ -219,8 +502,21 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                 "--human" => parsed.human = true,
                 "--json" => {}
                 "--force" | "--force-reindex" => parsed.force = true,
-                "--summary-mode" => {}
+                "--summary-mode" => parsed.summary_mode = true,
+                "--no-summary-mode" => parsed.summary_mode = false,
+                "--regex" => parsed.regex = true,
+                "--working-tree" => parsed.working_tree = true,
+                "--confirm" => parsed.confirm = true,
+                "--compact" => parsed.compact = Some(true),
+                "--no-compact" => parsed.compact = Some(false),
+                "--meta" => parsed.meta = true,
+                "--no-classify" => {}
+                "--no-scope" => {}
+                "--no-dedup" => {}
+                "--no-index" => parsed.no_index = true,
+                "--blocking" => {}
                 "--no-scan-new" => parsed.scan_new = false,
+                "--scan-new" => parsed.scan_new = true,
                 "--storage-dir" => {
                     parsed.storage = Some(PathBuf::from(take_value(args, &mut index)?))
                 }
@@ -239,6 +535,87 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                         .map_err(|_| "--port needs an integer".to_string())?;
                 }
                 "--host" => parsed.host = take_value(args, &mut index)?,
+                "--path-prefix" => parsed.path_prefix = Some(take_value(args, &mut index)?),
+                "--document" | "--document-path" | "--target" => {
+                    parsed.document = Some(take_value(args, &mut index)?)
+                }
+                "--limit" => {
+                    parsed.limit = Some(
+                        take_value(args, &mut index)?
+                            .parse()
+                            .map_err(|_| "--limit needs an integer".to_string())?,
+                    );
+                }
+                "--depth" => {
+                    parsed.depth = Some(
+                        take_value(args, &mut index)?
+                            .parse()
+                            .map_err(|_| "--depth needs an integer".to_string())?,
+                    );
+                }
+                "--significance-threshold" => {
+                    parsed.significance = Some(
+                        take_value(args, &mut index)?
+                            .parse()
+                            .map_err(|_| "--significance-threshold needs a number".to_string())?,
+                    );
+                }
+                "--mode" | "--group-by" | "--type" => {
+                    let value = take_value(args, &mut index)?;
+                    if arg == "--group-by" {
+                        parsed.group_by = Some(value);
+                    } else if arg == "--mode" {
+                        parsed.mode = Some(value);
+                    } else {
+                        parsed.ann_type = Some(value);
+                    }
+                }
+                "--chunk-id" => parsed.chunk_id = Some(take_value(args, &mut index)?),
+                "--top-n" => {
+                    parsed.top_n = Some(
+                        take_value(args, &mut index)?
+                            .parse()
+                            .map_err(|_| "--top-n needs an integer".to_string())?,
+                    );
+                }
+                "--min-tokens"
+                | "--max-tokens"
+                | "--max-result-tokens"
+                | "--context-lines"
+                | "--max-documents" => {
+                    let value: i64 = take_value(args, &mut index)?
+                        .parse()
+                        .map_err(|_| format!("{arg} needs an integer"))?;
+                    if arg == "--max-tokens" {
+                        parsed.max_tokens = Some(value);
+                    }
+                    if arg == "--max-result-tokens" {
+                        parsed.max_result_tokens = Some(value);
+                    }
+                    if arg == "--context-lines" {
+                        parsed.context_lines = Some(value);
+                    }
+                    if arg == "--min-tokens" {
+                        parsed.min_tokens = Some(value as usize);
+                    }
+                }
+                "--content" | "--tags" | "--session" => {
+                    let value = take_value(args, &mut index)?;
+                    if arg == "--session" {
+                        parsed.session = Some(value);
+                    } else if arg == "--tags" {
+                        parsed.tags.push(value);
+                        while args
+                            .get(index + 1)
+                            .is_some_and(|next| !next.starts_with('-'))
+                        {
+                            index += 1;
+                            parsed.tags.push(args[index].clone());
+                        }
+                    } else {
+                        parsed.note_body = Some(value);
+                    }
+                }
                 other => return Err(format!("unknown flag '{other}'")),
             }
             index += 1;
@@ -251,6 +628,20 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         parsed.positionals.push(".".to_string());
     }
     Ok(parsed)
+}
+
+fn field_clone(value: &crate::json::Value, key: &str) -> Option<crate::json::Value> {
+    let crate::json::Value::Object(pairs) = value else {
+        return None;
+    };
+    pairs
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, item)| item.clone())
+}
+
+fn object_field(value: &crate::json::Value, key: &str) -> crate::json::Value {
+    field_clone(value, key).unwrap_or(crate::json::Value::object(vec![]))
 }
 
 fn take_value(args: &[String], index: &mut usize) -> Result<String, String> {
@@ -274,7 +665,7 @@ Commands:
   doctor              Health, storage, and whether a legacy store is present
   index [PATH...]     Chunk and store files. Unchanged files are skipped
   remove PATH         Drop one document from the store
-  detect              Compare mtime and size. New files are indexed
+  detect              Compare mtime and size. New files are listed
   stats               Document, chunk, and symbol counts
   map                 One row per indexed file
   project-brief       The same counts, for the 1.5 command name
@@ -284,6 +675,11 @@ Commands:
   query TEXT          Search, definitions, and text search
   find-definition NAME
   find-references NAME
+  annotations         create, get, delete, update, search, bulk_create
+  annotate TARGET     --type document|chunk --content TEXT [--tags TAG]
+  delete-annotation ID
+  update-annotation ID [--content TEXT] [--tags TAG]
+  get-annotations     --target PATH [--type document|chunk] [--tags TAG]
   impact-radius       --symbol NAME
   coupling PATH
   enrichment-plan     Chunks that still need a summary
@@ -294,7 +690,14 @@ Commands:
   serve-mcp           Speak MCP on stdin
 
 JSON is the default on commands. --human prints text.
---version prints the version line and exits.
+--version prints the version line and exits. --help prints this text.
+Flags: --storage-dir --json --regex --working-tree --confirm --path-prefix
+--limit --document --document-path --session --session-id --depth
+--significance-threshold --mode --group-by --summary-mode --top-n --top-k
+--min-tokens --max-tokens --max-result-tokens --context-lines --compact
+--no-compact --no-classify --no-scope --no-dedup --no-index --scan-new
+--no-scan-new --force --search-mode --symbol --port --host --blocking
+--chunk-id --max-documents --tags --content --type --meta
 "
     )
 }
@@ -322,7 +725,7 @@ mod tests {
     fn version_line_is_twenty_bytes() {
         let response = dispatch(&["--version".to_string()]);
         assert_eq!(response.code, 0);
-        assert_eq!(response.stdout, b"stele-context 2.0.0\n");
+        assert_eq!(response.stdout, b"stele-context 2.1.0\n");
         assert_eq!(response.stdout.len(), 20);
     }
 
@@ -334,7 +737,7 @@ mod tests {
         let value = json::parse(text.trim_end()).unwrap();
         let rendered = json::to_string(&value);
         assert!(rendered.contains("\"ok\":true"));
-        assert!(rendered.contains("\"version\":\"2.0.0\""));
+        assert!(rendered.contains("\"version\":\"2.1.0\""));
         assert!(rendered.contains("\"implementation\":\"rust\""));
         assert!(rendered.contains("No 2.0 store yet") || rendered.contains("native store"));
     }

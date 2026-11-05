@@ -37,23 +37,48 @@ pub fn read_python_text(bytes: &[u8]) -> String {
         .replace('\r', "\n")
 }
 
-pub fn chunk_bytes(path: &str, bytes: &[u8]) -> Vec<Produced> {
+pub fn chunk_bytes(
+    path: &str,
+    bytes: &[u8],
+    chunk_size: usize,
+    max_chunk_size: usize,
+    merge_fallback: f64,
+) -> Vec<Produced> {
     if crate::media::is_media(code::extension_of(path)) {
-        return crate::media::chunk(path, bytes);
+        let produced = crate::media::chunk(path, bytes);
+        // 1.5.2 builds one chunk per PDF page, then merge_similar_chunks
+        // joins adjacent pages whose signatures clear the pdf threshold
+        // and whose combined tokens fit in max_chunk_size.
+        if code::extension_of(path) == "pdf" {
+            return merge::merge_similar(produced, max_chunk_size, merge_fallback);
+        }
+        return produced;
     }
-    chunk_document(path, &read_python_text(bytes))
+    chunk_document(
+        path,
+        &read_python_text(bytes),
+        chunk_size,
+        max_chunk_size,
+        merge_fallback,
+    )
 }
 
-pub fn chunk_document(path: &str, content: &str) -> Vec<Produced> {
+pub fn chunk_document(
+    path: &str,
+    content: &str,
+    chunk_size: usize,
+    max_chunk_size: usize,
+    merge_fallback: f64,
+) -> Vec<Produced> {
     let extension = code::extension_of(path);
     let (pieces, modality, language) = if TEXT_EXT.contains(&extension) {
         (
-            text::chunk(content, CHUNK_SIZE, MAX_CHUNK_SIZE),
+            text::chunk(content, chunk_size, max_chunk_size),
             "text".to_string(),
             None,
         )
     } else {
-        let (pieces, language) = code::chunk(content, path, CHUNK_SIZE, MAX_CHUNK_SIZE);
+        let (pieces, language) = code::chunk(content, path, chunk_size, max_chunk_size);
         (pieces, "code".to_string(), language)
     };
     let produced = pieces
@@ -69,7 +94,7 @@ pub fn chunk_document(path: &str, content: &str) -> Vec<Produced> {
             language: language.clone(),
         })
         .collect();
-    merge::merge_similar(produced, MAX_CHUNK_SIZE)
+    merge::merge_similar(produced, max_chunk_size, merge_fallback)
 }
 
 #[cfg(test)]
@@ -140,7 +165,7 @@ mod tests {
             let rel = string_field(file, "path");
             let bytes = std::fs::read(Path::new("parity/fixtures").join(&rel)).unwrap();
             let source = read_python_text(&bytes);
-            let produced = chunk_document(&rel, &source);
+            let produced = chunk_document(&rel, &source, CHUNK_SIZE, MAX_CHUNK_SIZE, 0.7);
             let chunks = match file {
                 Value::Object(pairs) => pairs.iter().find(|(key, _)| key == "chunks"),
                 _ => None,

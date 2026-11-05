@@ -19,11 +19,13 @@ jobs:
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             test: false
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            test: true
-          - os: macos-latest
+          # Intel images are a separate hosted pool. macos-latest is arm64, and
+          # that pool has been cancelling jobs before a runner is assigned.
+          - os: macos-15-intel
             target: x86_64-apple-darwin
+            test: true
+          - os: macos-15-intel
+            target: aarch64-apple-darwin
             test: false
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -49,6 +51,18 @@ jobs:
           RUSTFLAGS: "-D warnings"
         run: cargo test --release --target ${{ matrix.target }} --lib cargo_manifest_and_lock_are_std_only -- --exact
 
+      - name: Python PDF extra for parity
+        if: matrix.test
+        shell: bash
+        run: |
+          # Stay on the 1.x wheel. PyMuPDF 2.x publishes an sdist whose
+          # metadata name is pymupdf-lite, and macOS spends the job building it.
+          spec='pymupdf>=1.23,<2'
+          pkg='stele-context[mcp]==1.5.2'
+          python3 -m pip install --user --break-system-packages "$spec" "$pkg" || python3 -m pip install --user "$spec" "$pkg" || true
+          python -m pip install --user --break-system-packages "$spec" "$pkg" || python -m pip install --user "$spec" "$pkg" || true
+          python3 -c 'import pymupdf' || python -c 'import pymupdf'
+
       - name: Fetch parity corpora
         if: matrix.test
         shell: bash
@@ -58,7 +72,7 @@ jobs:
         if: matrix.test
         env:
           RUSTFLAGS: "-D warnings"
-        run: cargo test --release --target ${{ matrix.target }}
+        run: cargo test --release --target ${{ matrix.target }} -- --nocapture
 
       - name: Check
         if: ${{ !matrix.test }}
@@ -82,5 +96,24 @@ jobs:
             --binary "target/${{ matrix.target }}/release/stele-context${ext}" \
             --group b1 --runs 10 --check-floor
 
-  # The cross targets above are cargo check. These three run the tests.
-  # Linux, macOS, and Windows each have one native test job.
+      - name: Same corpus versus Python 1.5.2
+        if: matrix.test
+        shell: bash
+        run: |
+          ext=""
+          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
+          "target/${{ matrix.target }}/release/stele-bench${ext}" versus \
+            --binary "target/${{ matrix.target }}/release/stele-context${ext}" \
+            --runs 3
+
+  msrv:
+    name: rust 1.89
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89
+      - name: Check the minimum supported compiler
+        run: cargo check --locked
+
+  # The cross targets above are cargo check. Linux, macOS (Intel), and
+  # Windows each have one native test job. The 1.89 job is the MSRV.

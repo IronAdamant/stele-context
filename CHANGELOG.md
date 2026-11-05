@@ -1,3 +1,30 @@
+## [2.1.0] - 2026-11-05
+
+Closes the gaps against the PyPI 1.5.2 package. [MIGRATION.md](MIGRATION.md) lists what still differs and why.
+
+### Fixed
+
+- Standard and full MCP tools do the work (`prune_history`, `rollback`, `prune_chunks`, `list_sessions`, `rebuild_symbols`, `stale_chunks`, `get_dynamic_symbols`, `list_agents`, `get_notifications`, `environment_check`, `clean_bytecache`, `bulk_store_embeddings`, `bulk_store_chunk_agent_notes`, `get_chunk_history`, `batch`, and the 18 old singleton names).
+- `migrate` copies a 1.5 SQLite store into the native store without modifying it.
+- `.stele-context.toml` keys are applied, including top-level keys in a file without a `[stele-context]` table.
+- A folder with no `.git` or `.stele-context.toml` has no project root, as in 1.5.2: absolute paths, `project_root` null, no new-file scan. The working directory is resolved (`Path.cwd().resolve()`).
+- Tool arguments are accepted and rejected exactly as by the 1.5.2 functions; a rejected call gets an error that names the field and the arguments to retry with, and `isError: true`.
+- Search matches 1.5.2: BM25 over non-empty chunks, `symbol_boost` rows, the proximity nudge, `path_prefix` ranking, `compact` / `max_result_tokens` / `return_response_meta`. `query` takes all of its 1.5.2 arguments.
+- `agent_grep` counts every occurrence and collapses repeated excerpts (`also_in`); `search_text` walks chunks in 1.5.2's order and finds overlapping hits; `document_path` is normalized.
+- Dynamic symbols appear in `find_references` and in `symbol_rows`; `register_dynamic_symbols` honours `role`.
+- Tier 2 counts summaries, embeddings and `llm_embed` vectors; empty embedding vectors are rejected; `llm_embed` takes exactly 32 fingerprint values; memory chunks keep 1.5.2's fields and are reported by `detect_changes`.
+- `doctor` `map_preview.total_tokens` is the project total; `index.max_level`, `index.avg_connections`, `search_quality.hnsw_span`, `insert_count` and `kv_cache_size_bytes` come from a real graph and KV files, computed the 1.5.2 way. `doctor.python` is read from the host interpreter's files; no Python is started.
+- `get_search_history` returns 1.5.2's rows and keeps them across processes.
+- Index locks without git are kept in the store; walked files come back in 1.5.2's path order (case-insensitive on Windows); CLI `annotate` requires `--type` and `--content`; the CLI applies 1.5.2's flags on `search`, `query`, `impact-radius`, `coupling`, `agent-grep`.
+- Speed: release builds use fat LTO and one codegen unit (a 2.4 MB binary instead of 3.8 MB, faster process start); the MCP server opens the store on the first tool call; the graph uses heaps and is updated in place on Tier-2 writes, and its numbers are cached across processes.
+
+### Added
+
+- MCP tool groups (the IronAdamant suite convention): `core`, `index`, `search`, `symbols`, `embeddings`, `notes`, `locks`, `messages`, `kv`. An agent picks them per project with `stele:` lines in the `agent-tools` block of the project's AGENTS.md; `STELE_TOOLS` / `STELE_DISABLE` override per key and combine with `STELE_MCP_MODE`. Hidden tools leave `tools/list` and return a one-line `isError` naming the switch. AGENTS.md is re-checked (size and mtime) on every request, and `notifications/tools/list_changed` is sent when the list changes (`tools.listChanged: true`). A bad env value exits 2 with one stderr line; a bad AGENTS.md line is a warning in the `initialize` instructions and `doctor`. With nothing set, `tools/list` is byte-identical. See README "Tool groups" and "Choosing groups".
+- `initialize` returns `instructions`: one line with the groups that are on and how to change them.
+- [MIGRATION.md](MIGRATION.md): 1.5.x Python (PyPI, `python-legacy`) to 2.x Rust.
+- `tests/mcp_parity.rs` (replaces `scripts/mcp_parity.py`) and `stele-bench versus` (replaces `scripts/versus_152.py`), both in Rust. Python stays only as the 1.5.2 reference in tests.
+
 ## [Unreleased]
 
 ### Changed

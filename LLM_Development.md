@@ -4,6 +4,10 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-05 - verify-4 parity gaps
+
+- Empty chunks stay out of BM25. Index times are the stored index time. Map prefixes follow `Path`. Annotation tags are OR. Blank PDF pages keep their labels. Dynamic symbol ids stay put and are findable. Embeddings accept any positive length. Detect classifies restored and reprocessed chunks. `insert_count` follows the HNSW counter. Doctor does not spawn Python.
+
 ## 2026-11-04 - main is the Rust crate
 
 - Removed the Python package, Python tests, parity and bench runners, and the PyPI workflow from `main`.

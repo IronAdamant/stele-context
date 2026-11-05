@@ -9,6 +9,7 @@ struct Patterns {
     function: crate::pyre::Regex,
     class: crate::pyre::Regex,
     module_exports: crate::pyre::Regex,
+    exports_name: crate::pyre::Regex,
     require_var: crate::pyre::Regex,
     var_decl: crate::pyre::Regex,
     method: crate::pyre::Regex,
@@ -36,6 +37,7 @@ impl Patterns {
             function: compile(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)"),
             class: compile(r"(?:export\s+)?(?:abstract\s+)?class\s+(\w+)"),
             module_exports: compile(r"module\.exports\s*=\s*(?:new\s+)?(\w+)"),
+            exports_name: compile(r"exports\.(\w+)\s*=\s*(?:new\s+)?(\w+)"),
             require_var: compile(
                 r#"(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*require\(\s*['\"]([^'\"]+)['\"]\s*\)"#,
             ),
@@ -68,6 +70,29 @@ impl Patterns {
 pub(super) fn extract(content: &str) -> Vec<Hit> {
     let patterns = Patterns::load();
     let mut symbols = super::javascript_prepass::leading(content);
+    for found in find_all(&patterns.exports_name, content) {
+        let line = content
+            .chars()
+            .take(found.start)
+            .filter(|ch| *ch == '\n')
+            .count() as u32
+            + 1;
+        let name = group(content, &found, 1);
+        let rhs = group(content, &found, 2);
+        let fresh = |symbols: &[Hit], kind: &str, role: &str, label: &str| {
+            !symbols.iter().any(|hit| {
+                hit.name == label && hit.kind == kind && hit.role == role && hit.line == line
+            })
+        };
+        if fresh(&symbols, "variable", "definition", &name) {
+            util::emit(&mut symbols, name, "variable", "definition", line, None);
+        }
+        if !matches!(rhs.as_str(), "function" | "class" | "async" | "require")
+            && fresh(&symbols, "variable", "reference", &rhs)
+        {
+            util::emit(&mut symbols, rhs, "variable", "reference", line, None);
+        }
+    }
     scan_lines(&patterns, content, &mut symbols);
     symbols
 }

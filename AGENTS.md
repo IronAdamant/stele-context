@@ -66,6 +66,33 @@ The **stdlib-only** engine is in a **reasonable stopping place** for hybrid retr
 
 Cold-start ritual: `doctor` → `query` (with `session_id`) → `agent_grep` / `find_*` → `get_context`. First-run CLI: `stele-context init .`.
 
+## Choosing groups
+
+An agent sets Stele's groups for a project with `stele:` lines in the first `agent-tools` fenced block of the project's AGENTS.md (in the project root: the directory with `.git` or `.stele-context.toml`, else the server's working directory):
+
+````markdown
+```agent-tools
+# one agent works here; CoordinationHub owns leases
+stele: disable locks, notes
+```
+````
+
+Groups: `core` (always on: doctor, map, get_context, ...), `index`, `search`, `symbols`, `embeddings`, `notes`, `locks`, `messages`, `kv`. The README's [Tool groups](README.md#tool-groups) table lists every tool. Turn a group off when something else does its job:
+
+| Group | Turn it off when | Line |
+|---|---|---|
+| `locks` | one agent works on the project, or CoordinationHub, Trammel or Chisel coordinates the agents | `stele: disable locks` |
+| `notes` | Trammel or Wikifier keeps the notes and handoffs | `stele: disable notes` |
+| `messages` | CoordinationHub carries agent messages (standard/full only) | `stele: disable messages` |
+| `embeddings` | no agent writes Tier-2 summaries or vectors; keyword search is enough | `stele: disable embeddings` |
+| `kv` | you never save or restore session state (standard/full only) | `stele: disable kv` |
+| `symbols` | the project has no code (docs, data) | `stele: disable symbols` |
+| `index`, `search` | keep on: they are the cache and the lookups | |
+
+To keep only a few groups instead, list them: `stele: tools search, symbols` (`core` stays on). Lists take commas or spaces, and `#` starts a comment. Stele reads only its own lines, so other tools' lines can share the block.
+
+Stele checks the file's size and mtime on every request. When an edit changes the tool list it sends `notifications/tools/list_changed` and the client refetches the list; no restart. A line with an unknown name, or one that tries to switch off `core`, is ignored and reported as a warning in the `initialize` instructions and `doctor`. An env var beats the matching line: `STELE_TOOLS` replaces `stele: tools`, `STELE_DISABLE` replaces `stele: disable`.
+
 ## CLI ↔ MCP name map
 
 | CLI | MCP / engine |
@@ -112,7 +139,7 @@ bash scripts/fetch_corpora.sh
   --binary target/release/stele-context --group b1 --runs 10 --check-floor
 ```
 
-`stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.0.0`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. The 18 old singleton names return `tool_removed`.
+`stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.1.0`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. Full mode runs the 18 old singleton names by routing them to the current tools.
 
 Fixture goldens live in `parity/goldens/`. `cargo test` checks chunks and symbols against `fixtures.json`. `bash scripts/fetch_corpora.sh` fills `parity/.cache` so the rich 13.9.4 and flask 3.1.0 round-trip tests run. Historical timings are `bench/baseline/` and `bench/rust-b1.json`.
 

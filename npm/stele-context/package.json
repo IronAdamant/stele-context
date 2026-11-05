@@ -1,6 +1,6 @@
 {
   "name": "stele-context",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Launcher for the stele-context 2.0 Rust binary. This package does not ship a Python wheel.",
   "bin": {
     "stele-context": "bin/stele-context.js"

@@ -64,7 +64,6 @@ jobs:
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/stele-context${ext}" "dist/stele-context-${{ matrix.target }}${ext}"
           cp "target/${{ matrix.target }}/release/stele-context-mcp${ext}" "dist/stele-context-mcp-${{ matrix.target }}${ext}"
-          (cd dist && sha256sum * > SHA256SUMS)
 
       - uses: actions/upload-artifact@v4
         with:
@@ -81,9 +80,11 @@ jobs:
           merge-multiple: true
           path: dist
 
+      # One SHA256SUMS over the twelve binaries (it does not list itself).
       - name: Checksums
         run: |
           cd dist
+          rm -f SHA256SUMS
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 

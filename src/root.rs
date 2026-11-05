@@ -7,6 +7,25 @@ use crate::config::Config;
 use std::env;
 use std::path::{Path, PathBuf};
 
+/// `Path.resolve()`: symlinks and Windows 8.3 short names expanded, as
+/// 1.5.2 resolves its working directory. The verbatim prefix Windows adds
+/// (`\\?\`) is dropped so the text stays an ordinary path.
+pub fn resolved(path: &Path) -> PathBuf {
+    let Ok(real) = std::fs::canonicalize(path) else {
+        return path.to_path_buf();
+    };
+    if cfg!(windows) {
+        let text = real.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    real
+}
+
 pub fn home_dir() -> Option<PathBuf> {
     if cfg!(windows) {
         env::var_os("USERPROFILE").map(PathBuf::from)

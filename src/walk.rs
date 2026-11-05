@@ -43,7 +43,11 @@ pub fn is_supported_extension(ext: &str) -> bool {
         || MEDIA_EXTENSIONS.contains(&ext)
 }
 
-pub fn expand(paths: &[PathBuf], respect_gitignore: bool) -> io::Result<Vec<String>> {
+pub fn expand(
+    paths: &[PathBuf],
+    respect_gitignore: bool,
+    extra_skip: &[String],
+) -> io::Result<Vec<String>> {
     let mut out = Vec::new();
     for path in paths {
         if path.is_file() {
@@ -56,18 +60,41 @@ pub fn expand(paths: &[PathBuf], respect_gitignore: bool) -> io::Result<Vec<Stri
             } else {
                 None
             };
-            walk_dir(path, path, matcher.as_ref(), &mut out)?;
+            let mut found = Vec::new();
+            walk_dir(path, path, matcher.as_ref(), extra_skip, &mut found)?;
+            // 1.5.2 `sorted(p.rglob("*"))`: paths compare part by part, and
+            // a Windows path compares case-insensitively.
+            found.sort_by(|left, right| path_order(left, right));
+            out.extend(found);
         }
     }
-    out.sort();
-    out.dedup();
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|path| seen.insert(path.clone()));
     Ok(out)
+}
+
+/// `PurePath.__lt__`: the parts compared in order, each lowercased on
+/// Windows.
+pub fn path_order(left: &str, right: &str) -> std::cmp::Ordering {
+    let parts = |text: &str| -> Vec<String> {
+        text.split(['/', '\\'])
+            .map(|part| {
+                if cfg!(windows) {
+                    part.to_lowercase()
+                } else {
+                    part.to_string()
+                }
+            })
+            .collect()
+    };
+    parts(left).cmp(&parts(right))
 }
 
 fn walk_dir(
     root: &Path,
     dir: &Path,
     matcher: Option<&Gitignore>,
+    extra_skip: &[String],
     out: &mut Vec<String>,
 ) -> io::Result<()> {
     let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
@@ -75,7 +102,10 @@ fn walk_dir(
     for entry in entries {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with('.') || SKIP_DIRS.contains(&name.as_ref()) {
+        if name.starts_with('.')
+            || SKIP_DIRS.contains(&name.as_ref())
+            || extra_skip.iter().any(|skip| skip == name.as_ref())
+        {
             continue;
         }
         let path = entry.path();
@@ -85,7 +115,7 @@ fn walk_dir(
             if matcher.is_some_and(|rules| rules.is_ignored(&rel, true)) {
                 continue;
             }
-            walk_dir(root, &path, matcher, out)?;
+            walk_dir(root, &path, matcher, extra_skip, out)?;
         } else if file_type.is_file() {
             let ext = path
                 .extension()
@@ -105,14 +135,20 @@ fn walk_dir(
 }
 
 fn normalize(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    native_sep(&path.to_string_lossy())
 }
 
 fn normalize_under(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    native_sep(&path.strip_prefix(root).unwrap_or(path).to_string_lossy())
+}
+
+/// Match 1.5.2 `Path` text: forward slashes on Unix, backslashes on Windows.
+pub fn native_sep(path: &str) -> String {
+    if cfg!(windows) {
+        path.replace('/', "\\")
+    } else {
+        path.replace('\\', "/")
+    }
 }
 
 #[cfg(test)]
@@ -131,12 +167,12 @@ mod tests {
         fs::write(root.join("ignored.py"), "x\n").unwrap();
         fs::write(root.join("secrets").join("keys.txt"), "x\n").unwrap();
         fs::write(root.join(".hidden").join("no.py"), "x\n").unwrap();
-        let found = expand(&[root.clone()], true).unwrap();
+        let found = expand(&[root.clone()], true, &[]).unwrap();
         assert!(found.iter().any(|path| path.ends_with("kept.py")));
         assert!(!found.iter().any(|path| path.contains("ignored.py")));
         assert!(!found.iter().any(|path| path.contains("secrets")));
         assert!(!found.iter().any(|path| path.contains("hidden")));
-        let explicit = expand(&[root.join("ignored.py")], true).unwrap();
+        let explicit = expand(&[root.join("ignored.py")], true, &[]).unwrap();
         assert_eq!(explicit.len(), 1);
         let _ = fs::remove_dir_all(&root);
     }

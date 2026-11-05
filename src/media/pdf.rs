@@ -10,19 +10,218 @@ pub fn pages(bytes: &[u8]) -> Vec<(String, usize, usize)> {
     if !bytes.starts_with(b"%PDF") {
         return vec![(format!("pdf bytes {}", bytes.len()), 0, bytes.len())];
     }
-    let streams = content_streams(bytes);
-    if streams.is_empty() {
-        return vec![(format!("pdf pages 0 bytes {}", bytes.len()), 0, bytes.len())];
+    // One chunk per page. A page may reference several content streams
+    // (two text lines often do). Those streams are one page, not two.
+    let mut texts = page_texts(bytes);
+    if texts.is_empty() {
+        let joined = content_streams(bytes).join("\n");
+        if joined.trim().is_empty() {
+            // Every page is blank. 1.5.2 stores one empty chunk.
+            return vec![(String::new(), 0, 0)];
+        }
+        texts.push(joined);
     }
-    streams
-        .into_iter()
+    let chunks: Vec<(String, usize, usize)> = texts
+        .iter()
         .enumerate()
-        .map(|(index, text)| {
+        .filter_map(|(index, text)| {
+            if text.trim().is_empty() {
+                return None;
+            }
+            let text = if text.ends_with('\n') {
+                text.clone()
+            } else {
+                format!("{text}\n")
+            };
             let body = format!("[Page {}]\n{text}", index + 1);
             let end = (index + 1) * 1000;
-            (body, index * 1000, end)
+            Some((body, index * 1000, end))
         })
-        .collect()
+        .collect();
+    if !chunks.is_empty() {
+        return chunks;
+    }
+    let joined = content_streams(bytes).join("\n");
+    if joined.trim().is_empty() {
+        return vec![(String::new(), 0, 0)];
+    }
+    vec![(format!("[Page 1]\n{joined}\n"), 0, 1000)]
+}
+
+struct PdfObj {
+    num: u32,
+    body: Vec<u8>,
+    stream: Vec<u8>,
+}
+
+fn page_texts(bytes: &[u8]) -> Vec<String> {
+    let objects = pdf_objects(bytes);
+    if objects.is_empty() {
+        return Vec::new();
+    }
+    let mut stream_text = std::collections::HashMap::new();
+    let mut pages = Vec::new();
+    let mut kids = Vec::new();
+    for obj in &objects {
+        let body = String::from_utf8_lossy(&obj.body);
+        if body.contains("/Type /Pages") || body.contains("/Type/Pages") {
+            kids = pdf_refs_after(&body, "/Kids");
+        }
+        if is_page(&body) {
+            pages.push((obj.num, pdf_refs_after(&body, "/Contents")));
+        }
+        if !obj.stream.is_empty() {
+            let header = &obj.body;
+            let flate = find_sub(header, 0, b"FlateDecode").is_some();
+            let decoded = if flate {
+                inflate::zlib_decode(&obj.stream).unwrap_or_default()
+            } else {
+                obj.stream.clone()
+            };
+            stream_text.insert(obj.num, show_text(&decoded));
+        }
+    }
+    if pages.is_empty() {
+        return Vec::new();
+    }
+    let order: Vec<u32> = if kids.is_empty() {
+        pages.iter().map(|(num, _)| *num).collect()
+    } else {
+        kids
+    };
+    let mut out = Vec::new();
+    for page_num in order {
+        let Some((_, contents)) = pages.iter().find(|(num, _)| *num == page_num) else {
+            continue;
+        };
+        let mut text = String::new();
+        for id in contents {
+            let Some(piece) = stream_text.get(id) else {
+                continue;
+            };
+            if piece.trim().is_empty() {
+                continue;
+            }
+            if !text.is_empty() && !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push_str(piece);
+        }
+        // A blank page stays in the list so later pages keep their numbers.
+        out.push(text);
+    }
+    out
+}
+
+fn is_page(body: &str) -> bool {
+    (body.contains("/Type /Page") || body.contains("/Type/Page"))
+        && !body.contains("/Type /Pages")
+        && !body.contains("/Type/Pages")
+}
+
+fn pdf_objects(bytes: &[u8]) -> Vec<PdfObj> {
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(rel) = find_sub(bytes, cursor, b" obj") {
+        let at = cursor + rel;
+        let mut i = at;
+        while i > 0 && bytes[i - 1].is_ascii_whitespace() {
+            i -= 1;
+        }
+        while i > 0 && bytes[i - 1].is_ascii_digit() {
+            i -= 1;
+        }
+        while i > 0 && bytes[i - 1].is_ascii_whitespace() {
+            i -= 1;
+        }
+        let num_end = i;
+        while i > 0 && bytes[i - 1].is_ascii_digit() {
+            i -= 1;
+        }
+        let num = std::str::from_utf8(&bytes[i..num_end])
+            .ok()
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(0);
+        let body_start = at + b" obj".len();
+        let Some(end_rel) = find_sub(bytes, body_start, b"endobj") else {
+            break;
+        };
+        let body_end = body_start + end_rel;
+        let region = &bytes[body_start..body_end];
+        let (body, stream) = split_stream(region);
+        out.push(PdfObj { num, body, stream });
+        cursor = body_end + b"endobj".len();
+    }
+    out
+}
+
+fn split_stream(region: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let Some(rel) = find_sub(region, 0, b"stream") else {
+        return (region.to_vec(), Vec::new());
+    };
+    let mut start = rel + b"stream".len();
+    if region.get(start) == Some(&b'\r') {
+        start += 1;
+    }
+    if region.get(start) == Some(&b'\n') {
+        start += 1;
+    }
+    let Some(end_rel) = find_sub(region, start, b"endstream") else {
+        return (region[..rel].to_vec(), Vec::new());
+    };
+    let end = start + end_rel;
+    (region[..rel].to_vec(), region[start..end].to_vec())
+}
+
+fn pdf_refs_after(body: &str, key: &str) -> Vec<u32> {
+    let Some(at) = body.find(key) else {
+        return Vec::new();
+    };
+    let rest = &body[at + key.len()..];
+    let mut nums = Vec::new();
+    let bytes = rest.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let array = bytes.get(i) == Some(&b'[');
+    if array {
+        i += 1;
+    }
+    loop {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] == b']' || bytes[i] == b'/' || bytes[i] == b'>' {
+            break;
+        }
+        if !bytes[i].is_ascii_digit() {
+            break;
+        }
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if let Ok(num) = rest[start..i].parse() {
+            nums.push(num);
+        }
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if bytes.get(i) == Some(&b'R') {
+            i += 1;
+        }
+        if !array {
+            break;
+        }
+    }
+    nums
 }
 
 fn content_streams(bytes: &[u8]) -> Vec<String> {
@@ -179,6 +378,25 @@ endobj\n\
         assert_eq!(pages.len(), 1);
         assert!(pages[0].0.contains("[Page 1]"), "{}", pages[0].0);
         assert!(pages[0].0.contains("Hello PDF"), "{}", pages[0].0);
+    }
+
+    #[test]
+    fn two_streams_on_one_page_are_one_chunk() {
+        let pdf = b"%PDF-1.4\n\
+1 0 obj << /Type /Page /Contents [2 0 R 3 0 R] >> endobj\n\
+2 0 obj << /Length 20 >>\nstream\nBT (Hello) Tj ET\nendstream\nendobj\n\
+3 0 obj << /Length 20 >>\nstream\nBT (World) Tj ET\nendstream\nendobj\n\
+%%EOF\n";
+        let pages = pages(pdf);
+        assert_eq!(
+            pages.len(),
+            1,
+            "{:?}",
+            pages.iter().map(|p| &p.0).collect::<Vec<_>>()
+        );
+        assert!(pages[0].0.contains("Hello"), "{}", pages[0].0);
+        assert!(pages[0].0.contains("World"), "{}", pages[0].0);
+        assert!(!pages[0].0.contains("[Page 2]"), "{}", pages[0].0);
     }
 
     #[test]

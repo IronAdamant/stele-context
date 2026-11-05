@@ -19,11 +19,23 @@ fn media_fixture_matches_the_expected_counts() {
     let mut engine = Engine::open_at(root, store.clone()).unwrap();
     engine.index(&[".".to_string()], false).unwrap();
     let stats = engine.stats();
-    for key in ["documents", "chunks", "symbols"] {
-        let value = crate::store::int_field(&stats, key);
+    let storage = match &stats {
+        crate::json::Value::Object(pairs) => pairs
+            .iter()
+            .find(|(key, _)| key == "storage")
+            .map(|(_, value)| value),
+        _ => None,
+    };
+    let storage = storage.expect("storage");
+    for (key, label) in [
+        ("document_count", "documents"),
+        ("chunk_count", "chunks"),
+        ("symbol_count", "symbols"),
+    ] {
+        let value = crate::store::int_field(storage, key);
         assert!(
-            expected.contains(&format!("\"{key}\": {value}")),
-            "{key}={value} not in {expected}"
+            expected.contains(&format!("\"{label}\": {value}")),
+            "{label}={value} not in {expected}"
         );
     }
     let found = engine.search("Hello PDF symbols", "keyword", 3);

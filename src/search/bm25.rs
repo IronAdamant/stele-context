@@ -44,6 +44,10 @@ impl Bm25 {
         self.recompute_avg();
     }
 
+    pub fn contains(&self, id: &str) -> bool {
+        self.term_freqs.contains_key(id)
+    }
+
     pub fn remove(&mut self, id: &str) {
         let Some(freqs) = self.term_freqs.remove(id) else {
             return;
