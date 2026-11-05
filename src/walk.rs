@@ -60,12 +60,34 @@ pub fn expand(
             } else {
                 None
             };
-            walk_dir(path, path, matcher.as_ref(), extra_skip, &mut out)?;
+            let mut found = Vec::new();
+            walk_dir(path, path, matcher.as_ref(), extra_skip, &mut found)?;
+            // 1.5.2 `sorted(p.rglob("*"))`: paths compare part by part, and
+            // a Windows path compares case-insensitively.
+            found.sort_by(|left, right| path_order(left, right));
+            out.extend(found);
         }
     }
-    out.sort();
-    out.dedup();
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|path| seen.insert(path.clone()));
     Ok(out)
+}
+
+/// `PurePath.__lt__`: the parts compared in order, each lowercased on
+/// Windows.
+pub fn path_order(left: &str, right: &str) -> std::cmp::Ordering {
+    let parts = |text: &str| -> Vec<String> {
+        text.split(['/', '\\'])
+            .map(|part| {
+                if cfg!(windows) {
+                    part.to_lowercase()
+                } else {
+                    part.to_string()
+                }
+            })
+            .collect()
+    };
+    parts(left).cmp(&parts(right))
 }
 
 fn walk_dir(
