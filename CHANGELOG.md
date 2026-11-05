@@ -1,3 +1,20 @@
+## [2.2.0] - 2026-11-05
+
+Fixes for what slowed agents down or cost them tokens in a two-agent run on this repository. [MIGRATION.md](MIGRATION.md) lists each change against 1.5.2.
+
+### Fixed
+
+- Two agents' MCP servers, and the CLI, can share a project. A server holds the store only during a tool call and reloads it when another process wrote it. 2.1 held it for the server's whole life, so a second server's first tool call (or `stele-context stats`) waited until the first server exited.
+- An agent is never blocked by its own `index`. Index-time locks yield to an explicit `acquire` by any agent, are never written over an explicit lock, and show `"auto": true` in `status`.
+- Every tool in every mode has a real `inputSchema` (types, `required`, allowed values) and a one-line description, generated from the argument table the server binds calls with. Lite listed no arguments, and standard and full listed wrong ones for some tools (`find_definition` showed `path` and `query`, not `symbol`).
+- `map` applies `max_documents` and `max_annotation_chars`; `history` applies `limit` and `document_path`.
+
+### Changed
+
+- Compact results by default for the tools that ran past 10 KB. On this repository (202 files): `find_definition` 60.7 KB to 0.5 KB, `search` 101.2 KB to 8.4 KB, `search_text` 21.9 KB to 8.6 KB, `agent_grep` 29.4 KB to 7.2 KB, `map` 25.3 KB to 6.7 KB, a re-`index` 15.2 KB to 0.1 KB, `detect_changes` 6.0 KB to 0.2 KB, `history` 12.2 KB to 0.3 KB, `get_notifications` 30.1 KB to 2.9 KB. `full=true` (or the 1.5.2 argument value) returns the 1.5.2 result. `get_context` still returns the text it was asked for. The CLI is unchanged.
+- Speed: indexing this repository through MCP went from 3.4 s to 1.3 s on Windows. The coordination file is read and written once per index, not once per file, and chunk signatures count trigrams and words by sorting instead of hashing (same values, about 3x faster).
+- The benchmark gate times a reply from the moment its line arrives, before the bench's own JSON parser reads it; reply sizes are still reported.
+
 ## [2.1.0] - 2026-11-05
 
 Closes the gaps against the PyPI 1.5.2 package. [MIGRATION.md](MIGRATION.md) lists what still differs and why.

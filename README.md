@@ -21,7 +21,7 @@ Everything runs offline. Stele does not bundle a model and never calls one; Tier
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.1.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.2.0/scripts/install.sh | sh
 ```
 
 On Windows run `scripts/install.ps1`, or download `stele-context-<target>` from the [releases](https://github.com/IronAdamant/stele-context/releases). From source: `cargo build --release` (Rust 1.89+). The binaries are `stele-context` and `stele-context-mcp`.
@@ -48,7 +48,7 @@ or in a settings file:
 }
 ```
 
-Other clients use the same command. `lite` (the default) exposes 25 tools; `standard` adds sessions, history and bulk embeddings (43); `full` adds the 1.x singleton names (61). Lite's `tools/list` carries names only; `standard` and `full` list each tool's parameters.
+Other clients use the same command. `lite` (the default) exposes 25 tools; `standard` adds sessions, history and bulk embeddings (43); `full` adds the 1.x singleton names (61). Every mode lists each tool with a one-line description and its arguments (types, required ones, allowed values): `tools/list` is 8.5 KB in lite, 12.4 KB in standard and 16.7 KB in full (1.5.2: 26.3, 33.3 and 37.7 KB). Results that can run long come back compact (a definition is its signature and a short preview, `index` reports counts); `full=true` on those tools returns everything, see [MIGRATION.md](MIGRATION.md#deliberate-differences).
 
 ## Tool groups
 
@@ -79,7 +79,7 @@ The agent picks the groups for a project in its AGENTS.md (see [Choosing groups]
 - A hidden tool is absent from `tools/list`; calling it anyway returns `isError` with the line to change, e.g. `tool "document_lock" is disabled (group "locks") by STELE_DISABLE; remove "locks" from it to enable`.
 - `initialize` instructions (and `doctor`, when anything is hidden) carry one line with the groups that are on and off.
 
-`tools/list` size with everything on, then with `locks`, `notes` or `messages` off: lite 2,556 / 2,455 / 2,459 bytes (no `messages` in lite); standard 17,009 / 16,131 / 15,995 / 16,667; full 23,099 / 19,847 / 19,755 / 22,757.
+`tools/list` size with everything on, then with `locks`, `notes` or `messages` off: lite 8,512 / 8,060 / 7,932 bytes (no `messages` in lite); standard 12,352 / 11,722 / 11,571 / 12,075; full 16,737 / 14,442 / 14,082 / 16,460.
 
 ## Choosing groups
 
