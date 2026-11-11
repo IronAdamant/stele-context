@@ -21,7 +21,7 @@ Everything runs offline. Stele does not bundle a model and never calls one; Tier
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.3.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.4.0/scripts/install.sh | sh
 ```
 
 On Windows run `scripts/install.ps1`, or download `stele-context-<target>` from the [releases](https://github.com/IronAdamant/stele-context/releases). From source: `cargo build --release` (Rust 1.89+). The binaries are `stele-context` and `stele-context-mcp`.
@@ -79,7 +79,7 @@ The agent picks the groups for a project in its AGENTS.md (see [Choosing groups]
 - A hidden tool is absent from `tools/list`; calling it anyway returns `isError` with the line to change, e.g. `tool "document_lock" is disabled (group "locks") by STELE_DISABLE; remove "locks" from it to enable`.
 - `initialize` instructions (and `doctor`, when anything is hidden) carry one line with the groups that are on and off.
 
-`tools/list` size with everything on, then with `locks`, `notes` or `messages` off: lite 8,623 / 8,171 / 8,043 bytes (no `messages` in lite); standard 12,463 / 11,833 / 11,682 / 12,186; full 16,848 / 14,553 / 14,193 / 16,571.
+`tools/list` size with everything on, then with `locks`, `notes` or `messages` off: lite 9,732 / 9,280 / 9,152 bytes (no `messages` in lite); standard 13,732 / 13,068 / 12,898 / 13,421; full 18,117 / 15,788 / 15,409 / 17,806 (2.4: the `worktree_root` arguments and the when-to-use descriptions add about 1.1 KB to each).
 
 ## Choosing groups
 
@@ -130,6 +130,27 @@ stele-context detect
 ```
 
 CLI output is JSON (`--human` for text).
+
+## When to use Stele instead of grep
+
+| Question | Stele | Why it beats grep |
+|---|---|---|
+| Where is `X` defined? | `find_definition` | The definition rows only (fn, struct, trait, `macro_rules!`, const, `pub(crate) fn` ...) with the signature line, not every call site |
+| Who uses `X`? Is it dead? | `find_references` | Definition first, then every code line that calls, method-calls, imports or names `X`, comments and strings skipped, and a `referenced` / `unreferenced` verdict |
+| What breaks if `X` changes? | `impact_radius` | Follows the symbol graph across files |
+| Where is the `Game` trait? | `search` | The chunk that defines the names in the query comes first |
+
+Use grep for text in strings and comments, and for files outside the index.
+
+## Git worktrees
+
+When each agent works in its own worktree but the MCP server runs in the main checkout, pass `worktree_root` (the worktree's absolute path) to any read tool, or `--worktree PATH` on the CLI:
+
+```text
+find_references {"symbol": "game_frame", "worktree_root": "/repo/.claude/worktrees/lane-a"}
+```
+
+Stele answers from the main index plus an in-memory overlay of the files that differ in that worktree: new and changed files are re-indexed, deleted ones vanish. Every call re-checks the tree by size and mtime (the content hash when they differ), so the answer is as current as grep, and nothing is written to the main index. Replies add `"worktree"` and `"overlay_files"` (files that differ from main). A server started inside a worktree that has no index of its own does this by itself.
 
 ## How it works
 

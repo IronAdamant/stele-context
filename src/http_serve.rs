@@ -183,7 +183,26 @@ fn call(engine: &std::sync::Mutex<Engine>, body: &str) -> (u16, Value) {
             )]),
         );
     }
-    let outcome = mcp::dispatch(&mut engine, &tool, &params);
+    // 2.4: a read tool with worktree_root answers for that worktree.
+    let outcome = match crate::engine::overlay::requested(&params) {
+        Some(tree) => {
+            static OVERLAYS: std::sync::OnceLock<
+                std::sync::Mutex<crate::engine::overlay::Overlays>,
+            > = std::sync::OnceLock::new();
+            let mut overlays = OVERLAYS
+                .get_or_init(|| std::sync::Mutex::new(crate::engine::overlay::Overlays::new()))
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            overlays
+                .run(&mut engine, &tree, |tree_engine| {
+                    mcp::dispatch(tree_engine, &tool, &params)
+                })
+                .and_then(|(value, ran)| {
+                    value.map(|value| crate::engine::overlay::annotate(value, &ran))
+                })
+        }
+        None => mcp::dispatch(&mut engine, &tool, &params),
+    };
     engine.release_store();
     match outcome {
         Ok(mut result) => {

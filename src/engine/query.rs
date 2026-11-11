@@ -7,6 +7,9 @@ use crate::search::{self, VectorDoc};
 use crate::store::{Annotation, Dynamic, Session};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// Defining chunks `search` puts above the ranked rows (2.4).
+const DEFINITION_ROWS: usize = 3;
+
 fn cosine_stored(query: &[f64], stored: &[f32]) -> f64 {
     // 1.5.2 scores the f64 query signature against the f32 vector on disk.
     let mut dot = 0.0f64;
@@ -45,6 +48,38 @@ impl Engine {
         compact: bool,
         max_result_tokens: Option<i64>,
         return_meta: bool,
+    ) -> Value {
+        self.search_ranked(
+            query,
+            mode,
+            top_k,
+            path_prefix,
+            compact,
+            max_result_tokens,
+            return_meta,
+            false,
+            true,
+        )
+    }
+
+    /// `search_full` plus the 2.4 switches the MCP and HTTP `search` turn
+    /// on by default. `definitions_first`: chunks that define a name the
+    /// query spells out (`Game`, `use_assets`) come first, the chunk that
+    /// defines the most of them on top, a type or trait before a function.
+    /// `include_edges`: each row carries its `edges` block (often dozens of
+    /// symbol links); without it the block is left out.
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_ranked(
+        &mut self,
+        query: &str,
+        mode: &str,
+        top_k: usize,
+        path_prefix: Option<&str>,
+        compact: bool,
+        max_result_tokens: Option<i64>,
+        return_meta: bool,
+        definitions_first: bool,
+        include_edges: bool,
     ) -> Value {
         let mode = mode.trim().to_lowercase();
         let hybrid = mode == "hybrid";
@@ -91,7 +126,12 @@ impl Engine {
         } else {
             search::keyword(&self.bm25, query, rank_limit)
         };
-        if hits.is_empty() {
+        let defining = if definitions_first {
+            self.defining_chunks(query, path_prefix)
+        } else {
+            Vec::new()
+        };
+        if hits.is_empty() && defining.is_empty() {
             return Value::Array(Vec::new());
         }
         let mut rows = self.rows(&hits, hybrid);
@@ -128,6 +168,16 @@ impl Engine {
                 )
             });
             rows.truncate(top_k);
+        }
+        if !defining.is_empty() {
+            rows = self.definitions_on_top(rows, &defining, hybrid, top_k);
+        }
+        if !include_edges {
+            for row in rows.iter_mut() {
+                if let Value::Object(pairs) = row {
+                    pairs.retain(|(key, _)| key != "edges");
+                }
+            }
         }
         if !(return_meta || max_result_tokens.is_some() || compact) {
             return Value::Array(rows);
@@ -189,6 +239,179 @@ impl Engine {
             ]);
         }
         Value::Array(out)
+    }
+
+    /// Chunks that define a name the query spells out, best first: how many
+    /// of the query's names the chunk defines, then a type, trait or macro
+    /// before a function, then the exact case before a case-folded match.
+    /// Words that only say what kind of thing is meant (`trait`, `fn`,
+    /// `struct` ...) are not names; a type word in the query lifts types.
+    /// Returns (chunk_id, names it defines) for at most 10 chunks.
+    fn defining_chunks(
+        &self,
+        query: &str,
+        path_prefix: Option<&str>,
+    ) -> Vec<(String, Vec<String>)> {
+        const KIND_WORDS: &[&str] = &[
+            "trait",
+            "struct",
+            "enum",
+            "type",
+            "class",
+            "fn",
+            "function",
+            "method",
+            "macro",
+            "mod",
+            "module",
+            "const",
+            "impl",
+            "interface",
+            "def",
+        ];
+        let words: Vec<&str> = query
+            .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+            .filter(|word| !word.is_empty())
+            .collect();
+        let wants_type = words.iter().any(|word| {
+            matches!(
+                word.to_ascii_lowercase().as_str(),
+                "trait" | "struct" | "enum" | "type" | "class" | "interface"
+            )
+        });
+        let names: Vec<&str> = words
+            .iter()
+            .copied()
+            .filter(|word| {
+                word.chars().count() >= 3
+                    && !word.chars().all(|ch| ch.is_ascii_digit())
+                    && !KIND_WORDS.contains(&word.to_ascii_lowercase().as_str())
+            })
+            .collect();
+        if names.is_empty() {
+            return Vec::new();
+        }
+        // chunk -> (names it defines, best kind rank, exact-case names)
+        let mut found: std::collections::HashMap<&str, (Vec<String>, i32, i32)> =
+            std::collections::HashMap::new();
+        for sym in &self.store.state.symbols {
+            if sym.role != "definition" {
+                continue;
+            }
+            let Some(name) = names
+                .iter()
+                .find(|name| sym.name.eq_ignore_ascii_case(name))
+            else {
+                continue;
+            };
+            if path_prefix.is_some() && !self.under_prefix(path_prefix, &sym.path) {
+                continue;
+            }
+            let rank = match sym.kind.as_str() {
+                "class" | "macro" | "module" if wants_type => 3,
+                "class" | "macro" | "module" => 2,
+                "function" | "method" => 1,
+                _ => 0,
+            };
+            let entry = found
+                .entry(sym.chunk_id.as_str())
+                .or_insert_with(|| (Vec::new(), 0, 0));
+            let key = name.to_string();
+            if !entry.0.contains(&key) {
+                entry.0.push(key);
+                if sym.name == *name {
+                    entry.2 += 1;
+                }
+            }
+            entry.1 = entry.1.max(rank);
+        }
+        let mut ranked: Vec<(&str, (Vec<String>, i32, i32))> = found.into_iter().collect();
+        ranked.sort_by(|left, right| {
+            (right.1)
+                .0
+                .len()
+                .cmp(&(left.1).0.len())
+                .then((right.1).1.cmp(&(left.1).1))
+                .then((right.1).2.cmp(&(left.1).2))
+                .then(left.0.cmp(right.0))
+        });
+        ranked
+            .into_iter()
+            .take(10)
+            .map(|(id, (names, _, _))| (id.to_string(), names))
+            .collect()
+    }
+
+    /// Put the defining chunks first (in `defining` order), each marked
+    /// `source: "definition"` with the names it defines in `defines`, then
+    /// the other rows in their order; at most `top_k` rows. One place is
+    /// kept for the best ranked row when there is one.
+    fn definitions_on_top(
+        &self,
+        rows: Vec<Value>,
+        defining: &[(String, Vec<String>)],
+        hybrid: bool,
+        top_k: usize,
+    ) -> Vec<Value> {
+        let top = rows.iter().map(score_of).fold(0.0_f64, f64::max).max(1.0);
+        let mut rest: Vec<Value> = Vec::new();
+        let mut taken: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+        for row in rows {
+            let id = crate::store::string_field(&row, "chunk_id");
+            if defining.iter().any(|(chunk, _)| *chunk == id) {
+                taken.insert(id, row);
+            } else {
+                rest.push(row);
+            }
+        }
+        // At most DEFINITION_ROWS on top, and one place kept for the best
+        // ranked row when there is one.
+        let room = if rest.is_empty() {
+            top_k
+        } else {
+            top_k.saturating_sub(1).clamp(1, DEFINITION_ROWS)
+        };
+        let mut out = Vec::new();
+        for (id, names) in defining.iter().take(room) {
+            let row = match taken.remove(id) {
+                Some(row) => row,
+                None => {
+                    let made = self
+                        .rows(
+                            &[crate::search::Scored {
+                                id: id.clone(),
+                                score: top,
+                                source: "definition",
+                            }],
+                            hybrid,
+                        )
+                        .into_iter()
+                        .next();
+                    let Some(made) = made else {
+                        continue;
+                    };
+                    made
+                }
+            };
+            let Value::Object(mut pairs) = row else {
+                continue;
+            };
+            for (key, value) in pairs.iter_mut() {
+                match key.as_str() {
+                    "relevance_score" => *value = Value::Float(top),
+                    "source" => *value = Value::string("definition"),
+                    _ => {}
+                }
+            }
+            pairs.push((
+                "defines".to_string(),
+                Value::Array(names.iter().map(Value::string).collect()),
+            ));
+            out.push(Value::Object(pairs));
+        }
+        out.extend(rest);
+        out.truncate(top_k);
+        out
     }
 
     /// 1.5.2 symbol-boosted search: definitions whose name equals a query
@@ -652,6 +875,36 @@ impl Engine {
         compact: bool,
         max_result_tokens: Option<i64>,
     ) -> Result<Value, String> {
+        self.query_ranked(
+            text,
+            top_k,
+            path_prefix,
+            working_tree,
+            session,
+            search_mode,
+            compact,
+            max_result_tokens,
+            false,
+            true,
+        )
+    }
+
+    /// `query_full` with the 2.4 search switches (`search_ranked`) applied
+    /// to its search branch.
+    #[allow(clippy::too_many_arguments)]
+    pub fn query_ranked(
+        &mut self,
+        text: &str,
+        top_k: usize,
+        path_prefix: Option<&str>,
+        working_tree: bool,
+        session: Option<&str>,
+        search_mode: &str,
+        compact: bool,
+        max_result_tokens: Option<i64>,
+        definitions_first: bool,
+        include_edges: bool,
+    ) -> Result<Value, String> {
         let requested_working_tree = working_tree;
         let requested_prefix = path_prefix.map(str::to_string);
         let mut working_tree = working_tree;
@@ -677,7 +930,7 @@ impl Engine {
         }
         let mut results: Vec<Value> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
-        let semantic = self.search_full(
+        let semantic = self.search_ranked(
             text,
             search_mode,
             top_k,
@@ -685,6 +938,8 @@ impl Engine {
             compact,
             max_result_tokens,
             max_result_tokens.is_some(),
+            definitions_first,
+            include_edges,
         );
         let semantic = match semantic {
             Value::Array(rows) => rows,
@@ -978,6 +1233,23 @@ impl Engine {
                 )))
             });
             omitted = before - refs.len();
+        }
+        // 2.4: a Rust symbol also gets every other line of code that names
+        // it as a word (comments and strings skipped), so the answer has
+        // grep's recall: a call in a chunk that already names it, a fn
+        // passed as a value, `Self::name`. The symbol rows give the first
+        // line per chunk; these rows give the rest.
+        if languages.contains(&"rust") {
+            let extra = self.rust_mentions(name, &defs, &refs);
+            refs.extend(extra);
+            refs.sort_by(|left, right| {
+                crate::store::string_field(left, "document_path")
+                    .cmp(&crate::store::string_field(right, "document_path"))
+                    .then(
+                        crate::store::int_field(left, "line_number")
+                            .cmp(&crate::store::int_field(right, "line_number")),
+                    )
+            });
         }
         let total = (defs.len() + refs.len()) as i64;
         let verdict = if defs.is_empty() && refs.is_empty() {
@@ -1936,6 +2208,85 @@ impl Engine {
             ]));
         }
         rows
+    }
+
+    /// The lines of Rust code that name `name` as a word and that neither
+    /// a definition nor a reference row already gives, as reference rows.
+    /// `kind` says how the line uses it: `call` (`name(`), `method_call`
+    /// (`.name(` or `::name(`), `macro` (`name!`), else `mention`.
+    fn rust_mentions(&self, name: &str, defs: &[Value], refs: &[Value]) -> Vec<Value> {
+        if name.is_empty() || !name.chars().all(|ch| ch.is_alphanumeric() || ch == '_') {
+            return Vec::new();
+        }
+        let key = |row: &Value| {
+            (
+                crate::store::string_field(row, "document_path"),
+                crate::store::int_field(row, "line_number"),
+            )
+        };
+        let mut known: HashSet<(String, i64)> = defs.iter().chain(refs).map(key).collect();
+        let word = |ch: char| ch.is_alphanumeric() || ch == '_';
+        let target: Vec<char> = name.chars().collect();
+        let mut out = Vec::new();
+        for chunk in &self.store.state.chunks {
+            if language_of(&chunk.path) != "rust" || !chunk.content.contains(name) {
+                continue;
+            }
+            let code = crate::symbols::rust_code(&chunk.content);
+            let mut line = 1u32;
+            let mut at = 0usize;
+            while at < code.len() {
+                if code[at] == '\n' {
+                    line += 1;
+                    at += 1;
+                    continue;
+                }
+                let starts = code[at] == target[0]
+                    && code.len() - at >= target.len()
+                    && code[at..at + target.len()] == target[..]
+                    && !at.checked_sub(1).is_some_and(|before| word(code[before]))
+                    && !code
+                        .get(at + target.len())
+                        .is_some_and(|after| word(*after));
+                if !starts {
+                    at += 1;
+                    continue;
+                }
+                let file_line = crate::chunk::lines::absolute(&chunk.line_map, line) as i64;
+                if known.insert((chunk.path.clone(), file_line)) {
+                    let before = code[..at]
+                        .iter()
+                        .rev()
+                        .find(|ch| !ch.is_whitespace())
+                        .copied();
+                    let after = code[at + target.len()..]
+                        .iter()
+                        .find(|ch| !ch.is_whitespace())
+                        .copied();
+                    let kind = match (before, after) {
+                        (_, Some('!')) => "macro",
+                        (Some('.'), Some('(')) => "method_call",
+                        (Some(':'), Some('(')) => "method_call",
+                        (_, Some('(')) => "call",
+                        _ => "mention",
+                    };
+                    out.push(Value::object(vec![
+                        ("symbol", Value::string(name)),
+                        ("kind", Value::string(kind)),
+                        ("chunk_id", Value::string(&chunk.id)),
+                        ("document_path", Value::string(&chunk.path)),
+                        ("line_number", Value::Int(file_line)),
+                        (
+                            "content_preview",
+                            Value::string(chunk.content.chars().take(200).collect::<String>()),
+                        ),
+                        ("dynamic", Value::Bool(false)),
+                    ]));
+                }
+                at += target.len();
+            }
+        }
+        out
     }
 
     fn reference_rows(&self, name: &str, definitions: bool) -> Vec<Value> {

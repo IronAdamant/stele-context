@@ -28,6 +28,19 @@ pub struct Hit {
 
 pub(crate) use edges::build as build_edges;
 
+/// The version of the rules `extract_all` applies on top of 1.5.2's. A
+/// store whose rows were extracted with an older version re-extracts its
+/// Rust chunks the first time it is opened in full. 1: 2.4 adds Rust calls,
+/// method calls, macro invocations, `macro_rules!` and the definitions the
+/// line patterns miss.
+pub const RULES: i64 = 1;
+
+/// The chunk text with Rust comments and string and char literals blanked
+/// (newlines kept), for scanning code only.
+pub(crate) fn rust_code(content: &str) -> Vec<char> {
+    rust_refs::strip(content)
+}
+
 pub fn extract(extension: &str, content: &str) -> Vec<Hit> {
     let ext = extension
         .strip_prefix('.')

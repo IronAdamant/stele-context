@@ -58,6 +58,18 @@ After this, **`search`**, **`get_context`**, **`find_references`**, etc. have ma
 | Current chunk text | **`get_context`** (optional **trust** + **agent_notes** per chunk; records reads in session) |
 | Broad NL question (composite) | **`query`** — merges search + symbols + grep; returns **`applied_defaults`** for smart path_prefix/working_tree; optional `search_mode` / `compact` / `max_result_tokens` |
 | Blast radius / coupling | **`impact_radius`** / **`coupling`** (also CLI `impact-radius` / `coupling`) |
+| Text inside strings or comments, files outside the index | plain grep: Stele skips comments and strings when it reads Rust code |
+
+### When Stele beats grep (2.4)
+
+- **"Where is X defined?"** `find_definition` returns the definition rows only (fn, struct, trait, `macro_rules!`, const, `pub(crate) fn` ...), with the signature line. grep returns every call site too.
+- **"Who uses X?" / "Is X dead?"** `find_references` puts the definition first, then every code line that calls, method-calls, imports or names X, and answers `referenced` or `unreferenced`. For Rust it has grep's recall over code (on a Specula sample, 185 of 185 code lines that `grep -w` found outside strings).
+- **"What breaks if I change X?"** `impact_radius` follows the symbol graph across files. grep cannot.
+- **"Where is the Game trait?"** `search` ranks the chunk that defines the names in the query first.
+
+### Working in a git worktree (2.4)
+
+The server's index is the main checkout's. Pass **`worktree_root`** (the worktree's absolute path, the same value CoordinationHub's `register_agent` takes) to any read tool, or `--worktree PATH` on the CLI. Stele answers from the main index plus an in-memory overlay of the files that differ in the worktree (new, changed, deleted), re-checked by size and mtime on every call, so the answer is as current as grep. Replies add `worktree` and `overlay_files`. A server started inside a worktree that has no index of its own does this automatically.
 
 ### Grep-first: searching = caching
 

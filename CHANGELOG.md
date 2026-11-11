@@ -1,3 +1,25 @@
+## [2.4.0] - 2026-11-11
+
+Fixes from Specula's M5 lanes, where Stele "mostly lost to grep". [MIGRATION.md](MIGRATION.md) lists each change against 1.5.2.
+
+### Added
+
+- **`worktree_root`** on the read tools (`search`, `agent_grep`, `search_text`, `query`, `find_definition`, `find_references`, `impact_radius`, `coupling`, `get_context`, `map`, `stale_chunks`, `get_search_history`, `get_session_read_files`; HTTP too), and `--worktree PATH` on the CLI read commands. The answer is the one an index of that git worktree would give: the main index plus an in-memory overlay of the files that differ there (new and changed files re-indexed, deleted ones dropped). Every call re-checks the tree by size and mtime, then the content hash, so answers are as current as grep; nothing is written to the main index. Replies add `worktree` and `overlay_files`. The overlay's file stamps are kept in `<storage>/overlays/<hash>/overlay.json` so a new process does not hash the tree again; overlays of removed worktrees are pruned. A path that does not exist, is relative, or is not a checkout of the same project (git common dir) gets a one-line error that says what to pass. A server started inside a linked worktree that has no index of its own answers the read tools for that worktree from the main checkout's index. On Specula (1,576 indexed files, one server for main) the first call for a worktree builds its overlay in 4-8 s (every file is hashed once), later calls take 0.2-0.8 s, and the first call after editing `lib.rs` (3,500 lines) 1.9 s.
+- `macro_rules!` definitions are symbols (kind `macro`), and `name!(..)` invocations are references, so `find_definition` and `find_references` work for macros.
+
+### Fixed
+
+- **False "unreferenced".** Rust calls were not references at all: `find_references human_took_controls` on Specula answered `unreferenced` although `game_frame` calls it four times. Calls (`name(..)`, `name::<T>(..)`), method and associated calls (`.name(..)`, `Type::name(..)`) and macro invocations are now recorded, and for a Rust symbol every other code line that names it (comments and strings skipped) is a reference row with its `kind`. On a sample of 20 Specula functions and macros, `find_references` found 29 of the 208 lines `grep -w` finds; it now finds 185, and the other 23 name the symbol only inside a string. False `unreferenced` or `not_found` verdicts went from 12 to 0.
+- Rust definitions 1.5.2's line patterns missed: `pub(crate)` / `pub(super)` items, `const fn`, `unsafe fn`, `extern "C" fn`, `union`, `type` aliases, `mod`, `const` and `static` items. `find_definition game_rolled_back` (a `pub(crate) fn`) found nothing before.
+- **`search` ranks the definition first.** The chunks that define a name the query spells out come first (`source: "definition"`, `defines` lists the names; the one defining most of them, a type or trait before a function, at most 3), and rows leave out their `edges` block unless `include_edges=true`. "Game trait use_assets" on Specula now answers `crates/specula/src/game.rs` first in 7.0 KB; 2.3 ranked three test files first, never listed `game.rs`, and answered in 39.6 KB with 496 edge entries. `query` gets the same ranking. `definitions_first=false` gives the old order.
+- The `bulk_store_summaries` input schema had `"type": "object of chunk_id to string"`; the Anthropic API rejected it and Claude Code left the tool out. It is now an object of strings (`bulk_store_embeddings`: an object of number arrays), and a test checks every schema type.
+
+### Changed
+
+- Tool descriptions and a second `initialize` instructions line say when Stele beats grep (where a symbol is defined, every use with a dead-code verdict, what a change breaks) and when grep is the better tool. Lite `tools/list` is 9,732 bytes (2.3: 8,623).
+- More Rust symbol rows: on Specula 212k instead of 129k (64k method calls), 239k edges instead of 158k; a fresh snapshot is 96 MB instead of 70 MB. A store written with older rules re-extracts its Rust chunks the first time it is opened in full (6.5 s once on Specula). A method or associated call links an edge only when its name is defined once.
+- Edge building is faster: the module-path matching and test-file pass no longer rebuild strings per document; on Specula's 212k symbols it takes 0.45 s (0.82 s with the same rows before the change).
+
 ## [2.3.0] - 2026-11-05
 
 Symbol accuracy fixes from the Specula live test (B5, B6). [MIGRATION.md](MIGRATION.md) lists them against 1.5.2.

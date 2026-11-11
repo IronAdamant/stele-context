@@ -11,14 +11,14 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("index", "Index files or directories so search, symbols and get_context can use them. Re-run on files you changed."),
     ("remove", "Remove a document and its chunks, symbols and annotations from the index."),
     ("detect_changes", "Files modified, new or removed since the last index; changed files are re-indexed."),
-    ("search", "Ranked search over indexed chunks (BM25; hybrid with Tier-2 summaries). Previews by default; compact=false for full text."),
-    ("agent_grep", "Grep indexed files with enclosing scope and classification, within max_tokens (default 1000)."),
-    ("search_text", "Exact substring or regex over every indexed chunk, with perfect recall. limit defaults to 20."),
-    ("query", "Start here for a question: merges ranked search, symbol lookups and grep in one list."),
-    ("find_references", "Definitions and every usage of a symbol, with the line that names it, in its definitions' language (all_languages=true for all), and a verdict."),
-    ("find_definition", "Where a symbol is defined: path, line, signature and a short preview. full=true adds the chunk text."),
-    ("impact_radius", "What depends on a symbol, file or chunk, through the symbol graph."),
-    ("coupling", "Files coupled to a file through shared symbols."),
+    ("search", "Find code by what it is called or does: the chunk that defines a named symbol comes first, then ranked matches. Use when you know a name or concept but not the file; grep for every literal match. include_edges=true adds symbol links."),
+    ("agent_grep", "Grep the index with each match's enclosing fn/class and a classification, within max_tokens (default 1000). Plain grep is as good for files outside the index."),
+    ("search_text", "Exact substring or regex over every indexed chunk, with grep's recall. limit defaults to 20."),
+    ("query", "A question in words: merges ranked search (definitions first), symbol lookups and grep in one list. For one known identifier, find_definition and find_references are sharper."),
+    ("find_references", "Beats grep -w for 'who uses X' and 'is X dead': the definition first, then every code line that calls, imports or names X (comments and strings skipped), and a verdict (referenced/unreferenced)."),
+    ("find_definition", "Beats grep for 'where is X defined': one row per definition (fn, struct, trait, macro_rules!, const ...) with path, line, signature and a short preview, no call sites. full=true adds the chunk text."),
+    ("impact_radius", "What a change to a symbol, file or chunk can break: its dependents across files through the symbol graph, which grep cannot follow. summary_mode=true keeps it short."),
+    ("coupling", "Files coupled to a file through shared symbols (mode edges) or common consumers (co_consumers); check before moving or splitting a file."),
     ("get_context", "Cached text of files with unchanged/changed/new status, so unchanged files need no re-read."),
     ("doctor", "Session start: index health, counts, Tier-2 coverage and next steps."),
     ("map", "Project overview: documents by token size (max_documents, default 50), totals, index health."),
@@ -138,6 +138,19 @@ fn schema_of(kind: &str) -> crate::json::Value {
         "list of objects" => item("object"),
         "list of numbers" => item("number"),
         "list" => Value::object(vec![("type", Value::string("array"))]),
+        // 2.4: these kinds read well in an argument error but are not JSON
+        // Schema types; the Anthropic API rejected the whole tool for them.
+        "object of chunk_id to string" => Value::object(vec![
+            ("type", Value::string("object")),
+            (
+                "additionalProperties",
+                Value::object(vec![("type", Value::string("string"))]),
+            ),
+        ]),
+        "object of chunk_id to number list" => Value::object(vec![
+            ("type", Value::string("object")),
+            ("additionalProperties", item("number")),
+        ]),
         other => Value::object(vec![("type", Value::string(other))]),
     }
 }
@@ -257,6 +270,60 @@ mod tests {
         // index fills in agent_id itself, so only paths is required.
         let index = crate::json::to_string(&entry_of("index"));
         assert!(index.contains(r#""required":["paths"]"#), "{index}");
+    }
+
+    /// Every `type` in every schema is a JSON Schema type. The Anthropic API
+    /// refused `bulk_store_summaries` for `"type": "object of chunk_id to
+    /// string"` ("schema/properties/summaries/type must be equal to one of
+    /// the allowed values"), and Claude Code then left the tool out.
+    #[test]
+    fn every_schema_type_is_a_json_schema_type() {
+        use crate::json::Value;
+        fn visit(value: &Value, tool: &str, bad: &mut Vec<String>) {
+            match value {
+                Value::Object(pairs) => {
+                    for (key, item) in pairs {
+                        if key == "properties" {
+                            // Keys here are argument names, not keywords.
+                            if let Value::Object(params) = item {
+                                params
+                                    .iter()
+                                    .for_each(|(_, schema)| visit(schema, tool, bad));
+                            }
+                        } else if key == "type" {
+                            let ok = matches!(item, Value::String(text) if matches!(
+                                text.as_str(),
+                                "string" | "number" | "integer" | "boolean" | "object" | "array" | "null"
+                            ));
+                            if !ok {
+                                bad.push(format!("{tool}: {}", crate::json::to_string(item)));
+                            }
+                        } else {
+                            visit(item, tool, bad);
+                        }
+                    }
+                }
+                Value::Array(items) => items.iter().for_each(|item| visit(item, tool, bad)),
+                _ => {}
+            }
+        }
+        let mut bad = Vec::new();
+        for name in super::super::mode_names("full") {
+            let entry = entry(name);
+            if let Value::Object(pairs) = &entry {
+                if let Some((_, schema)) = pairs.iter().find(|(key, _)| key == "inputSchema") {
+                    visit(schema, name, &mut bad);
+                }
+            }
+        }
+        assert!(bad.is_empty(), "{bad:?}");
+        let summaries = crate::json::to_string(&entry("bulk_store_summaries"));
+        assert!(
+            summaries.contains(
+                r#""summaries":{"type":"object","additionalProperties":{"type":"string"}}"#
+            ),
+            "{summaries}"
+        );
     }
 
     fn entry_of(tool: &str) -> crate::json::Value {

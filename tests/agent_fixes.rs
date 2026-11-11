@@ -140,7 +140,7 @@ fn every_mode_lists_real_argument_schemas() {
     for (mode, count, max_bytes) in [
         ("lite", 25, 10_000),
         ("standard", 43, 14_000),
-        ("full", 61, 18_000),
+        ("full", 61, 19_000),
     ] {
         let mut server = Server::start(&project, mode);
         let listed = server.request("tools/list", "{}");
@@ -151,8 +151,7 @@ fn every_mode_lists_real_argument_schemas() {
             "{mode}"
         );
         assert!(
-            listed
-                .contains(r#"{"name":"find_definition","description":"Where a symbol is defined"#),
+            listed.contains(r#"{"name":"find_definition","description":"Beats grep for"#),
             "{mode}"
         );
         assert!(listed.contains(r#""required":["symbol"]"#), "{mode}");

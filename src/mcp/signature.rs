@@ -62,6 +62,8 @@ const SIGS: &[Sig] = &[
             ("context_lines", false, "integer"),
             ("session_id", false, "string"),
             ("working_tree", false, "boolean"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -126,6 +128,8 @@ const SIGS: &[Sig] = &[
             ("significance_threshold", false, "number"),
             ("exclude_symbols", false, "list of strings"),
             ("mode", false, "string"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -190,6 +194,8 @@ const SIGS: &[Sig] = &[
             ("symbol", true, "string"),
             ("full", false, "boolean"),
             ("limit", false, "integer"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -200,6 +206,8 @@ const SIGS: &[Sig] = &[
             ("symbol", true, "string"),
             ("all_languages", false, "boolean"),
             ("full", false, "boolean"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -239,6 +247,8 @@ const SIGS: &[Sig] = &[
             ("max_chunk_content_tokens", false, "integer"),
             ("include_diff", false, "boolean"),
             ("max_diff_tokens", false, "integer"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -294,6 +304,10 @@ const SIGS: &[Sig] = &[
             ("document_path", false, "string"),
             // 2.2 (MIGRATION.md).
             ("full", false, "boolean"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -312,6 +326,8 @@ const SIGS: &[Sig] = &[
             ("significance_threshold", false, "number"),
             ("exclude_symbols", false, "list of strings"),
             ("direction", false, "string"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -355,6 +371,8 @@ const SIGS: &[Sig] = &[
             ("max_documents", false, "integer"),
             ("max_annotation_chars", false, "integer"),
             ("path_prefix", false, "string"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -390,6 +408,11 @@ const SIGS: &[Sig] = &[
             ("search_mode", false, "string"),
             ("compact", false, "boolean"),
             ("max_result_tokens", false, "integer"),
+            // 2.4
+            ("definitions_first", false, "boolean"),
+            ("include_edges", false, "boolean"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -476,6 +499,11 @@ const SIGS: &[Sig] = &[
             ("path_prefix", false, "string"),
             ("working_tree", false, "boolean"),
             ("session_id", false, "string"),
+            // 2.4
+            ("definitions_first", false, "boolean"),
+            ("include_edges", false, "boolean"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -493,6 +521,8 @@ const SIGS: &[Sig] = &[
             ("limit", false, "integer"),
             ("session_id", false, "string"),
             ("working_tree", false, "boolean"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -501,6 +531,8 @@ const SIGS: &[Sig] = &[
         params: &[
             ("threshold", false, "number"),
             ("max_age_seconds", false, "number"),
+            // 2.4: answer for this git worktree (base index + overlay).
+            ("worktree_root", false, "string"),
         ],
     },
     Sig {
@@ -849,7 +881,7 @@ print(json.dumps(out))
         assert!(unknown.contains("Valid arguments: pattern (required), regex, document_path"));
         assert_eq!(
             bind("query", &["querry"], None, true).unwrap_err(),
-            "query: unknown argument 'querry'. Did you mean 'query'? Valid arguments: query (required), top_k, path_prefix, working_tree, session_id, search_mode, compact, max_result_tokens."
+            "query: unknown argument 'querry'. Did you mean 'query'? Valid arguments: query (required), top_k, path_prefix, working_tree, session_id, search_mode, compact, max_result_tokens, definitions_first, include_edges, worktree_root."
         );
         // The accepted alias stands in for `vector`.
         assert!(bind(
