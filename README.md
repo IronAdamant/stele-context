@@ -150,7 +150,7 @@ When each agent works in its own worktree but the MCP server runs in the main ch
 find_references {"symbol": "game_frame", "worktree_root": "/repo/.claude/worktrees/lane-a"}
 ```
 
-Stele answers from the main index plus an in-memory overlay of the files that differ in that worktree: new and changed files are re-indexed, deleted ones vanish. Every call re-checks the tree by size and mtime (the content hash when they differ), so the answer is as current as grep, and nothing is written to the main index. Replies add `"worktree"` and `"overlay_files"` (files that differ from main). A server started inside a worktree that has no index of its own does this by itself.
+Stele answers from the main index plus an in-memory overlay of the files that differ in that worktree: new and changed files are re-indexed, deleted ones vanish. Every call re-checks the tree by size and mtime (then the two checkouts' git indexes, then the content hash), so the answer is as current as grep, and nothing is written to the main index. The first call on a fresh worktree of a 1,600-file project takes under a second; later calls about 0.1 s. Replies add `"worktree"` and `"overlay_files"` (files that differ from main). A server started inside a worktree that has no index of its own does this by itself.
 
 ## How it works
 

@@ -303,3 +303,93 @@ fn a_server_inside_an_unindexed_worktree_answers_for_it() {
     .unwrap();
     assert!(auto_worktree(&trees.tree, None).is_none());
 }
+
+/// A fresh `git worktree add` gives every file a new mtime. The two git
+/// indexes prove the untouched files equal to the base without reading
+/// them; only the edited file is read and re-indexed.
+#[test]
+fn git_indexes_prove_unchanged_files_without_reading_them() {
+    let trees = Trees::new("gitproof");
+    let mut base = trees.base();
+    fs::write(
+        trees.tree.join("src/a.rs"),
+        "pub fn alpha_edited() -> u32 {\n    beta()\n}\n",
+    )
+    .unwrap();
+    // New mtimes on every worktree file, as a checkout gives them.
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+    for name in ["a.rs", "b.rs", "c.rs"] {
+        fs::File::options()
+            .write(true)
+            .open(trees.tree.join("src").join(name))
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+    }
+    let main_src = trees.main.join("src");
+    let tree_src = trees.tree.join("src");
+    crate::engine::gitindex::write_for_test(
+        &trees.main.join(".git").join("index"),
+        &[
+            ("src/a.rs", &main_src.join("a.rs"), 1),
+            ("src/b.rs", &main_src.join("b.rs"), 2),
+            ("src/c.rs", &main_src.join("c.rs"), 3),
+        ],
+        10,
+    );
+    crate::engine::gitindex::write_for_test(
+        &trees
+            .main
+            .join(".git")
+            .join("worktrees")
+            .join("wt")
+            .join("index"),
+        &[
+            ("src/a.rs", &tree_src.join("a.rs"), 9),
+            ("src/b.rs", &tree_src.join("b.rs"), 2),
+            ("src/c.rs", &tree_src.join("c.rs"), 3),
+        ],
+        10,
+    );
+    let mut overlays = Overlays::new();
+    let tree = trees.tree_text();
+    let (found, ran) = overlays
+        .run(&mut base, &tree, |engine| {
+            engine.find_definition("alpha_edited")
+        })
+        .unwrap();
+    assert_eq!(count(&found), 1);
+    assert_eq!(ran.overlay_files, 1);
+    assert_eq!(
+        overlays.slots[0].counts,
+        (2, 1, 1),
+        "proven, read, re-indexed"
+    );
+    // The next call costs one stat per file.
+    overlays
+        .run(&mut base, &tree, |engine| engine.find_definition("beta"))
+        .unwrap();
+    assert_eq!(overlays.slots[0].counts, (0, 0, 0));
+    // A blob that differs between the checkouts proves nothing: b.rs is
+    // read (and found equal, so it is not re-indexed).
+    let mut fresh = Overlays::new();
+    fs::remove_dir_all(base.storage.join("overlays")).unwrap();
+    crate::engine::gitindex::write_for_test(
+        &trees
+            .main
+            .join(".git")
+            .join("worktrees")
+            .join("wt")
+            .join("index"),
+        &[
+            ("src/a.rs", &tree_src.join("a.rs"), 9),
+            ("src/b.rs", &tree_src.join("b.rs"), 7),
+            ("src/c.rs", &tree_src.join("c.rs"), 3),
+        ],
+        10,
+    );
+    fresh
+        .run(&mut base, &tree, |engine| engine.find_definition("beta"))
+        .unwrap();
+    assert_eq!(fresh.slots[0].counts, (1, 2, 1));
+}

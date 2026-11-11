@@ -2,6 +2,7 @@
 //! Public methods take a project-relative path and honor mtime+size.
 
 mod fingerprint;
+mod gitindex;
 mod migrate;
 mod ops;
 pub mod overlay;

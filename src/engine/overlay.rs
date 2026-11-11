@@ -9,7 +9,10 @@
 //!   files re-indexed and the deleted ones dropped. Its store is ephemeral:
 //!   nothing it holds is written to the base index, and it takes no locks.
 //! - Differences are found by walking the worktree with the index's ignore
-//!   rules, then size and mtime first and the content hash when they differ.
+//!   rules, then size and mtime first. When they differ, the two
+//!   checkouts' git indexes can prove the file unchanged without reading it
+//!   (`gitindex`); otherwise its content hash decides (read on up to 8
+//!   threads).
 //!   Each call re-checks with that cheap pass, so answers are as current as
 //!   grep. A new file counts when it is under a top-level directory the
 //!   base index covers (or at the top level, when the base has top-level
@@ -22,6 +25,7 @@
 //! - Replies gain `worktree` and `overlay_files` (how many files differ from
 //!   the base); paths stay relative to the worktree.
 
+use super::gitindex::GitIndex;
 use super::Engine;
 use crate::json::{self, Value};
 use crate::store::Store;
@@ -70,6 +74,16 @@ struct Slot {
     used: u64,
     /// `overlay.json` written at least once by this process.
     saved: bool,
+    /// Proof without reading a file (`gitindex`): the worktree's git index,
+    /// the blob each base document is known to hold (main's file still has
+    /// the stamp the base indexed and matches main's git index entry), and
+    /// the `/` prefix from the checkout root to the engine's directory.
+    tree_index: Option<GitIndex>,
+    proof: HashMap<String, Vec<u8>>,
+    prefix: String,
+    /// What the last sync did: files proven unchanged by git, read and
+    /// hashed, re-indexed. Written to `overlay.json` as `last_sync`.
+    counts: (usize, usize, usize),
 }
 
 /// What a worktree call ran against.
@@ -331,9 +345,65 @@ impl Slot {
             differs: BTreeSet::new(),
             used: 0,
             saved: false,
+            tree_index: None,
+            proof: HashMap::new(),
+            prefix: String::new(),
+            counts: (0, 0, 0),
         };
         slot.apply_manifest();
+        slot.prove_from_git(base, tree);
         Ok(slot)
+    }
+
+    /// Read both checkouts' git indexes. A base document is proven to hold
+    /// blob B when main's file still has the size and mtime the base
+    /// indexed it with and main's index entry vouches for that stamp. A
+    /// worktree file whose own index entry vouches for its stamp and names
+    /// the same B then holds the base document's bytes, unread.
+    fn prove_from_git(&mut self, base: &Engine, tree: &Path) {
+        let base_cwd = crate::root::resolved(&base.cwd);
+        let Some(base_root) = crate::root::detect_project_root(&base_cwd) else {
+            return;
+        };
+        let Some(tree_root) = crate::root::detect_project_root(tree) else {
+            return;
+        };
+        let (Some(main_index), Some(tree_index)) =
+            (GitIndex::read(&base_root), GitIndex::read(&tree_root))
+        else {
+            return;
+        };
+        let mut prefix = base_cwd
+            .strip_prefix(&base_root)
+            .map(|offset| offset.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if !prefix.is_empty() && !prefix.ends_with('/') {
+            prefix.push('/');
+        }
+        for doc in &base.store.state.documents {
+            let Ok(meta) = fs::metadata(base.cwd.join(&doc.path)) else {
+                continue;
+            };
+            if meta.len() != doc.size || super::mtime_ns(&meta) != doc.mtime_ns {
+                continue;
+            }
+            let key = format!("{prefix}{}", doc.path.replace('\\', "/"));
+            if let Some(oid) = main_index.fresh_blob(&key, &meta) {
+                self.proof.insert(doc.path.clone(), oid.to_vec());
+            }
+        }
+        self.prefix = prefix;
+        self.tree_index = Some(tree_index);
+    }
+
+    /// The worktree file `rel` (with `meta`) holds the base document's bytes,
+    /// as the two git indexes prove.
+    fn proven_same(&self, rel: &str, meta: &fs::Metadata) -> bool {
+        let (Some(index), Some(oid)) = (&self.tree_index, self.proof.get(rel)) else {
+            return false;
+        };
+        let key = format!("{}{}", self.prefix, rel.replace('\\', "/"));
+        index.fresh_blob(&key, meta) == Some(oid.as_slice())
     }
 
     fn manifest_path(&self) -> PathBuf {
@@ -438,22 +508,38 @@ impl Slot {
             changed = true;
         }
         let mut rows = self.document_rows();
+        // Files whose stamp differs from the overlay's row: proven equal to
+        // the base through git, else read and hashed (in parallel).
+        let mut unread: Vec<(String, PathBuf, fs::Metadata)> = Vec::new();
+        let (mut proven, mut reindexed) = (0usize, 0usize);
         for (rel, abs) in work {
             let Ok(meta) = fs::metadata(&abs) else {
                 continue;
             };
-            let mtime = super::mtime_ns(&meta);
-            let doc = rows.get(&rel).copied();
-            if let Some(at) = doc {
+            if let Some(at) = rows.get(&rel).copied() {
                 let row = &self.engine.store.state.documents[at];
-                if row.size == meta.len() && row.mtime_ns == mtime {
+                if row.size == meta.len() && row.mtime_ns == super::mtime_ns(&meta) {
+                    continue;
+                }
+                let base_sha = self.base.get(&rel).map(|(sha, _, _)| sha.as_str());
+                if base_sha == Some(row.sha256.as_str()) && self.proven_same(&rel, &meta) {
+                    let row = &mut self.engine.store.state.documents[at];
+                    row.size = meta.len();
+                    row.mtime_ns = super::mtime_ns(&meta);
+                    self.differs.remove(&rel);
+                    stamped = true;
+                    proven += 1;
                     continue;
                 }
             }
-            let Ok(bytes) = fs::read(&abs) else {
+            unread.push((rel, abs, meta));
+        }
+        let read = unread.len();
+        let hashed = hash_files(&unread);
+        for ((rel, abs, meta), sha) in unread.into_iter().zip(hashed) {
+            let Some(sha) = sha else {
                 continue;
             };
-            let sha = super::content_sha(&rel, &bytes);
             let base_sha = self.base.get(&rel).map(|(sha, _, _)| sha.as_str());
             if base_sha == Some(sha.as_str()) {
                 self.differs.remove(&rel);
@@ -461,19 +547,21 @@ impl Slot {
                 self.differs.insert(rel.clone());
             }
             stamped = true;
-            if let Some(at) = doc {
+            if let Some(at) = rows.get(&rel).copied() {
                 let row = &mut self.engine.store.state.documents[at];
                 if row.sha256 == sha {
                     row.size = meta.len();
-                    row.mtime_ns = mtime;
+                    row.mtime_ns = super::mtime_ns(&meta);
                     continue;
                 }
             }
             self.reindex(&rel, &abs, &meta)?;
+            reindexed += 1;
             changed = true;
             // Re-indexing moves the document rows.
             rows = self.document_rows();
         }
+        self.counts = (proven, read, reindexed);
         if changed {
             let state = &mut self.engine.store.state;
             state.edges = crate::symbols::build_edges(&state.symbols);
@@ -577,6 +665,14 @@ impl Slot {
                 "differs",
                 Value::Array(self.differs.iter().map(Value::string).collect()),
             ),
+            (
+                "last_sync",
+                Value::object(vec![
+                    ("proven_by_git_index", Value::Int(self.counts.0 as i64)),
+                    ("read", Value::Int(self.counts.1 as i64)),
+                    ("reindexed", Value::Int(self.counts.2 as i64)),
+                ]),
+            ),
             ("files", Value::Array(rows)),
         ]);
         let path = self.manifest_path();
@@ -585,6 +681,41 @@ impl Slot {
             let _ = fs::rename(&tmp, &path);
         }
     }
+}
+
+/// The `sha256` a document row would store for each file, read and hashed
+/// on up to 8 threads (a fresh checkout's files are slow to read the first
+/// time). None for a file that could not be read.
+fn hash_files(files: &[(String, PathBuf, fs::Metadata)]) -> Vec<Option<String>> {
+    let hash = |(rel, abs, _): &(String, PathBuf, fs::Metadata)| {
+        fs::read(abs)
+            .ok()
+            .map(|bytes| super::content_sha(rel, &bytes))
+    };
+    let threads = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .clamp(1, 8);
+    if files.len() < 16 || threads == 1 {
+        return files.iter().map(hash).collect();
+    }
+    let size = files.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let parts: Vec<_> = files
+            .chunks(size)
+            .map(|part| {
+                (
+                    part.len(),
+                    scope.spawn(move || part.iter().map(hash).collect::<Vec<_>>()),
+                )
+            })
+            .collect();
+        // A part whose thread failed counts as unread, keeping the order.
+        parts
+            .into_iter()
+            .flat_map(|(len, part)| part.join().unwrap_or_else(|_| vec![None; len]))
+            .collect()
+    })
 }
 
 fn field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
