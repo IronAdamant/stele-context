@@ -217,6 +217,7 @@ impl Engine {
             }
         }
         self.store.state.edges = crate::symbols::build_edges(&self.store.state.symbols);
+        self.store.state.symbol_rules = crate::symbols::RULES;
         let documents = self.store.state.documents.len() as i64;
         let symbols = self.store.state.symbols.len() as i64;
         let edges = self.store.state.edges.len() as i64;

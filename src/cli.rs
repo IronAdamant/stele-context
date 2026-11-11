@@ -84,6 +84,8 @@ struct Parsed {
     ann_type: Option<String>,
     note_body: Option<String>,
     cwd: Option<PathBuf>,
+    /// 2.4 `--worktree PATH`: answer a read command for that git worktree.
+    worktree: Option<String>,
 }
 
 impl Parsed {
@@ -173,7 +175,21 @@ impl Parsed {
                 ),
             );
         }
-        let result = self.execute(&mut engine);
+        let result = match self.worktree.as_deref() {
+            Some(tree) if WORKTREE_COMMANDS.contains(&command.as_str()) => {
+                let mut overlays = crate::engine::overlay::Overlays::new();
+                overlays
+                    .run(&mut engine, tree, |tree_engine| self.execute(tree_engine))
+                    .and_then(|(value, ran)| {
+                        value.map(|value| crate::engine::overlay::annotate(value, &ran))
+                    })
+            }
+            Some(_) => Err(format!(
+                "--worktree works with the read commands ({}), not {command}",
+                WORKTREE_COMMANDS.join(", ")
+            )),
+            None => self.execute(&mut engine),
+        };
         match result {
             Ok(value) => {
                 if self.human {
@@ -406,6 +422,20 @@ impl Parsed {
     }
 }
 
+/// The commands `--worktree` applies to (the MCP read tools).
+const WORKTREE_COMMANDS: &[&str] = &[
+    "search",
+    "search-text",
+    "agent-grep",
+    "query",
+    "find-definition",
+    "find-references",
+    "impact-radius",
+    "coupling",
+    "get-context",
+    "map",
+];
+
 fn init_marker(cwd: &std::path::Path) -> Result<Value, String> {
     let path = cwd.join(".stele-context.toml");
     if !path.exists() {
@@ -458,6 +488,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         tags: Vec::new(),
         ann_type: None,
         note_body: None,
+        worktree: None,
         cwd: None,
     };
     let mut index = 0usize;
@@ -538,6 +569,7 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                         .map_err(|_| "--port needs an integer".to_string())?;
                 }
                 "--host" => parsed.host = take_value(args, &mut index)?,
+                "--worktree" => parsed.worktree = Some(take_value(args, &mut index)?),
                 "--path-prefix" => parsed.path_prefix = Some(take_value(args, &mut index)?),
                 "--document" | "--document-path" | "--target" => {
                     parsed.document = Some(take_value(args, &mut index)?)
@@ -701,6 +733,7 @@ Flags: --storage-dir --json --regex --working-tree --confirm --path-prefix
 --no-compact --no-classify --no-scope --no-dedup --no-index --scan-new
 --no-scan-new --force --search-mode --symbol --port --host --blocking
 --chunk-id --max-documents --tags --content --type --meta
+--worktree PATH (read commands: answer for that git worktree of the project)
 "
     )
 }
@@ -728,7 +761,7 @@ mod tests {
     fn version_line_is_twenty_bytes() {
         let response = dispatch(&["--version".to_string()]);
         assert_eq!(response.code, 0);
-        assert_eq!(response.stdout, b"stele-context 2.3.0\n");
+        assert_eq!(response.stdout, b"stele-context 2.4.0\n");
         assert_eq!(response.stdout.len(), 20);
     }
 
@@ -740,7 +773,7 @@ mod tests {
         let value = json::parse(text.trim_end()).unwrap();
         let rendered = json::to_string(&value);
         assert!(rendered.contains("\"ok\":true"));
-        assert!(rendered.contains("\"version\":\"2.3.0\""));
+        assert!(rendered.contains("\"version\":\"2.4.0\""));
         assert!(rendered.contains("\"implementation\":\"rust\""));
         assert!(rendered.contains("No 2.0 store yet") || rendered.contains("native store"));
     }

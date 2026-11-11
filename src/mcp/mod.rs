@@ -16,6 +16,10 @@ mod signature;
 
 const HANDSHAKES: &[&str] = &["2026-07-28", "2025-11-25", "2025-06-18"];
 
+/// The second line of the initialize instructions (2.4): when Stele beats
+/// grep, when grep is the better tool, and how to ask from a worktree.
+const USAGE: &str = "Stele beats grep for where a symbol is defined (find_definition), every use of it with a dead-code verdict (find_references) and what a change breaks (impact_radius). Use grep for text in strings or comments and for files outside the index. In a git worktree pass worktree_root=<its absolute path> to read tools.";
+
 const LITE: &[&str] = &[
     "index",
     "remove",
@@ -119,6 +123,15 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
     // yet. The same thread then finds the host Python version that doctor
     // reports (file reads along PATH, slow on Windows; nothing is started).
     let mut engine: Option<Engine> = None;
+    // 2.4: worktree overlays, and the worktree a server started inside a
+    // linked git worktree answers for when that tree has no index of its
+    // own (crate::engine::overlay::auto_worktree).
+    let mut overlays = crate::engine::overlay::Overlays::new();
+    let auto = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| crate::engine::overlay::auto_worktree(&cwd, storage));
+    let mut base: Option<Engine> = None;
+    let mut base_opened = false;
     let (sender, opened) = std::sync::mpsc::channel::<Option<Engine>>();
     let (warm_sender, warmed) = std::sync::mpsc::channel::<Vec<u8>>();
     let owned = storage.map(std::path::Path::to_path_buf);
@@ -184,7 +197,7 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
                 if let Value::Object(pairs) = &mut result {
                     pairs.push((
                         "instructions".to_string(),
-                        Value::string(surface.instructions(&catalogue)),
+                        Value::string(format!("{}\n{USAGE}", surface.instructions(&catalogue))),
                     ));
                 }
                 result
@@ -226,12 +239,47 @@ pub fn serve_with(storage: Option<&std::path::Path>) -> Response {
                 // The store is held for one call at a time, so two agents'
                 // servers (and the CLI) can share a project.
                 let reacquired = engine.as_mut().map(Engine::reacquire_store);
+                let name = string_field(&params, "name");
+                let default_tree = auto
+                    .as_ref()
+                    .filter(|_| crate::engine::overlay::WORKTREE_TOOLS.contains(&name.as_str()));
+                if let Some((main, _)) = default_tree {
+                    if !base_opened {
+                        base_opened = true;
+                        base = Engine::open_from(main.clone(), None).ok();
+                        if let Some(base) = base.as_mut() {
+                            base.release_store();
+                        }
+                    }
+                }
                 let result = match reacquired {
                     Some(Err(message)) => tool_result(
                         &json::to_string(&Value::object(vec![("error", Value::string(message))])),
                         true,
                     ),
-                    _ => tools_call(engine.as_mut(), &params),
+                    _ => match (default_tree, base.as_mut()) {
+                        (Some((_, tree)), Some(main)) => {
+                            let held = main.reacquire_store();
+                            let result = match held {
+                                Err(message) => tool_result(
+                                    &json::to_string(&Value::object(vec![(
+                                        "error",
+                                        Value::string(message),
+                                    )])),
+                                    true,
+                                ),
+                                Ok(()) => tools_call_in(
+                                    Some(main),
+                                    &params,
+                                    &mut overlays,
+                                    Some(&tree.display().to_string()),
+                                ),
+                            };
+                            main.release_store();
+                            result
+                        }
+                        _ => tools_call_in(engine.as_mut(), &params, &mut overlays, None),
+                    },
                 };
                 if let Some(engine) = engine.as_mut() {
                     engine.release_store();
@@ -453,7 +501,14 @@ pub(crate) fn healing_hint(name: &str, err: &str) -> Option<&'static str> {
     None
 }
 
-fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
+/// One tools/call. A read tool with `worktree_root` (or the server's
+/// automatic worktree, `default_tree`) runs on that tree's overlay.
+fn tools_call_in(
+    engine: Option<&mut Engine>,
+    params: &Value,
+    overlays: &mut crate::engine::overlay::Overlays,
+    default_tree: Option<&str>,
+) -> Value {
     let name = string_field(params, "name");
     let Some(engine) = engine else {
         return tool_text(
@@ -475,7 +530,24 @@ fn tools_call(engine: Option<&mut Engine>, params: &Value) -> Value {
         // The convention's one line, as the text of an isError result.
         return tool_result(&selection.refusal(&name, &why), true);
     }
-    let (text, is_error) = match call_bound(engine, &name, &args, true) {
+    let tree = crate::engine::overlay::requested(&args).or_else(|| {
+        default_tree
+            .filter(|_| crate::engine::overlay::WORKTREE_TOOLS.contains(&name.as_str()))
+            .map(str::to_string)
+    });
+    let called = match tree {
+        Some(tree) => bind_args(&name, &args, true).and_then(|()| {
+            overlays
+                .run(engine, &tree, |tree_engine| {
+                    dispatch(tree_engine, &name, &args)
+                })
+                .and_then(|(value, ran)| {
+                    value.map(|value| crate::engine::overlay::annotate(value, &ran))
+                })
+        }),
+        None => call_bound(engine, &name, &args, true),
+    };
+    let (text, is_error) = match called {
         Ok(mut value) => {
             attach_hint(&name, &mut value);
             if name == "doctor" {
@@ -631,7 +703,7 @@ fn run_tool(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, Stri
                 Some(Value::String(text)) => Some(text.clone()),
                 _ => None,
             };
-            Ok(engine.search_full(
+            Ok(engine.search_ranked(
                 &query,
                 &arg(args, "search_mode").unwrap_or_else(|| "keyword".to_string()),
                 top,
@@ -640,6 +712,9 @@ fn run_tool(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, Stri
                 flag_default(args, "compact", true),
                 int_arg(args, "max_result_tokens"),
                 flag(args, "return_response_meta"),
+                // 2.4: the defining chunk first, and no edge blocks.
+                flag_default(args, "definitions_first", true),
+                flag(args, "include_edges"),
             ))
         }
         "search_text" => engine.text_search(
@@ -670,7 +745,7 @@ fn run_tool(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, Stri
                 Some(Value::String(text)) => Some(text.clone()),
                 _ => None,
             };
-            engine.query_full(
+            engine.query_ranked(
                 &query,
                 int_arg(args, "top_k").unwrap_or(10).max(1) as usize,
                 prefix.as_deref(),
@@ -679,6 +754,8 @@ fn run_tool(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, Stri
                 &arg(args, "search_mode").unwrap_or_else(|| "keyword".to_string()),
                 flag_default(args, "compact", true),
                 int_arg(args, "max_result_tokens"),
+                flag_default(args, "definitions_first", true),
+                flag(args, "include_edges"),
             )
         }
         "find_definition" => Ok(engine.find_definition(&symbol)),

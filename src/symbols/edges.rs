@@ -253,14 +253,25 @@ fn resolve(symbols: &[Symbol]) -> Vec<Edge> {
                 .insert(sym.name.as_str());
         }
     }
+    // The first definition chunk of each document, in symbol order.
     let mut doc_chunks: Vec<(&str, &str)> = Vec::new();
+    let mut doc_seen: HashSet<&str> = HashSet::new();
     for sym in symbols {
-        if sym.role == "definition" && !doc_chunks.iter().any(|(path, _)| *path == sym.path) {
+        if sym.role == "definition" && doc_seen.insert(sym.path.as_str()) {
             doc_chunks.push((sym.path.as_str(), sym.chunk_id.as_str()));
         }
     }
+    let doc_norms: Vec<String> = doc_chunks
+        .iter()
+        .map(|(path, _)| path.replace('\\', "/"))
+        .collect();
+    // A module name's first matching document, worked out once per name.
+    let mut module_docs: HashMap<&str, Option<(&str, &str)>> = HashMap::new();
+    // Prepared hint matchers and `/` paths, built once each.
+    let mut matchers: HashMap<&str, ModuleMatch> = HashMap::new();
+    let mut norms: HashMap<&str, String> = HashMap::new();
     let mut edges = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen: HashSet<(&str, &str, &str)> = HashSet::new();
     for sym in symbols {
         if sym.role != "reference" || sym.name.len() < 2 || noise(&sym.name) {
             continue;
@@ -270,14 +281,25 @@ fn resolve(symbols: &[Symbol]) -> Vec<Edge> {
             .cloned()
             .unwrap_or_default();
         if defs.is_empty() && sym.kind == "module" {
-            for (path, chunk) in &doc_chunks {
-                if module_matches(&sym.name, path) {
-                    defs = vec![(chunk, path, None)];
-                    break;
-                }
+            let found = *module_docs.entry(sym.name.as_str()).or_insert_with(|| {
+                let matcher = ModuleMatch::new(&sym.name);
+                doc_norms
+                    .iter()
+                    .position(|norm| matcher.matches(norm))
+                    .map(|at| (doc_chunks[at].1, doc_chunks[at].0))
+            });
+            if let Some((chunk, path)) = found {
+                defs = vec![(chunk, path, None)];
             }
         }
         if defs.is_empty() {
+            continue;
+        }
+        // 2.4: a Rust method or associated call (`.update(..)`,
+        // `Type::new(..)`) names no receiver type, so it links only to a
+        // name defined once; `update` defined in forty files would give
+        // every caller forty false edges.
+        if sym.kind == "method_call" && defs.len() > 1 {
             continue;
         }
         // Python's rebuild drops `container` before resolution, so the
@@ -287,7 +309,18 @@ fn resolve(symbols: &[Symbol]) -> Vec<Edge> {
                 let hinted: Vec<_> = defs
                     .iter()
                     .copied()
-                    .filter(|(_, path, _)| hint.iter().any(|module| module_matches(module, path)))
+                    .filter(|(_, path, _)| {
+                        let norm = norms
+                            .entry(path)
+                            .or_insert_with(|| path.replace('\\', "/"))
+                            .clone();
+                        hint.iter().any(|module| {
+                            matchers
+                                .entry(module)
+                                .or_insert_with(|| ModuleMatch::new(module))
+                                .matches(&norm)
+                        })
+                    })
                     .collect();
                 if !hinted.is_empty() {
                     defs = hinted;
@@ -298,8 +331,7 @@ fn resolve(symbols: &[Symbol]) -> Vec<Edge> {
             if chunk == sym.chunk_id {
                 continue;
             }
-            let key = (sym.chunk_id.clone(), chunk.to_string(), sym.name.clone());
-            if !seen.insert(key) {
+            if !seen.insert((sym.chunk_id.as_str(), chunk, sym.name.as_str())) {
                 continue;
             }
             let kind = if sym.path == path {
@@ -336,6 +368,21 @@ fn test_edges(symbols: &[Symbol]) -> Vec<Edge> {
             source_by_stem.entry(stem_of(path)).or_default().push(path);
         }
     }
+    // The module and import references of each document, so each test
+    // file looks at its own rows only.
+    let mut imports: HashMap<&str, Vec<&str>> = HashMap::new();
+    for sym in symbols {
+        if sym.role == "reference" && (sym.kind == "module" || sym.kind == "import") {
+            imports
+                .entry(sym.path.as_str())
+                .or_default()
+                .push(sym.name.as_str());
+        }
+    }
+    let source_norms: Vec<String> = source_docs
+        .iter()
+        .map(|path| path.replace('\\', "/"))
+        .collect();
     let mut edges = Vec::new();
     let mut seen = HashSet::new();
     for test_path in test_docs {
@@ -358,15 +405,11 @@ fn test_edges(symbols: &[Symbol]) -> Vec<Edge> {
                 candidates.extend(paths.iter().copied());
             }
         }
-        for sym in symbols {
-            if sym.path == test_path
-                && sym.role == "reference"
-                && (sym.kind == "module" || sym.kind == "import")
-            {
-                for src in &source_docs {
-                    if module_matches(&sym.name, src) {
-                        candidates.insert(*src);
-                    }
+        for name in imports.get(test_path).map(Vec::as_slice).unwrap_or(&[]) {
+            let matcher = ModuleMatch::new(name);
+            for (src, norm) in source_docs.iter().zip(&source_norms) {
+                if matcher.matches(norm) {
+                    candidates.insert(*src);
                 }
             }
         }
@@ -411,44 +454,68 @@ fn stem_of(path: &str) -> String {
         .to_string()
 }
 
-fn module_matches(module: &str, path: &str) -> bool {
-    let norm = path.replace('\\', "/");
-    if module.starts_with("./") || module.starts_with("../") {
-        let mut clean = module;
-        while let Some(rest) = clean
-            .strip_prefix("../")
-            .or_else(|| clean.strip_prefix("./"))
-        {
-            clean = rest;
-        }
-        if clean.is_empty() {
-            return false;
-        }
-        for ext in ["", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"] {
-            let suffix = format!("{clean}{ext}");
-            if norm.ends_with(&format!("/{suffix}")) || norm == suffix {
-                return true;
+/// Whether a module name (`./widget`, `rich.console`, `app.css`) names a
+/// document path, prepared once per name, so a name checked against every
+/// document does not rebuild its strings per document (2.4; the same
+/// answers as the per-call check it replaces).
+struct ModuleMatch {
+    /// The path is this, or ends with `/` + this.
+    whole: Vec<String>,
+    /// The path ends with one of these (Python modules).
+    tails: Vec<String>,
+}
+
+impl ModuleMatch {
+    fn new(module: &str) -> ModuleMatch {
+        if module.starts_with("./") || module.starts_with("../") {
+            let mut clean = module;
+            while let Some(rest) = clean
+                .strip_prefix("../")
+                .or_else(|| clean.strip_prefix("./"))
+            {
+                clean = rest;
             }
-        }
-        for index in [format!("{clean}/index.js"), format!("{clean}/index.ts")] {
-            if norm.ends_with(&format!("/{index}")) || norm == index {
-                return true;
+            if clean.is_empty() {
+                return ModuleMatch {
+                    whole: Vec::new(),
+                    tails: Vec::new(),
+                };
             }
+            let mut whole: Vec<String> = ["", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]
+                .iter()
+                .map(|ext| format!("{clean}{ext}"))
+                .collect();
+            whole.push(format!("{clean}/index.js"));
+            whole.push(format!("{clean}/index.ts"));
+            return ModuleMatch {
+                whole,
+                tails: Vec::new(),
+            };
         }
-        return false;
+        let parts = module.replace('.', "/");
+        let tails = vec![format!("/{parts}.py"), format!("/{parts}/__init__.py")];
+        let clean = module.trim_start_matches('/');
+        const WEB: &[&str] = &[
+            ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".css", ".scss", ".less",
+        ];
+        let whole = if !clean.is_empty() && WEB.iter().any(|ext| clean.ends_with(ext)) {
+            vec![clean.to_string()]
+        } else {
+            Vec::new()
+        };
+        ModuleMatch { whole, tails }
     }
-    let parts = module.replace('.', "/");
-    if norm.ends_with(&format!("/{parts}.py")) || norm.ends_with(&format!("/{parts}/__init__.py")) {
-        return true;
+
+    /// `norm` is the document path with `/` separators.
+    fn matches(&self, norm: &str) -> bool {
+        self.tails.iter().any(|tail| norm.ends_with(tail.as_str()))
+            || self.whole.iter().any(|whole| {
+                norm == whole
+                    || (norm.len() > whole.len()
+                        && norm.ends_with(whole.as_str())
+                        && norm.as_bytes()[norm.len() - whole.len() - 1] == b'/')
+            })
     }
-    let clean = module.trim_start_matches('/');
-    const WEB: &[&str] = &[
-        ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".css", ".scss", ".less",
-    ];
-    if !clean.is_empty() && WEB.iter().any(|ext| clean.ends_with(ext)) {
-        return norm.ends_with(&format!("/{clean}")) || norm == clean;
-    }
-    false
 }
 
 #[cfg(test)]
@@ -465,6 +532,31 @@ mod tests {
             chunk_id: chunk.to_string(),
             path: path.to_string(),
             chunk_index: 0,
+        }
+    }
+
+    #[test]
+    fn module_names_match_document_paths() {
+        let norm = |path: &str| path.replace('\\', "/");
+        let cases = [
+            ("./widget", "src\\widget.js", true),
+            ("../lib/widget", "src/lib/widget/index.ts", true),
+            ("./widget", "src/mywidget.js", false),
+            ("./", "src/a.js", false),
+            ("rich.console", "src/rich/console.py", true),
+            ("rich.console", "rich/console/__init__.py", false),
+            ("rich.console", "x/rich/console/__init__.py", true),
+            ("app.css", "web/app.css", true),
+            ("app.css", "app.css", true),
+            ("app.css", "web/xapp.css", false),
+            ("crate::a::B", "src/a.rs", false),
+        ];
+        for (module, path, want) in cases {
+            assert_eq!(
+                ModuleMatch::new(module).matches(&norm(path)),
+                want,
+                "{module} {path}"
+            );
         }
     }
 

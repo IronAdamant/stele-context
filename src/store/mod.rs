@@ -232,6 +232,9 @@ pub struct State {
     /// before 2.3 counts them from the top of the chunk, as 1.5.2 does;
     /// opening it converts them once.
     pub symbol_lines: bool,
+    /// The version of the symbol rules the stored rows were extracted with
+    /// (`symbols::RULES`). 0 is 2.3 and earlier.
+    pub symbol_rules: i64,
 }
 
 pub struct Store {
@@ -246,6 +249,13 @@ pub struct Store {
     /// wrote it. A different stamp under the lock means another process
     /// wrote the store.
     stamp: Option<(Option<std::time::SystemTime>, u64)>,
+    /// Bumped whenever `state` is replaced or saved, so a worktree overlay
+    /// built from this store knows when to rebuild (2.4).
+    generation: u64,
+    /// A worktree overlay's store (2.4): held in memory only. `save` writes
+    /// nothing and the lock is never taken, so the base index on disk is
+    /// never touched by worktree data.
+    ephemeral: bool,
 }
 
 impl Store {
@@ -268,11 +278,43 @@ impl Store {
             lock,
             locked: true,
             stamp,
+            generation: 0,
+            ephemeral: false,
         })
+    }
+
+    /// An in-memory store holding `state`, with its directory at
+    /// `storage/store` for the side files (BM25 cache, graph numbers).
+    pub fn ephemeral(storage: &Path, state: State) -> Result<Store, String> {
+        let dir = storage.join("store");
+        fs::create_dir_all(&dir).map_err(|err| format!("create overlay store: {err}"))?;
+        let lock = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join("lock"))
+            .map_err(|err| format!("open overlay lock: {err}"))?;
+        Ok(Store {
+            dir,
+            state,
+            lock,
+            locked: false,
+            stamp: None,
+            generation: 0,
+            ephemeral: true,
+        })
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Let other processes use the store until `relock`.
     pub fn unlock(&mut self) {
+        if self.ephemeral {
+            return;
+        }
         if self.locked {
             let _ = self.lock.unlock();
             self.locked = false;
@@ -282,6 +324,9 @@ impl Store {
     /// Take the store back. True when another process wrote the snapshot
     /// since this one last read or wrote it.
     pub fn relock(&mut self) -> Result<bool, String> {
+        if self.ephemeral {
+            return Ok(false);
+        }
         if !self.locked {
             self.lock
                 .lock()
@@ -313,10 +358,16 @@ impl Store {
             lock,
             locked: true,
             stamp,
+            generation: 0,
+            ephemeral: false,
         })
     }
 
     pub fn reload_full(&mut self) -> Result<(), String> {
+        if self.ephemeral {
+            return Ok(());
+        }
+        self.generation += 1;
         self.stamp = snapshot_stamp(&self.dir);
         self.state = load_snapshot(&self.dir.join("snapshot.json")).unwrap_or_default();
         Ok(())
@@ -356,6 +407,10 @@ impl Store {
 
     pub fn save(&mut self, op: &str, detail: &Value) -> Result<(), String> {
         self.state.seq = self.state.seq.saturating_add(1);
+        if self.ephemeral {
+            return Ok(());
+        }
+        self.generation += 1;
         self.ensure_sigs();
         write_sigs(&self.dir.join("signatures.bin"), &self.state)?;
         let body = json::to_vec(&self.state.to_json());
@@ -464,6 +519,7 @@ impl State {
                 "symbol_lines",
                 Value::string(if self.symbol_lines { "file" } else { "chunk" }),
             ),
+            ("symbol_rules", Value::Int(self.symbol_rules)),
             (
                 "chunk_history",
                 Value::Array(self.chunk_history.iter().map(ChunkHist::to_json).collect()),
@@ -665,6 +721,10 @@ impl State {
                 .collect(),
             memory_hint: false,
             symbol_lines: matches!(field(value, "symbol_lines"), Some(Value::String(text)) if text == "file"),
+            symbol_rules: match field(value, "symbol_rules") {
+                Some(Value::Int(number)) => *number,
+                _ => 0,
+            },
         }
     }
 }

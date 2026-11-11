@@ -48,6 +48,40 @@ pub fn detect_project_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
+/// The git common directory of the checkout that holds `start`: the
+/// `.git` directory of a main checkout, or the one a linked worktree's
+/// `.git` file points to through its `commondir`. None outside git.
+pub fn git_common_dir(start: &Path) -> Option<PathBuf> {
+    for dir in start.ancestors() {
+        let git = dir.join(".git");
+        let Ok(meta) = std::fs::metadata(&git) else {
+            continue;
+        };
+        if meta.is_dir() {
+            return Some(resolved(&git));
+        }
+        let text = std::fs::read_to_string(&git).ok()?;
+        let rest = text.trim().strip_prefix("gitdir:")?;
+        let gitdir = PathBuf::from(rest.trim());
+        let gitdir = if gitdir.is_absolute() {
+            gitdir
+        } else {
+            dir.join(gitdir)
+        };
+        return Some(match std::fs::read_to_string(gitdir.join("commondir")) {
+            Ok(common) => resolved(&gitdir.join(common.trim())),
+            Err(_) => resolved(&gitdir),
+        });
+    }
+    None
+}
+
+/// True when the checkout at `root` is a linked git worktree (its `.git`
+/// is a file).
+pub fn is_linked_worktree(root: &Path) -> bool {
+    std::fs::metadata(root.join(".git")).is_ok_and(|meta| meta.is_file())
+}
+
 pub fn resolve_storage_dir(
     flag: Option<&Path>,
     config: &Config,

@@ -2,8 +2,10 @@
 //! Public methods take a project-relative path and honor mtime+size.
 
 mod fingerprint;
+mod gitindex;
 mod migrate;
 mod ops;
+pub mod overlay;
 #[cfg(test)]
 mod parity_test;
 mod query;
@@ -58,6 +60,10 @@ pub struct Engine {
     file_reads: Vec<(String, String, Vec<String>, f64)>,
     operations: u64,
     failures: u64,
+    /// A worktree overlay (2.4): an in-memory copy of the base index with
+    /// the worktree's changed files re-indexed. It writes no locks and
+    /// sends no change notes; the base index and other agents never see it.
+    overlay: bool,
 }
 
 impl Engine {
@@ -146,6 +152,7 @@ impl Engine {
             file_reads: Vec::new(),
             operations: 0,
             failures: 0,
+            overlay: false,
         })
         .map(|mut engine| {
             if !engine.documents_only {
@@ -163,6 +170,85 @@ impl Engine {
     /// again with file lines and the 2.3 references. Files that changed get
     /// both when they are re-indexed.
     fn file_lines_once(&mut self) {
+        self.file_lines_pass();
+        self.symbol_rules_once();
+    }
+
+    /// A store extracted with older symbol rules (`symbols::RULES`) gets its
+    /// Rust chunks extracted again from the stored text and line maps; the
+    /// other languages' rules did not change. Runs once per store.
+    fn symbol_rules_once(&mut self) {
+        if self.store.state.symbol_rules >= symbols::RULES {
+            return;
+        }
+        self.store.state.symbol_rules = symbols::RULES;
+        if self.store.state.symbols.is_empty() {
+            return;
+        }
+        // The extension commit_piece hands to the extractor.
+        let rust = |path: &str, language: Option<&str>| {
+            language
+                .unwrap_or_else(|| extension_of(path))
+                .eq_ignore_ascii_case("rs")
+        };
+        let mut fresh: Vec<Symbol> = Vec::new();
+        let mut touched: HashSet<String> = HashSet::new();
+        let mut positions: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for sym in &self.store.state.symbols {
+            positions.insert(sym.chunk_id.clone(), sym.chunk_index);
+        }
+        let chunks: Vec<(String, String, String, Vec<(u32, u32)>)> = self
+            .store
+            .state
+            .chunks
+            .iter()
+            .filter(|chunk| rust(&chunk.path, chunk.language.as_deref()))
+            .map(|chunk| {
+                (
+                    chunk.id.clone(),
+                    chunk.path.clone(),
+                    chunk.content.clone(),
+                    chunk.line_map.clone(),
+                )
+            })
+            .collect();
+        for (id, path, content, line_map) in chunks {
+            let position = positions.get(&id).copied().unwrap_or(0);
+            for hit in symbols::extract_all("rs", &content) {
+                let _id = self.take_symbol_id();
+                fresh.push(Symbol {
+                    name: hit.name,
+                    kind: hit.kind,
+                    role: hit.role,
+                    line: chunk::lines::absolute(&line_map, hit.line),
+                    container: hit.container,
+                    chunk_id: id.clone(),
+                    path: path.clone(),
+                    chunk_index: position,
+                });
+            }
+            touched.insert(id);
+        }
+        if touched.is_empty() {
+            return;
+        }
+        self.store
+            .state
+            .symbols
+            .retain(|sym| !touched.contains(&sym.chunk_id));
+        self.store.state.symbols.extend(fresh);
+        self.store.state.edges = symbols::build_edges(&self.store.state.symbols);
+        let _ = self.store.save(
+            "symbol_rules",
+            &Value::object(vec![
+                ("rules", Value::Int(symbols::RULES)),
+                ("chunks", Value::Int(touched.len() as i64)),
+            ]),
+        );
+    }
+
+    fn file_lines_pass(&mut self) {
         if self.store.state.symbol_lines {
             return;
         }
@@ -386,7 +472,9 @@ impl Engine {
             {
                 let _ = self.prune_history(None, Some(self.max_history_entries));
             }
-            crate::locks::note_indexed(&self.cwd, &fresh, &self.server_agent);
+            if !self.overlay {
+                crate::locks::note_indexed(&self.cwd, &fresh, &self.server_agent);
+            }
             if !self.server_agent.is_empty() {
                 crate::locks::hold_shared(&self.cwd, &fresh, &self.server_agent, now_secs());
             }
@@ -632,7 +720,7 @@ impl Engine {
             kv_reprocessed += reprocessed;
             self.reindex_file(rel, &abs, &meta)?;
         }
-        if !modified.is_empty() {
+        if !modified.is_empty() && !self.overlay {
             let paths: Vec<String> = modified
                 .iter()
                 .map(|row| crate::store::string_field(row, "path"))
@@ -640,7 +728,7 @@ impl Engine {
                 .collect();
             crate::locks::note_change(&self.cwd, &paths, &agent, "modified");
         }
-        if !removed.is_empty() {
+        if !removed.is_empty() && !self.overlay {
             crate::locks::note_change(&self.cwd, &removed, &agent, "removed");
         }
         // A memory chunk is reported but stays stored, so it alone changes
@@ -691,7 +779,9 @@ impl Engine {
         self.store.state.locks.retain(|lock| lock.path != rel);
         self.drop_path(&rel);
         self.rebuild_bm25();
-        crate::locks::note_change(&self.cwd, &[rel.clone()], &self.server_agent, "removed");
+        if !self.overlay {
+            crate::locks::note_change(&self.cwd, &[rel.clone()], &self.server_agent, "removed");
+        }
         self.store.save(
             "remove",
             &Value::object(vec![("path", Value::string(&rel))]),
@@ -1947,6 +2037,16 @@ fn collect(
     Ok(out)
 }
 
+/// The `sha256` a document row stores for these file bytes: of the bytes
+/// for media, of the decoded text otherwise.
+pub(crate) fn content_sha(rel: &str, bytes: &[u8]) -> String {
+    if crate::media::is_media(crate::chunk::extension_of(rel)) {
+        hex(&sha256(bytes))
+    } else {
+        hex(&sha256(chunk::read_python_text(bytes).as_bytes()))
+    }
+}
+
 fn rel_of(cwd: &Path, path: &Path) -> String {
     crate::walk::native_sep(&path.strip_prefix(cwd).unwrap_or(path).to_string_lossy())
 }
@@ -2345,6 +2445,8 @@ impl Engine {
         // in full, and an empty one has none. Say so, or the next open of a
         // store first written here would convert these lines a second time.
         self.store.state.symbol_lines = true;
+        // The same holds for the symbol rules (`symbol_rules_once`).
+        self.store.state.symbol_rules = symbols::RULES;
         let digest = chunk::content_sha256(&piece.content);
         let id = chunk::chunk_id(rel, piece.start, piece.end, &digest);
         let ext = piece

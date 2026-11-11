@@ -1102,7 +1102,16 @@ fn rust_args(name: &str, arguments: Py) -> Py {
             default("full", Py::Bool(true));
             default("limit", int(100));
         }
-        "search" => default("compact", Py::Bool(false)),
+        "search" => {
+            default("compact", Py::Bool(false));
+            // 2.4: definitions first and no edge blocks are MCP defaults.
+            default("definitions_first", Py::Bool(false));
+            default("include_edges", Py::Bool(true));
+        }
+        "query" => {
+            default("definitions_first", Py::Bool(false));
+            default("include_edges", Py::Bool(true));
+        }
         "search_text" => default("limit", int(50)),
         "agent_grep" => default("max_tokens", int(4000)),
         "map" => default("max_documents", int(0)),
