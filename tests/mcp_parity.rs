@@ -1376,7 +1376,7 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
         notes.push(format!("{extra} more Rust reference rows (2.3)"));
     }
     let extra_defs = EXTRA_RUST_DEFINITIONS.load(std::sync::atomic::Ordering::Relaxed);
-    if extra_defs != 0 && rust_definitions(left, right, extra_defs) {
+    if extra_defs != 0 && rust_definitions(left, right, extra_defs, extra - extra_defs) {
         notes.push(format!(
             "{extra_defs} more Rust definitions (2.4 items, 2.5 fields)"
         ));
@@ -1556,19 +1556,23 @@ fn extra_rust_definitions(tree: &Path) -> i64 {
     extra
 }
 
-/// Equalize `definition_count` when it differs by exactly those rows.
-fn rust_definitions(left: &mut Py, right: &Py, extra: i64) -> bool {
+/// Equalize `definition_count` when it differs by exactly those rows, and
+/// `reference_count` when it differs by the other extra rows (`refs`).
+fn rust_definitions(left: &mut Py, right: &Py, extra: i64, refs: i64) -> bool {
     let mut changed = false;
     if let (Py::Dict(lp), Py::Dict(rp)) = (left, right) {
         for (key, value) in lp.iter_mut() {
             let Some(other) = lookup(rp, key) else {
                 continue;
             };
-            if key == "definition_count" && value.as_float() - other.as_float() == extra as f64 {
+            let differs = value.as_float() - other.as_float();
+            if (key == "definition_count" && differs == extra as f64)
+                || (key == "reference_count" && differs == refs as f64)
+            {
                 *value = other.clone();
                 changed = true;
             } else if matches!(value, Py::Dict(_)) {
-                changed |= rust_definitions(value, other, extra);
+                changed |= rust_definitions(value, other, extra, refs);
             }
         }
     }
