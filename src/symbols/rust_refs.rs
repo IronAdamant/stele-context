@@ -1090,11 +1090,11 @@ mod tests {
     #[test]
     fn grouped_imports_paths_and_types() {
         let content = "use crate::write_policy::{WorldWrite, self, Exempt as Ex, inner::{Rule, deep}};\n\
-                       use specula_core::checksum::crc32;\n\
+                       use sample_core::checksum::crc32;\n\
                        // WorldError in a comment, \"Opener\" in text\n\
                        pub fn over(world: &mut dyn crate::write_policy::Writer) -> Box<dyn Shape> {\n\
                            let x = 'a'; let y: &'static str = \"Mark\";\n\
-                           specula_core::checksum::crc32_update(x, y)\n\
+                           sample_core::checksum::crc32_update(x, y)\n\
                        }\n\
                        pub struct Defined;\n";
         let rows = names(content);
@@ -1173,7 +1173,7 @@ foo::{x};
 
     #[test]
     fn calls_methods_macros_and_closures_are_references() {
-        // Specula's false "unreferenced": a private fn called by bare name
+        // The false "unreferenced" on a large Rust workspace: a private fn called by bare name
         // in the same file, inside `if` and `&&`, as an argument, and in a
         // closure and a macro.
         let content = "fn human_took_controls(input: &[Event]) -> bool { false }
@@ -1299,7 +1299,7 @@ foo::{x};
         );
     }
 
-    /// 2.5: Specula's "every place a reference is added or dropped" on four
+    /// 2.5: on a large Rust workspace, "every place a reference is added or dropped" on four
     /// fields took five greps: fields were not symbols.
     #[test]
     fn struct_and_variant_fields_are_definitions_and_uses_are_references() {

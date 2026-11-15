@@ -6,8 +6,8 @@
 //! git vouches that its bytes are that entry's blob, so two checkouts whose
 //! entries for a path name the same blob hold the same bytes. A fresh
 //! `git worktree add` gives every file a new mtime; without this the first
-//! overlay call read every file (about 18 s of a 20 s call on Specula, the
-//! reads of just-written files, not the hashing).
+//! overlay call read every file (about 18 s of a 20 s call on a large Rust
+//! workspace, the reads of just-written files, not the hashing).
 //!
 //! An entry stamped at or after the index file's own mtime is "racily
 //! clean" (the file may have changed in the same tick) and proves nothing.

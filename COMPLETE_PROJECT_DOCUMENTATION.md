@@ -40,7 +40,7 @@ The product is the std-only Rust binary. The old Python 1.x version lives on the
 | `bench/rust-b1.json`, `bench/rust-rich.json` | Recorded Rust timings |
 | `scripts/install.sh`, `scripts/install.ps1` | Install a release binary |
 | `scripts/fetch_corpora.sh` | Download pinned corpora for tests |
-| `npm/stele-context/` | Optional Node launcher. Not published by the tag workflows |
+| `npm/stele-context/` | Optional Node launcher. package.json is private. Not on npm, and no workflow publishes it |
 | `server.json`, `.mcp.json` | MCP registry and a local client example |
 | `.github/workflows/rust.yml` | Format, zero-deps, tests, B1 floor. Linux, macOS, Windows |
 | `.github/workflows/benchmark-gate.yml` | D13 via `stele-bench gate` |

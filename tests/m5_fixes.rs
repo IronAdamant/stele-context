@@ -1,4 +1,4 @@
-//! 2.4 fixes from Specula's M5 lanes, through the real MCP server: Rust
+//! 2.4 fixes from M5 lanes on a large Rust workspace, through the real MCP server: Rust
 //! calls and macros as symbols (the false "unreferenced"), definition-first
 //! search without edge blocks, the bulk_store_summaries schema, and
 //! `worktree_root` answers from a git worktree.
@@ -190,7 +190,7 @@ fn json_path(path: &Path) -> String {
     path.display().to_string().replace('\\', "\\\\")
 }
 
-/// Specula M5: `find_references human_took_controls` answered
+/// M5, on a large Rust workspace: `find_references human_took_controls` answered
 /// "unreferenced" for a private fn called by bare name in the same file.
 #[test]
 fn a_private_fn_called_by_name_is_referenced_on_every_line() {
@@ -222,7 +222,7 @@ fn macro_rules_definitions_and_invocations() {
     assert!(refs.contains(r#""line_number":22"#), "{refs}");
 }
 
-/// Specula M5: "Game trait use_assets" ranked an incidental file first and
+/// M5, on a large Rust workspace: "Game trait use_assets" ranked an incidental file first and
 /// carried about 60 edges. The defining chunk comes first, without edges
 /// unless asked.
 #[test]

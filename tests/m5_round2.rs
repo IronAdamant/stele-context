@@ -1,4 +1,4 @@
-//! 2.5 fixes from Specula M5, through the real MCP server and CLI: struct
+//! 2.5 fixes from an M5 review of a large Rust workspace, through the real MCP server and CLI: struct
 //! fields are symbols (`find_references tasks` answered `not_found`), and
 //! `named_in` connects a Rust symbol to the scripts, docs and string
 //! literals that name it (a renamed tool broke Python check scripts the
@@ -55,7 +55,7 @@ pub fn make() -> Queue { Queue { tasks: 0 } }
 
 const SCRIPT: &str = "import subprocess
 def run():
-    return subprocess.run([\"specula\", \"call\", \"model_export\", \"--wind\"])
+    return subprocess.run([\"app\", \"call\", \"model_export\", \"--wind\"])
 def catalog():
     return call(\"tools_catalog\")
 ";
@@ -243,7 +243,7 @@ fn row<'a>(text: &'a str, path: &str, line: u32) -> &'a str {
     &text[open..=close]
 }
 
-/// Specula M5: "find every place a reference is added or dropped" on four
+/// M5, on a large Rust workspace: "find every place a reference is added or dropped" on four
 /// fields took five greps; `find_references tasks` said `not_found`.
 #[test]
 fn a_struct_field_has_its_definition_reads_and_writes() {
@@ -349,7 +349,7 @@ fn field_rows_are_capped_and_counted() {
     assert_eq!(cli.matches(r#""kind":"field_access""#).count(), 5, "{cli}");
 }
 
-/// Specula M5: two Python check scripts failed after a merge because of a
+/// M5, on a large Rust workspace: two Python check scripts failed after a merge because of a
 /// Rust change; nothing connected the Rust symbol to the scripts naming it.
 #[test]
 fn named_in_lists_scripts_docs_and_string_literals() {

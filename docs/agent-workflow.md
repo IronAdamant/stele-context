@@ -63,7 +63,7 @@ After this, **`search`**, **`get_context`**, **`find_references`**, etc. have ma
 ### When Stele beats grep (2.4)
 
 - **"Where is X defined?"** `find_definition` returns the definition rows only (fn, struct, trait, `macro_rules!`, const, `pub(crate) fn` ...), with the signature line. grep returns every call site too.
-- **"Who uses X?" / "Is X dead?"** `find_references` puts the definition first, then every code line that calls, method-calls, imports or names X, and answers `referenced` or `unreferenced`. For Rust it has grep's recall over code (on a Specula sample, 185 of 185 code lines that `grep -w` found outside strings).
+- **"Who uses X?" / "Is X dead?"** `find_references` puts the definition first, then every code line that calls, method-calls, imports or names X, and answers `referenced` or `unreferenced`. For Rust it has grep's recall over code (on a sample from a large Rust workspace, 185 of 185 code lines that `grep -w` found outside strings).
 - **"What breaks if I change X?"** `impact_radius` follows the symbol graph across files. grep cannot.
 - **(2.5) "Where is field x read or written?"** `find_references x` lists a Rust field's definition and every use, grouped by owning type where the line names it (`self.x` in `impl T`, `T { x }`), with `write: true` on assignments and mutating calls. Other receivers are `name_only`: Stele does not infer types. `owner=T` keeps one type.
 - **(2.5) "Which scripts or docs name X?"** `named_in` on `find_references` and `impact_radius`: Python scripts calling a tool by name, docs naming a flag, string literals. A compiler cannot see these, so check them before a rename.

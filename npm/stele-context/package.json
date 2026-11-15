@@ -1,7 +1,8 @@
 {
   "name": "stele-context",
   "version": "2.5.0",
-  "description": "Launcher for the stele-context 2.0 Rust binary. This package does not ship a Python wheel.",
+  "private": true,
+  "description": "Launcher for the stele-context 2.0 Rust binary. This package does not ship a Python wheel and is not published to npm.",
   "bin": {
     "stele-context": "bin/stele-context.js"
   },

@@ -4,6 +4,12 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-15 - public docs and the npm launcher
+
+- Removed an unannounced project name from the changelog, docs, comments and test fixtures. Example paths are generic. Version history and measured numbers stay.
+- README `tools/list` sizes match the current lite, standard and full responses (9,982, 13,982 and 18,367 bytes with everything on).
+- `npm/stele-context/package.json` is `private`. No workflow publishes it. Install stays GitHub release binaries and `pip install stele-context` for 1.5.x.
+
 ## 2026-11-15 - 2.5.0: fields and named_in
 
 - Rust struct, union and enum-variant fields are definitions (kind `field`, `container` the owner). `.name` not called is `field_access`; a field in a struct literal or pattern is `struct_field`. `symbols::RULES` is 2, so a 2.4 store re-extracts its Rust chunks once.
