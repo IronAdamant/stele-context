@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn health_tools_and_stats_round_trip() {
-        let dir = std::env::temp_dir().join(format!("stele-http-{}", std::process::id()));
+        let dir = crate::test_dir("http");
         let _ = std::fs::remove_dir_all(&dir);
         let engine = Engine::open(Some(&dir)).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();

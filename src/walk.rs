@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn skips_ignored_and_dot_directories() {
-        let root = std::env::temp_dir().join(format!("stele-walk-{}", std::process::id()));
+        let root = crate::test_dir("walk");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("secrets")).unwrap();
         fs::create_dir_all(root.join(".hidden")).unwrap();

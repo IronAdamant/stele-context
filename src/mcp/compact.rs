@@ -407,7 +407,7 @@ mod tests {
     use super::*;
 
     fn engine() -> crate::engine::Engine {
-        let dir = std::env::temp_dir().join(format!("stele-compact-{}", std::process::id()));
+        let dir = crate::test_dir("compact");
         std::fs::create_dir_all(&dir).unwrap();
         crate::engine::Engine::open_at(dir.clone(), dir.join("store")).unwrap()
     }

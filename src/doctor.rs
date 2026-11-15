@@ -470,7 +470,7 @@ mod tests {
 
     #[test]
     fn doctor_parses_snapshot_json() {
-        let dir = std::env::temp_dir().join(format!("stele-doctor-{}", std::process::id()));
+        let dir = crate::test_dir("doctor");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("store")).unwrap();
         fs::write(

@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn env_beats_agents_md_per_key() {
-        let dir = std::env::temp_dir().join(format!("stele-groups-unit-{}", std::process::id()));
+        let dir = crate::test_dir("groups-unit");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("AGENTS.md"),

@@ -2196,15 +2196,10 @@ fn strings(values: &[String]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn index_then_search_matches_a_fixture_symbol() {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("stele-index-{stamp}"));
+        let root = crate::test_dir("index");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("sample.py"), "def classify(n):\n    return n\n").unwrap();

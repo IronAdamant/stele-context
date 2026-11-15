@@ -12,14 +12,7 @@ struct Trees {
 
 impl Trees {
     fn new(tag: &str) -> Trees {
-        let root = std::env::temp_dir().join(format!(
-            "stele-overlay-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
+        let root = crate::test_dir(&format!("overlay-{tag}"));
         let main = root.join("main");
         let tree = root.join("wt");
         fs::create_dir_all(main.join(".git").join("worktrees").join("wt")).unwrap();

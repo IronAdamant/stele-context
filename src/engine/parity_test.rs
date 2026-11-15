@@ -11,7 +11,7 @@ fn python_bin() -> &'static str {
 
 #[test]
 fn migrate_reads_a_database_written_by_python_152() {
-    let root = std::env::temp_dir().join(format!("stele-mig-{}", std::process::id()));
+    let root = crate::test_dir("mig");
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("sample.py"), "def classify(n):\n    return n\n").unwrap();
@@ -85,7 +85,7 @@ print(json.dumps({"chunks": indexed.get("total_chunks", 0)}))
 
 #[test]
 fn standard_tools_match_python_on_a_one_file_project() {
-    let root = std::env::temp_dir().join(format!("stele-par-{}", std::process::id()));
+    let root = crate::test_dir("par");
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("src")).unwrap();
     fs::write(
@@ -243,7 +243,7 @@ print(json.dumps(payload))
     );
     let py_text = String::from_utf8_lossy(&ran.stdout);
     let py_value = crate::json::parse(py_text.trim()).expect("python json");
-    let rs_store = std::env::temp_dir().join(format!("stele-par-rs-{}", std::process::id()));
+    let rs_store = crate::test_dir("par-rs");
     let _ = fs::remove_dir_all(&rs_store);
     let mut engine = Engine::open_at(root.clone(), rs_store.clone()).unwrap();
     let indexed = engine.index(&[".".to_string()], false).unwrap();
