@@ -28,6 +28,24 @@ pub mod walk;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const SCHEMA_VERSION: &str = "2.5.0";
 
+/// A temp path no other test of this run uses: the process id, a
+/// per-process counter (tests run in parallel and Windows clocks are
+/// coarse, so the clock alone can repeat) and the time (pids are reused
+/// across runs).
+#[cfg(test)]
+pub(crate) fn test_dir(tag: &str) -> std::path::PathBuf {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    std::env::temp_dir().join(format!(
+        "stele-{tag}-{}-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ))
+}
+
 #[cfg(test)]
 mod zero_deps {
     #[test]

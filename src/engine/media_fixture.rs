@@ -1,20 +1,13 @@
 use super::Engine;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn media_fixture_matches_the_expected_counts() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let root = manifest.join("parity/fixtures/media");
     let expected = fs::read_to_string(manifest.join("parity/goldens/media.json")).unwrap();
-    let store = std::env::temp_dir().join(format!(
-        "stele-media-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let store = crate::test_dir("media");
     let _ = fs::remove_dir_all(&store);
     let mut engine = Engine::open_at(root, store.clone()).unwrap();
     engine.index(&[".".to_string()], false).unwrap();

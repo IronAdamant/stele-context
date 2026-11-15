@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn reads_a_python_sqlite_table() {
-        let dir = std::env::temp_dir().join(format!("stele-sqlite-{}", std::process::id()));
+        let dir = crate::test_dir("sqlite");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let db = dir.join("sample.db");

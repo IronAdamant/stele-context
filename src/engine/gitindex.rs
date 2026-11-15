@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn a_fresh_blob_needs_the_same_stamp_and_a_settled_index() {
-        let dir = std::env::temp_dir().join(format!("stele-gitindex-{}", std::process::id()));
+        let dir = crate::test_dir("gitindex");
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("f.rs");
         fs::write(&file, "abc").unwrap();

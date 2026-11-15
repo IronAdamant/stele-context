@@ -30,9 +30,13 @@ fn filler(name: &str) -> String {
 }
 
 fn project() -> Project {
+    // Tests run in parallel and Windows clocks are coarse: the counter
+    // keeps two trees of one process apart.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
-        "stele-symbols-{}-{}",
+        "stele-symbols-{}-{}-{}",
         std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())

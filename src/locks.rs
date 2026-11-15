@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn force_steal_writes_the_shared_conflict_log() {
-        let root = std::env::temp_dir().join(format!("stele-lock-{}", std::process::id()));
+        let root = crate::test_dir("lock");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join(".git")).unwrap();
         let mut state = State::default();
@@ -393,8 +393,7 @@ mod tests {
     #[test]
     fn index_locks_yield_and_never_replace_explicit_locks() {
         for git in [false, true] {
-            let root =
-                std::env::temp_dir().join(format!("stele-lock-auto-{}-{git}", std::process::id()));
+            let root = crate::test_dir(&format!("lock-auto-{git}"));
             let _ = fs::remove_dir_all(&root);
             fs::create_dir_all(&root).unwrap();
             if git {
@@ -463,7 +462,7 @@ mod tests {
 
     #[test]
     fn force_steal_is_visible_from_the_other_worktree() {
-        let root = std::env::temp_dir().join(format!("stele-lock-wt-{}", std::process::id()));
+        let root = crate::test_dir("lock-wt");
         let _ = fs::remove_dir_all(&root);
         let main = root.join("main");
         let other = root.join("other");

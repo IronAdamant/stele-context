@@ -158,7 +158,7 @@ mod tests {
         let mut index = Bm25::new();
         index.add("a", "console markup render");
         index.add("b", "other markup");
-        let path = std::env::temp_dir().join(format!("stele-bm25-{}.bin", std::process::id()));
+        let path = crate::test_dir("bm25").with_extension("bin");
         save(&index, &path, 99).unwrap();
         let loaded = load(&path, 99).unwrap();
         assert_eq!(

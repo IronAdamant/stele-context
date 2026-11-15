@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn marker_and_git_walk_up() {
-        let root = std::env::temp_dir().join(format!("stele-root-{}", std::process::id()));
+        let root = crate::test_dir("root");
         let _ = fs::remove_dir_all(&root);
         let nested = root.join("a").join("b");
         fs::create_dir_all(&nested).unwrap();
