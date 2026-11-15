@@ -1,4 +1,4 @@
-//! 2.3 symbol accuracy (Specula live test B5, B6): file line numbers and
+//! 2.3 symbol accuracy (live test of a large Rust workspace, B5, B6): file line numbers and
 //! the real signature line; Rust references through grouped imports and
 //! `::` paths; references kept to the definition's language; a store from
 //! before 2.3 converted on open.
@@ -65,7 +65,7 @@ fn project() -> Project {
     .unwrap();
     std::fs::write(
         src.join("binary.rs"),
-        "pub fn tag(data: &[u8]) -> u32 {\n    specula_core::checksum::crc32(data)\n}\n",
+        "pub fn tag(data: &[u8]) -> u32 {\n    sample_core::checksum::crc32(data)\n}\n",
     )
     .unwrap();
     std::fs::write(

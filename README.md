@@ -48,7 +48,7 @@ or in a settings file:
 }
 ```
 
-Other clients use the same command. `lite` (the default) exposes 25 tools; `standard` adds sessions, history and bulk embeddings (43); `full` adds the 1.x singleton names (61). Every mode lists each tool with a one-line description and its arguments (types, required ones, allowed values): `tools/list` is 8.6 KB in lite, 12.5 KB in standard and 16.8 KB in full (1.5.2: 26.3, 33.3 and 37.7 KB). Results that can run long come back compact (a definition is its signature and a short preview, `index` reports counts); `full=true` on those tools returns everything, see [MIGRATION.md](MIGRATION.md#deliberate-differences).
+Other clients use the same command. `lite` (the default) exposes 25 tools; `standard` adds sessions, history and bulk embeddings (43); `full` adds the 1.x singleton names (61). Every mode lists each tool with a one-line description and its arguments (types, required ones, allowed values): `tools/list` is 9,982 bytes in lite, 13,982 bytes in standard and 18,367 bytes in full (1.5.2: 26.3, 33.3 and 37.7 KB). Results that can run long come back compact (a definition is its signature and a short preview, `index` reports counts); `full=true` on those tools returns everything, see [MIGRATION.md](MIGRATION.md#deliberate-differences).
 
 ## Tool groups
 
@@ -79,7 +79,7 @@ The agent picks the groups for a project in its AGENTS.md (see [Choosing groups]
 - A hidden tool is absent from `tools/list`; calling it anyway returns `isError` with the line to change, e.g. `tool "document_lock" is disabled (group "locks") by STELE_DISABLE; remove "locks" from it to enable`.
 - `initialize` instructions (and `doctor`, when anything is hidden) carry one line with the groups that are on and off.
 
-`tools/list` size with everything on, then with `locks`, `notes` or `messages` off: lite 9,732 / 9,280 / 9,152 bytes (no `messages` in lite); standard 13,732 / 13,068 / 12,898 / 13,421; full 18,117 / 15,788 / 15,409 / 17,806 (2.4: the `worktree_root` arguments and the when-to-use descriptions add about 1.1 KB to each).
+`tools/list` size with everything on, then with `locks`, `notes` or `messages` off: lite 9,982 / 9,530 / 9,402 bytes (no `messages` in lite); standard 13,982 / 13,318 / 13,148 / 13,671; full 18,367 / 16,038 / 15,659 / 18,056. In 2.4 the everything-on sizes were 9,732, 13,732 and 18,117 bytes: the `worktree_root` arguments and the when-to-use descriptions added about 1.1 KB to each.
 
 ## Choosing groups
 

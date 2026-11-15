@@ -39,7 +39,7 @@ Pushing `v1.*` from `python-legacy` runs `publish.yml` on that branch and upload
 | `stele-context-x86_64-pc-windows-msvc.exe` | Windows x86_64 |
 | `stele-context-aarch64-pc-windows-msvc.exe` | Windows Arm |
 
-Each triple also has `stele-context-mcp-<triple>`. `scripts/install.sh` and `scripts/install.ps1` download the matching asset. The npm package in `npm/stele-context` is a launcher; it is not published by the tag workflows.
+Each triple also has `stele-context-mcp-<triple>`. `scripts/install.sh` and `scripts/install.ps1` download the matching asset. The npm package in `npm/stele-context` is a launcher with `"private": true`. No workflow publishes it, and `npm publish` is refused.
 
 ## Secrets
 
