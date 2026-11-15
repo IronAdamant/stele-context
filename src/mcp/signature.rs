@@ -208,6 +208,9 @@ const SIGS: &[Sig] = &[
             ("full", false, "boolean"),
             // 2.4: answer for this git worktree (base index + overlay).
             ("worktree_root", false, "string"),
+            // 2.5: struct fields by owning type, and named_in.
+            ("owner", false, "string"),
+            ("named_in", false, "boolean"),
         ],
     },
     Sig {
@@ -328,6 +331,8 @@ const SIGS: &[Sig] = &[
             ("direction", false, "string"),
             // 2.4: answer for this git worktree (base index + overlay).
             ("worktree_root", false, "string"),
+            // 2.5: files of other languages and strings that name the symbol.
+            ("named_in", false, "boolean"),
         ],
     },
     Sig {

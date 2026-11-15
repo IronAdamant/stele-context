@@ -32,13 +32,22 @@ pub(crate) use edges::build as build_edges;
 /// store whose rows were extracted with an older version re-extracts its
 /// Rust chunks the first time it is opened in full. 1: 2.4 adds Rust calls,
 /// method calls, macro invocations, `macro_rules!` and the definitions the
-/// line patterns miss.
-pub const RULES: i64 = 1;
+/// line patterns miss. 2: 2.5 adds struct and enum-variant fields
+/// (`field`), field accesses (`field_access`) and struct literal and
+/// pattern fields (`struct_field`).
+pub const RULES: i64 = 2;
 
-/// The chunk text with Rust comments and string and char literals blanked
-/// (newlines kept), for scanning code only.
-pub(crate) fn rust_code(content: &str) -> Vec<char> {
-    rust_refs::strip(content)
+pub(crate) use rust_refs::Use as RustUse;
+
+/// The text with everything but Rust string and char literals blanked
+/// (newlines kept).
+pub(crate) fn rust_strings(content: &str) -> Vec<char> {
+    rust_refs::strings_only(content)
+}
+
+/// Every place Rust code names `name`, with how it uses it (2.5).
+pub(crate) fn rust_uses(content: &str, name: &str) -> Vec<RustUse> {
+    rust_refs::uses(content, name)
 }
 
 pub fn extract(extension: &str, content: &str) -> Vec<Hit> {

@@ -18,7 +18,7 @@ const HANDSHAKES: &[&str] = &["2026-07-28", "2025-11-25", "2025-06-18"];
 
 /// The second line of the initialize instructions (2.4): when Stele beats
 /// grep, when grep is the better tool, and how to ask from a worktree.
-const USAGE: &str = "Stele beats grep for where a symbol is defined (find_definition), every use of it with a dead-code verdict (find_references) and what a change breaks (impact_radius). Use grep for text in strings or comments and for files outside the index. In a git worktree pass worktree_root=<its absolute path> to read tools.";
+const USAGE: &str = "Stele beats grep for where a symbol is defined (find_definition), every use of it with a dead-code verdict (find_references, Rust struct fields included) and what a change breaks (impact_radius). Both list the scripts, docs and string literals that name the symbol (named_in), which a compiler never sees. Use grep for other text and for files outside the index. In a git worktree pass worktree_root=<its absolute path> to read tools.";
 
 const LITE: &[&str] = &[
     "index",
@@ -759,13 +759,24 @@ fn run_tool(engine: &mut Engine, name: &str, args: &Value) -> Result<Value, Stri
             )
         }
         "find_definition" => Ok(engine.find_definition(&symbol)),
-        "find_references" => Ok(engine.find_references_in(&symbol, flag(args, "all_languages"))),
-        "impact_radius" => Ok(engine.impact_radius(
+        "find_references" => Ok(engine.find_references_with(
+            &symbol,
+            &crate::engine::RefOptions {
+                all_languages: flag(args, "all_languages"),
+                owner: arg(args, "owner"),
+                // 2.5: field rows past FIELD_ROWS are counted; full=true
+                // lists them all.
+                field_limit: compact::wants_full(args).then_some(0),
+                named_in: tri_flag(args, "named_in"),
+            },
+        )),
+        "impact_radius" => Ok(engine.impact_radius_with(
             &symbol,
             arg(args, "document_path").as_deref(),
             arg(args, "chunk_id").as_deref(),
             int_arg(args, "depth").unwrap_or(2).max(0) as usize,
             flag(args, "summary_mode"),
+            tri_flag(args, "named_in"),
         )),
         "coupling" => Ok(engine.coupling_mode(
             &path,
@@ -1296,6 +1307,11 @@ fn arg(value: &Value, key: &str) -> Option<String> {
         Some(Value::Float(number)) => Some(number.to_string()),
         _ => None,
     }
+}
+
+/// `Some(bit)` when the call passes the flag, `None` when it leaves it out.
+fn tri_flag(value: &Value, key: &str) -> Option<bool> {
+    field(value, key).map(|_| flag(value, key))
 }
 
 fn flag_default(value: &Value, key: &str, default: bool) -> bool {

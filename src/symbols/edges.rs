@@ -234,10 +234,18 @@ pub fn build(symbols: &[Symbol]) -> Vec<Edge> {
 }
 
 fn resolve(symbols: &[Symbol]) -> Vec<Edge> {
+    // 2.5: a Rust field (`field`) is reached only by a field use
+    // (`field_access`, `struct_field`), and a field use reaches nothing else.
     let mut definitions: HashMap<&str, Vec<(&str, &str, Option<&str>)>> = HashMap::new();
+    let mut fields: HashMap<&str, Vec<(&str, &str, Option<&str>)>> = HashMap::new();
     for sym in symbols {
         if sym.role == "definition" {
-            definitions.entry(sym.name.as_str()).or_default().push((
+            let table = if sym.kind == "field" {
+                &mut fields
+            } else {
+                &mut definitions
+            };
+            table.entry(sym.name.as_str()).or_default().push((
                 sym.chunk_id.as_str(),
                 sym.path.as_str(),
                 sym.container.as_deref(),
@@ -257,7 +265,7 @@ fn resolve(symbols: &[Symbol]) -> Vec<Edge> {
     let mut doc_chunks: Vec<(&str, &str)> = Vec::new();
     let mut doc_seen: HashSet<&str> = HashSet::new();
     for sym in symbols {
-        if sym.role == "definition" && doc_seen.insert(sym.path.as_str()) {
+        if sym.role == "definition" && sym.kind != "field" && doc_seen.insert(sym.path.as_str()) {
             doc_chunks.push((sym.path.as_str(), sym.chunk_id.as_str()));
         }
     }
@@ -276,7 +284,8 @@ fn resolve(symbols: &[Symbol]) -> Vec<Edge> {
         if sym.role != "reference" || sym.name.len() < 2 || noise(&sym.name) {
             continue;
         }
-        let mut defs = definitions
+        let field_use = sym.kind == "field_access" || sym.kind == "struct_field";
+        let mut defs = if field_use { &fields } else { &definitions }
             .get(sym.name.as_str())
             .cloned()
             .unwrap_or_default();
@@ -299,7 +308,9 @@ fn resolve(symbols: &[Symbol]) -> Vec<Edge> {
         // `Type::new(..)`) names no receiver type, so it links only to a
         // name defined once; `update` defined in forty files would give
         // every caller forty false edges.
-        if sym.kind == "method_call" && defs.len() > 1 {
+        // A field use names no receiver type either (2.5): `.id` links only
+        // to a field `id` declared once.
+        if (sym.kind == "method_call" || field_use) && defs.len() > 1 {
             continue;
         }
         // Python's rebuild drops `container` before resolution, so the

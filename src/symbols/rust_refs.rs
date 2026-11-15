@@ -17,6 +17,11 @@
 //!   `const fn`, `unsafe fn`, `extern "C" fn`, `pub(crate) struct`,
 //!   `union`, `type` aliases, `mod`, `const` and `static` items, and
 //!   `macro_rules! name` (kind `macro`).
+//! - (2.5) the named fields of structs, unions and enum variants
+//!   (definitions of kind `field`, `container` the owning type: `Index`, or
+//!   `Shape::Circle` for a variant), `.name` not followed by `(` (kind
+//!   `field_access`), and a field named in a struct literal or pattern
+//!   (`Index { tasks: x }`, `Index { tasks, .. }`: kind `struct_field`).
 //!
 //! Comments, string and char literals are skipped.
 
@@ -164,7 +169,7 @@ const STD_MACROS: &[&str] = &[
 ];
 
 pub(super) fn extra(content: &str, base: &[Hit]) -> Vec<Hit> {
-    let code = strip(content);
+    let code: String = strip(content).into_iter().collect();
     let tokens = tokenize(&code);
     let mut seen: HashSet<String> = base
         .iter()
@@ -193,6 +198,7 @@ pub(super) fn extra(content: &str, base: &[Hit]) -> Vec<Hit> {
     let define = |name: &str,
                   kind: &str,
                   line: u32,
+                  container: Option<String>,
                   out: &mut Vec<Hit>,
                   known: &mut HashSet<(String, u32)>| {
         if name == "_" || !known.insert((name.to_string(), line)) {
@@ -203,10 +209,11 @@ pub(super) fn extra(content: &str, base: &[Hit]) -> Vec<Hit> {
             kind: kind.to_string(),
             role: "definition".to_string(),
             line,
-            container: None,
+            container,
         });
     };
-    let text = |at: usize| tokens.get(at).map(|token| token.text.as_str());
+    let enclosing = enclosing_opens(&tokens);
+    let text = |at: usize| tokens.get(at).map(|token| token.text);
     let mut index = 0usize;
     while index < tokens.len() {
         let token = &tokens[index];
@@ -218,12 +225,39 @@ pub(super) fn extra(content: &str, base: &[Hit]) -> Vec<Hit> {
         }
         if token.ident {
             if let Some((name, kind)) = definition_at(&tokens, index) {
-                define(&name.text, kind, name.line, &mut out, &mut defined_now);
+                define(
+                    &name.text,
+                    kind,
+                    name.line,
+                    None,
+                    &mut out,
+                    &mut defined_now,
+                );
+                // 2.5: the named fields of a struct, union or enum variant.
+                if matches!(token.text, "struct" | "union" | "enum") {
+                    for (field, owner) in fields_of(&tokens, index) {
+                        define(
+                            &field.text,
+                            "field",
+                            field.line,
+                            Some(owner),
+                            &mut out,
+                            &mut defined_now,
+                        );
+                    }
+                }
             }
         }
         if token.ident && token.text == "macro_rules" && text(index + 1) == Some("!") {
             if let Some(name) = tokens.get(index + 2).filter(|name| name.ident) {
-                define(&name.text, "macro", name.line, &mut out, &mut defined_now);
+                define(
+                    &name.text,
+                    "macro",
+                    name.line,
+                    None,
+                    &mut out,
+                    &mut defined_now,
+                );
                 index += 3;
                 continue;
             }
@@ -231,7 +265,7 @@ pub(super) fn extra(content: &str, base: &[Hit]) -> Vec<Hit> {
         if token.ident
             && text(index + 1) == Some("!")
             && matches!(text(index + 2), Some("(" | "[" | "{"))
-            && !STD_MACROS.contains(&token.text.as_str())
+            && !STD_MACROS.contains(&token.text)
         {
             emit(&token.text, "macro", token.line, &mut out);
             index += 2;
@@ -264,7 +298,7 @@ pub(super) fn extra(content: &str, base: &[Hit]) -> Vec<Hit> {
                 let item_of_module = position == last && position > 0 && !after_type;
                 if item_of_module || capitalised(&segment.text) {
                     emit(&segment.text, "path", segment.line, &mut out);
-                } else if position == last && called && !KEYWORDS.contains(&segment.text.as_str()) {
+                } else if position == last && called && !KEYWORDS.contains(&segment.text) {
                     let kind = if after_type { "method_call" } else { "call" };
                     emit(&segment.text, kind, segment.line, &mut out);
                 }
@@ -277,7 +311,7 @@ pub(super) fn extra(content: &str, base: &[Hit]) -> Vec<Hit> {
         if token.ident
             && called
             && !capitalised(&token.text)
-            && !KEYWORDS.contains(&token.text.as_str())
+            && !KEYWORDS.contains(&token.text)
             && !index
                 .checked_sub(1)
                 .is_some_and(|before| tokens[before].text == "fn")
@@ -295,9 +329,25 @@ pub(super) fn extra(content: &str, base: &[Hit]) -> Vec<Hit> {
             index += 1;
             continue;
         }
+        // 2.5: `.name` not called is a field access; a field named in a
+        // struct literal or pattern is a `struct_field`.
+        if token.ident && !KEYWORDS.contains(&token.text) {
+            if field_after_dot(&tokens, index) {
+                emit(&token.text, "field_access", token.line, &mut out);
+                index += 1;
+                continue;
+            }
+            if !defined_now.contains(&(token.text.to_string(), token.line))
+                && literal_field(&tokens, &enclosing, index).is_some()
+            {
+                emit(&token.text, "struct_field", token.line, &mut out);
+                index += 1;
+                continue;
+            }
+        }
         if token.ident
             && capitalised(&token.text)
-            && !defined_now.contains(&(token.text.clone(), token.line))
+            && !defined_now.contains(&(token.text.to_string(), token.line))
             && !after_dot
         {
             emit(&token.text, "type", token.line, &mut out);
@@ -311,14 +361,15 @@ pub(super) fn extra(content: &str, base: &[Hit]) -> Vec<Hit> {
 /// `fn` (whatever qualifiers come before it), `struct`, `enum`, `trait`,
 /// `union`, `type` aliases, `mod`, and `const` / `static` items. Const
 /// generics (`<const N: usize>`) and `const fn` are not items here.
-fn definition_at(tokens: &[Token], index: usize) -> Option<(&Token, &'static str)> {
+fn definition_at<'a>(
+    tokens: &'a [Token<'a>],
+    index: usize,
+) -> Option<(&'a Token<'a>, &'static str)> {
     let token = &tokens[index];
     let next = tokens.get(index + 1).filter(|next| next.ident)?;
-    let after = tokens.get(index + 2).map(|after| after.text.as_str());
-    let before = index
-        .checked_sub(1)
-        .map(|before| tokens[before].text.as_str());
-    match token.text.as_str() {
+    let after = tokens.get(index + 2).map(|after| after.text);
+    let before = index.checked_sub(1).map(|before| tokens[before].text);
+    match token.text {
         "fn" => Some((next, "function")),
         "struct" | "enum" | "trait" => Some((next, "class")),
         "union" if matches!(after, Some("{" | "<")) => Some((next, "class")),
@@ -332,8 +383,8 @@ fn definition_at(tokens: &[Token], index: usize) -> Option<(&Token, &'static str
             } else {
                 (next, index + 2)
             };
-            if KEYWORDS.contains(&name.text.as_str())
-                || tokens.get(colon).map(|token| token.text.as_str()) != Some(":")
+            if KEYWORDS.contains(&name.text)
+                || tokens.get(colon).map(|token| token.text) != Some(":")
             {
                 return None;
             }
@@ -350,10 +401,7 @@ fn item_start(tokens: &[Token], index: usize) -> bool {
     if token.first && token.column == 0 {
         return true;
     }
-    match index
-        .checked_sub(1)
-        .map(|before| tokens[before].text.as_str())
-    {
+    match index.checked_sub(1).map(|before| tokens[before].text) {
         Some("pub") => true,
         Some(")") => tokens[..index]
             .iter()
@@ -372,6 +420,399 @@ fn capitalised(name: &str) -> bool {
         && name.chars().any(|ch| ch.is_ascii_lowercase())
 }
 
+/// For each token, the index of the innermost `{`, `(` or `[` still open
+/// before it.
+fn enclosing_opens(tokens: &[Token]) -> Vec<Option<usize>> {
+    let mut stack: Vec<usize> = Vec::new();
+    let mut out = Vec::with_capacity(tokens.len());
+    for (at, token) in tokens.iter().enumerate() {
+        match token.text {
+            "}" | ")" | "]" => {
+                stack.pop();
+                out.push(stack.last().copied());
+            }
+            "{" | "(" | "[" => {
+                out.push(stack.last().copied());
+                stack.push(at);
+            }
+            _ => out.push(stack.last().copied()),
+        }
+    }
+    out
+}
+
+/// The `{` that opens the body of the item whose keyword is at `keyword`
+/// (`struct`, `enum`, `union`, `impl`), past generics and a `where`
+/// clause; `None` for a tuple or unit struct.
+fn body_open(tokens: &[Token], keyword: usize) -> Option<usize> {
+    let mut angle = 0i32;
+    for at in keyword + 1..tokens.len() {
+        match tokens[at].text {
+            "<" => angle += 1,
+            ">" if !(at > 0 && tokens[at - 1].text == "-") => angle -= 1,
+            "{" if angle <= 0 => return Some(at),
+            "(" | ";" if angle <= 0 => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The named fields declared between the `{` at `open` and its `}`: an
+/// identifier followed by `:` at the top level of the braces, after `{`,
+/// `,`, `pub`, `pub(..)` or an attribute.
+fn named_fields<'a>(tokens: &'a [Token<'a>], open: usize) -> Vec<&'a Token<'a>> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut at = open + 1;
+    while at < tokens.len() {
+        match tokens[at].text {
+            "{" | "(" | "[" => depth += 1,
+            "}" | ")" | "]" => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+        let token = &tokens[at];
+        if depth == 0
+            && token.ident
+            && !KEYWORDS.contains(&token.text)
+            && tokens.get(at + 1).is_some_and(|next| next.text == ":")
+            && matches!(tokens[at - 1].text, "{" | "," | "pub" | ")" | "]")
+        {
+            out.push(token);
+        }
+        at += 1;
+    }
+    out
+}
+
+/// The named fields of the struct, union or enum whose keyword is at
+/// `keyword`, each with its owner: the type, or `Enum::Variant`.
+fn fields_of<'a>(tokens: &'a [Token<'a>], keyword: usize) -> Vec<(&'a Token<'a>, String)> {
+    let Some(name) = tokens.get(keyword + 1) else {
+        return Vec::new();
+    };
+    let Some(open) = body_open(tokens, keyword) else {
+        return Vec::new();
+    };
+    if tokens[keyword].text != "enum" {
+        return named_fields(tokens, open)
+            .into_iter()
+            .map(|field| (field, name.text.to_string()))
+            .collect();
+    }
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut at = open + 1;
+    while at < tokens.len() {
+        let token = &tokens[at];
+        if depth == 0
+            && token.ident
+            && matches!(tokens[at - 1].text, "{" | "," | "]")
+            && tokens.get(at + 1).is_some_and(|next| next.text == "{")
+        {
+            let owner = format!("{}::{}", name.text, token.text);
+            for field in named_fields(tokens, at + 1) {
+                out.push((field, owner.clone()));
+            }
+        }
+        match token.text {
+            "{" | "(" | "[" => depth += 1,
+            "}" | ")" | "]" => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    out
+}
+
+/// `.name` not called (`.name(..)`, `.name::<T>(..)`) and not after a
+/// range's `..`.
+fn field_after_dot(tokens: &[Token], index: usize) -> bool {
+    let text = |at: usize| tokens.get(at).map(|token| token.text);
+    index >= 1
+        && text(index - 1) == Some(".")
+        && !(index >= 2 && text(index - 2) == Some("."))
+        && text(index + 1) != Some("(")
+        && !(text(index + 1) == Some("::") && text(index + 2) == Some("<"))
+        && text(index + 1) != Some("!")
+}
+
+/// The type a struct literal or pattern names when the identifier at
+/// `index` is one of its fields (`Index { tasks: x }`, `Self { tasks, .. }`):
+/// the written path's last type (`Index`, `Self`, `Shape::Circle`).
+fn literal_field(tokens: &[Token], enclosing: &[Option<usize>], index: usize) -> Option<String> {
+    let token = &tokens[index];
+    if !token.ident || capitalised(&token.text) || index == 0 {
+        return None;
+    }
+    if !matches!(tokens[index - 1].text, "{" | ",") {
+        return None;
+    }
+    if !tokens
+        .get(index + 1)
+        .is_some_and(|next| matches!(next.text, ":" | "," | "}"))
+    {
+        return None;
+    }
+    let open = enclosing.get(index).copied().flatten()?;
+    if tokens[open].text != "{" {
+        return None;
+    }
+    literal_type(tokens, open)
+}
+
+/// The path before the `{` at `open` when that brace opens a struct
+/// literal or pattern, not an item body or a block.
+fn literal_type(tokens: &[Token], open: usize) -> Option<String> {
+    let mut at = open.checked_sub(1)?;
+    let last = &tokens[at];
+    if !last.ident || !(capitalised(&last.text) || last.text == "Self") {
+        return None;
+    }
+    let mut segments = vec![last.text];
+    while at >= 2 && tokens[at - 1].text == "::" && tokens[at - 2].ident {
+        at -= 2;
+        segments.push(tokens[at].text);
+    }
+    let before = at.checked_sub(1).map(|before| tokens[before].text);
+    let before_two = at.checked_sub(2).map(|before| tokens[before].text);
+    match before {
+        // Item headers, bounds, `-> Type {` and `for x in Type {`.
+        Some(
+            "struct" | "enum" | "union" | "impl" | "for" | "trait" | "dyn" | ":" | ">" | "+"
+            | "mod" | "where" | "in" | "type" | "fn" | "if" | "while" | "match",
+        ) => return None,
+        // `if a == Mode {` and `if a && Flag {`: a block.
+        Some("=") if matches!(before_two, Some("=" | "!" | "<" | ">")) => return None,
+        Some("&") if before_two == Some("&") => return None,
+        _ => {}
+    }
+    let typed: Vec<&str> = segments
+        .iter()
+        .copied()
+        .filter(|segment| capitalised(segment) || *segment == "Self")
+        .collect();
+    Some(match typed.as_slice() {
+        [variant, owner, ..] => format!("{owner}::{variant}"),
+        [only] => only.to_string(),
+        [] => return None,
+    })
+}
+
+/// The type an `impl` at `index` is for (`impl Index`, `impl<T> Trait for
+/// Index<T>`), when `index` starts an impl item and not `-> impl Trait`.
+fn impl_header(tokens: &[Token], index: usize) -> Option<(usize, String)> {
+    if let Some(before) = index.checked_sub(1) {
+        if !matches!(
+            tokens[before].text,
+            "}" | ";" | "]" | "{" | "unsafe" | "default"
+        ) {
+            return None;
+        }
+    }
+    let open = body_open(tokens, index)?;
+    let mut angle = 0i32;
+    let mut start = index + 1;
+    let mut end = open;
+    for at in index + 1..open {
+        match tokens[at].text {
+            "<" => angle += 1,
+            ">" if tokens[at - 1].text != "-" => angle -= 1,
+            "for" if angle <= 0 => start = at + 1,
+            "where" if angle <= 0 => {
+                end = at;
+                break;
+            }
+            _ => {}
+        }
+    }
+    let mut angle = 0i32;
+    let mut owner = None;
+    for at in start..end {
+        let token = &tokens[at];
+        match token.text {
+            "<" => angle += 1,
+            ">" if tokens[at - 1].text != "-" => angle -= 1,
+            _ if angle <= 0 && token.ident && capitalised(&token.text) => {
+                owner = Some(token.text.to_string())
+            }
+            _ => {}
+        }
+    }
+    Some((open, owner?))
+}
+
+/// Std methods that change the collection or cell they are called on.
+const MUTATORS: &[&str] = &[
+    "append",
+    "clear",
+    "dedup",
+    "drain",
+    "entry",
+    "extend",
+    "extend_from_slice",
+    "fill",
+    "get_mut",
+    "insert",
+    "iter_mut",
+    "pop",
+    "pop_back",
+    "pop_front",
+    "push",
+    "push_back",
+    "push_front",
+    "push_str",
+    "remove",
+    "replace",
+    "resize",
+    "retain",
+    "retain_mut",
+    "reverse",
+    "set",
+    "sort",
+    "sort_by",
+    "sort_by_key",
+    "sort_unstable",
+    "split_off",
+    "swap",
+    "swap_remove",
+    "take",
+    "truncate",
+    "values_mut",
+];
+
+/// The field access at `index` changes the field: it is assigned
+/// (`=`, `+=` ...), borrowed `&mut`, or a mutating std method is called on
+/// it (`.push(..)`, `.remove(..)`, `.retain(..)` ...).
+fn writes_field(tokens: &[Token], index: usize) -> bool {
+    let text = |at: usize| tokens.get(at).map(|token| token.text);
+    let next = text(index + 1);
+    let after = text(index + 2);
+    if next == Some("=") && !matches!(after, Some("=" | ">")) {
+        return true;
+    }
+    if matches!(next, Some("+" | "-" | "*" | "/" | "%" | "^" | "|" | "&")) && after == Some("=") {
+        return true;
+    }
+    if matches!(next, Some("<" | ">")) && after == next && text(index + 3) == Some("=") {
+        return true;
+    }
+    if next == Some(".")
+        && after.is_some_and(|method| MUTATORS.contains(&method))
+        && text(index + 3) == Some("(")
+    {
+        return true;
+    }
+    index >= 4
+        && text(index - 1) == Some(".")
+        && text(index - 3) == Some("mut")
+        && text(index - 4) == Some("&")
+}
+
+/// One place a Rust file's code names a word (2.5): its 1-based line, how
+/// it uses it, the owning type where the code says it, and whether a field
+/// access changes the field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Use {
+    pub line: u32,
+    pub kind: &'static str,
+    pub owner: Option<String>,
+    pub write: bool,
+}
+
+/// Every place the code of `content` (a whole Rust file, or one chunk)
+/// names `name` as a word, comments and strings skipped. `kind` is `macro`
+/// (`name!(..)`), `method_call` (`.name(..)`, `Type::name(..)`), `call`,
+/// `field_access` (`.name`), `struct_field` (`Type { name: .. }`) or
+/// `mention`. `owner` is set where the code says the type without
+/// inference: `self.name` and `Self { name }` inside `impl Type`, and
+/// `Type { name }`.
+pub(crate) fn uses(content: &str, name: &str) -> Vec<Use> {
+    let code: String = strip(content).into_iter().collect();
+    let tokens = tokenize(&code);
+    let enclosing = enclosing_opens(&tokens);
+    let text = |at: usize| tokens.get(at).map(|token| token.text);
+    // The type of each open impl body, by its `{`.
+    let mut impl_bodies: Vec<(usize, String)> = Vec::new();
+    let mut stack: Vec<(usize, Option<String>)> = Vec::new();
+    let mut out = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        match token.text {
+            "{" => {
+                let owner = impl_bodies
+                    .iter()
+                    .position(|(open, _)| *open == index)
+                    .map(|at| impl_bodies.swap_remove(at).1);
+                stack.push((index, owner));
+                continue;
+            }
+            "}" => {
+                stack.pop();
+                continue;
+            }
+            "impl" => {
+                if let Some(header) = impl_header(&tokens, index) {
+                    impl_bodies.push(header);
+                }
+                continue;
+            }
+            _ => {}
+        }
+        if !token.ident || token.text != name {
+            continue;
+        }
+        let in_impl = || stack.iter().rev().find_map(|(_, owner)| owner.clone());
+        let after_dot = index >= 1 && text(index - 1) == Some(".");
+        let after_path = index >= 1 && text(index - 1) == Some("::");
+        let called = text(index + 1) == Some("(")
+            || (text(index + 1) == Some("::") && text(index + 2) == Some("<"));
+        let (kind, owner, write) =
+            if text(index + 1) == Some("!") && matches!(text(index + 2), Some("(" | "[" | "{")) {
+                ("macro", None, false)
+            } else if called {
+                let kind = if after_dot || after_path {
+                    "method_call"
+                } else {
+                    "call"
+                };
+                (kind, None, false)
+            } else if field_after_dot(&tokens, index) {
+                let owner = if index >= 2 && text(index - 2) == Some("self") {
+                    in_impl()
+                } else {
+                    None
+                };
+                ("field_access", owner, writes_field(&tokens, index))
+            } else if let Some(written) = literal_field(&tokens, &enclosing, index) {
+                let owner = if written == "Self" || written.starts_with("Self::") {
+                    in_impl().map(|owner| format!("{owner}{}", &written[4..]))
+                } else {
+                    Some(written)
+                };
+                ("struct_field", owner, false)
+            } else {
+                ("mention", None, false)
+            };
+        out.push(Use {
+            line: token.line,
+            kind,
+            owner,
+            write,
+        });
+    }
+    out
+}
+
 /// The names a `use` tree imports, from `start` (just after `use`) to its
 /// `;`. Returns the index after the `;`.
 fn use_tree(tokens: &[Token], start: usize, found: &mut dyn FnMut(&str, u32)) -> usize {
@@ -379,7 +820,7 @@ fn use_tree(tokens: &[Token], start: usize, found: &mut dyn FnMut(&str, u32)) ->
     let mut depth = 0i32;
     while index < tokens.len() {
         let token = &tokens[index];
-        match token.text.as_str() {
+        match token.text {
             ";" if depth <= 0 => return index + 1,
             "{" => depth += 1,
             "}" => {
@@ -391,7 +832,7 @@ fn use_tree(tokens: &[Token], start: usize, found: &mut dyn FnMut(&str, u32)) ->
             _ if token.ident => {
                 // A leaf is a name not followed by `::`. In `X as Y` the
                 // import is X; Y is a local alias.
-                let next = tokens.get(index + 1).map(|next| next.text.as_str());
+                let next = tokens.get(index + 1).map(|next| next.text);
                 let alias = index
                     .checked_sub(1)
                     .is_some_and(|before| tokens[before].text == "as");
@@ -406,8 +847,8 @@ fn use_tree(tokens: &[Token], start: usize, found: &mut dyn FnMut(&str, u32)) ->
     index
 }
 
-struct Token {
-    text: String,
+struct Token<'a> {
+    text: &'a str,
     ident: bool,
     line: u32,
     /// The first token on its line, and its column there.
@@ -415,15 +856,23 @@ struct Token {
     column: u32,
 }
 
-/// Identifiers, `::`, and single punctuation, with 1-based lines.
-fn tokenize(code: &[char]) -> Vec<Token> {
-    let mut tokens: Vec<Token> = Vec::new();
+/// Identifiers, `::`, and single punctuation, with 1-based lines. Token
+/// text borrows `code` (2.5: no allocation per token).
+fn tokenize(code: &str) -> Vec<Token<'_>> {
+    let chars: Vec<(usize, char)> = code.char_indices().collect();
+    let byte = |at: usize| {
+        chars
+            .get(at)
+            .map(|(offset, _)| *offset)
+            .unwrap_or(code.len())
+    };
+    let mut tokens: Vec<Token> = Vec::with_capacity(chars.len() / 4);
     let mut line = 1u32;
     let mut line_start = 0usize;
     let mut index = 0usize;
     let first_on = |tokens: &[Token], line: u32| tokens.last().is_none_or(|last| last.line != line);
-    while index < code.len() {
-        let ch = code[index];
+    while index < chars.len() {
+        let ch = chars[index].1;
         if ch == '\n' {
             line += 1;
             index += 1;
@@ -436,12 +885,13 @@ fn tokenize(code: &[char]) -> Vec<Token> {
         }
         if ch.is_alphabetic() || ch == '_' {
             let start = index;
-            while index < code.len() && (code[index].is_alphanumeric() || code[index] == '_') {
+            while index < chars.len() && (chars[index].1.is_alphanumeric() || chars[index].1 == '_')
+            {
                 index += 1;
             }
             // `r#name` raw identifiers.
-            let text: String = code[start..index].iter().collect();
-            if text == "r" && code.get(index) == Some(&'#') {
+            let text = &code[byte(start)..byte(index)];
+            if text == "r" && chars.get(index).map(|(_, ch)| *ch) == Some('#') {
                 index += 1;
                 continue;
             }
@@ -455,30 +905,25 @@ fn tokenize(code: &[char]) -> Vec<Token> {
             continue;
         }
         if ch.is_ascii_digit() {
-            while index < code.len() && (code[index].is_alphanumeric() || code[index] == '_') {
+            while index < chars.len() && (chars[index].1.is_alphanumeric() || chars[index].1 == '_')
+            {
                 index += 1;
             }
             continue;
         }
-        if ch == ':' && code.get(index + 1) == Some(&':') {
-            tokens.push(Token {
-                first: first_on(&tokens, line),
-                column: (index - line_start) as u32,
-                text: "::".to_string(),
-                ident: false,
-                line,
-            });
-            index += 2;
-            continue;
-        }
+        let width = if ch == ':' && chars.get(index + 1).map(|(_, ch)| *ch) == Some(':') {
+            2
+        } else {
+            1
+        };
         tokens.push(Token {
             first: first_on(&tokens, line),
             column: (index - line_start) as u32,
-            text: ch.to_string(),
+            text: &code[byte(index)..byte(index + width)],
             ident: false,
             line,
         });
-        index += 1;
+        index += width;
     }
     tokens
 }
@@ -486,15 +931,44 @@ fn tokenize(code: &[char]) -> Vec<Token> {
 /// The chunk with comments and string and char literals blanked (newlines
 /// kept, so line numbers hold).
 pub(crate) fn strip(content: &str) -> Vec<char> {
-    let chars: Vec<char> = content.chars().collect();
-    let mut out = chars.clone();
-    let blank = |out: &mut Vec<char>, from: usize, to: usize| {
-        for slot in out.iter_mut().take(to).skip(from) {
-            if *slot != '\n' {
-                *slot = ' ';
-            }
+    let (chars, regions) = literal_regions(content);
+    let mut out = chars;
+    for (from, to, _) in regions {
+        blank(&mut out, from, to);
+    }
+    out
+}
+
+/// The chunk with everything but string literals blanked (newlines kept):
+/// the text a scan for a name used as a string reads (2.5 `named_in`).
+pub(crate) fn strings_only(content: &str) -> Vec<char> {
+    let (chars, regions) = literal_regions(content);
+    let mut out: Vec<char> = chars
+        .iter()
+        .map(|ch| if *ch == '\n' { '\n' } else { ' ' })
+        .collect();
+    for (from, to, string) in regions {
+        if string {
+            let to = to.min(chars.len());
+            out[from..to].copy_from_slice(&chars[from..to]);
         }
-    };
+    }
+    out
+}
+
+fn blank(out: &mut [char], from: usize, to: usize) {
+    for slot in out.iter_mut().take(to).skip(from) {
+        if *slot != '\n' {
+            *slot = ' ';
+        }
+    }
+}
+
+/// The characters of `content` and its comment and literal regions as
+/// `(from, to, is_string)`; char literals count as strings.
+fn literal_regions(content: &str) -> (Vec<char>, Vec<(usize, usize, bool)>) {
+    let chars: Vec<char> = content.chars().collect();
+    let mut regions: Vec<(usize, usize, bool)> = Vec::new();
     let mut index = 0usize;
     while index < chars.len() {
         let ch = chars[index];
@@ -505,7 +979,7 @@ pub(crate) fn strip(content: &str) -> Vec<char> {
                 .position(|item| *item == '\n')
                 .map(|at| index + at)
                 .unwrap_or(chars.len());
-            blank(&mut out, index, end);
+            regions.push((index, end, false));
             index = end;
             continue;
         }
@@ -526,7 +1000,7 @@ pub(crate) fn strip(content: &str) -> Vec<char> {
                     at += 1;
                 }
             }
-            blank(&mut out, index, at.min(chars.len()));
+            regions.push((index, at.min(chars.len()), false));
             index = at;
             continue;
         }
@@ -557,7 +1031,7 @@ pub(crate) fn strip(content: &str) -> Vec<char> {
                     }
                     end += 1;
                 }
-                blank(&mut out, index, end.min(chars.len()));
+                regions.push((index, end.min(chars.len()), true));
                 index = end;
                 continue;
             }
@@ -571,7 +1045,7 @@ pub(crate) fn strip(content: &str) -> Vec<char> {
                 at += 1;
             }
             let end = (at + 1).min(chars.len());
-            blank(&mut out, index, end);
+            regions.push((index, end, true));
             index = end;
             continue;
         }
@@ -589,14 +1063,14 @@ pub(crate) fn strip(content: &str) -> Vec<char> {
                 None
             };
             if let Some(close) = close {
-                blank(&mut out, index, close + 1);
+                regions.push((index, close + 1, true));
                 index = close + 1;
                 continue;
             }
         }
         index += 1;
     }
-    out
+    (chars, regions)
 }
 
 #[cfg(test)]
@@ -823,6 +1297,133 @@ foo::{x};
                 .count(),
             1
         );
+    }
+
+    /// 2.5: Specula's "every place a reference is added or dropped" on four
+    /// fields took five greps: fields were not symbols.
+    #[test]
+    fn struct_and_variant_fields_are_definitions_and_uses_are_references() {
+        let content = "pub struct Index<T: Clone> where T: Default {
+    pub tasks: Vec<T>,
+    #[allow(dead_code)]
+    pub(crate) notes: Vec<String>,
+    f: fn(u32) -> u32,
+}
+pub enum Shape { Circle { radius: f32 }, Unit, Pair(u32, u32) }
+pub struct Tuple(u32);
+impl<T: Clone + Default> Index<T> {
+    fn add(&mut self, t: T) {
+        self.tasks.push(t);
+        let n = 0..self.notes.len();
+        let Index { tasks, .. } = self;
+        let s = Shape::Circle { radius: 1.0 };
+        let r = s.radius;
+    }
+}
+";
+        let rows = kinds(content);
+        for (name, line) in [("tasks", 2), ("notes", 4), ("f", 5), ("radius", 7)] {
+            assert!(
+                has(&rows, name, "field", "definition", line),
+                "{name}: {rows:?}"
+            );
+        }
+        let all = super::super::extract_all("rs", content);
+        let owner = |name: &str| {
+            all.iter()
+                .find(|hit| hit.name == name && hit.kind == "field")
+                .and_then(|hit| hit.container.clone())
+        };
+        assert_eq!(owner("tasks").as_deref(), Some("Index"));
+        assert_eq!(owner("radius").as_deref(), Some("Shape::Circle"));
+        // `self.tasks` is the first use of `tasks` in the chunk; one row per
+        // name and chunk, as for every other reference.
+        assert!(
+            has(&rows, "tasks", "field_access", "reference", 11),
+            "{rows:?}"
+        );
+        assert!(
+            has(&rows, "notes", "field_access", "reference", 12),
+            "{rows:?}"
+        );
+        assert!(
+            has(&rows, "radius", "struct_field", "reference", 14),
+            "{rows:?}"
+        );
+        // Not fields: a where bound, a tuple struct, a method, a variant
+        // without fields, a fn type's argument.
+        for not in ["T", "Tuple", "push", "len", "Unit", "u32"] {
+            assert!(
+                rows.iter().all(|row| row.0 != not || row.1 != "field"),
+                "{not}: {rows:?}"
+            );
+        }
+        assert!(
+            rows.iter()
+                .all(|row| !(row.1 == "field_access" && (row.0 == "len" || row.0 == "push"))),
+            "{rows:?}"
+        );
+    }
+
+    #[test]
+    fn uses_name_the_owner_where_the_code_writes_it() {
+        let content = "struct Index { tasks: Vec<u32> }
+struct Other { tasks: u32 }
+impl Index {
+    fn add(&mut self, t: u32) {
+        self.tasks.push(t);
+        self.tasks = Vec::new();
+        let n = self.tasks.len();
+        let x = other.tasks;
+        let me = Self { tasks: Vec::new() };
+        let o = Other { tasks: 1 };
+        borrow(&mut self.tasks);
+        tasks(1);
+        if self.tasks == x {}
+    }
+}
+fn build() -> Index { Index { tasks } }
+fn range(v: &[u32]) { let s = &v[0..tasks]; }
+// self.tasks in a comment
+";
+        let uses = uses(content, "tasks");
+        let at = |line: u32| {
+            uses.iter()
+                .find(|one| one.line == line)
+                .unwrap_or_else(|| panic!("line {line}: {uses:?}"))
+        };
+        let owned = |line: u32, kind: &str, owner: Option<&str>, write: bool| {
+            let one = at(line);
+            assert_eq!(
+                (one.kind, one.owner.as_deref(), one.write),
+                (kind, owner, write),
+                "line {line}: {uses:?}"
+            );
+        };
+        owned(5, "field_access", Some("Index"), true);
+        owned(6, "field_access", Some("Index"), true);
+        owned(7, "field_access", Some("Index"), false);
+        owned(8, "field_access", None, false);
+        owned(9, "struct_field", Some("Index"), false);
+        owned(10, "struct_field", Some("Other"), false);
+        owned(11, "field_access", Some("Index"), true);
+        owned(12, "call", None, false);
+        owned(13, "field_access", Some("Index"), false);
+        // `-> Index { Index { tasks } }`: the body brace is not a literal.
+        owned(16, "struct_field", Some("Index"), false);
+        owned(17, "mention", None, false);
+        assert!(uses.iter().all(|one| one.line != 18), "{uses:?}");
+    }
+
+    #[test]
+    fn strings_only_keeps_string_literals() {
+        let text: String =
+            strings_only("let a = \"model_export\"; // model_export\nmodel_export(1);\n")
+                .into_iter()
+                .collect();
+        assert!(text.contains("\"model_export\""), "{text:?}");
+        assert_eq!(text.matches("model_export").count(), 1, "{text:?}");
+        assert_eq!(text.lines().count(), 2);
     }
 
     #[test]

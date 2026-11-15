@@ -295,7 +295,8 @@ impl Engine {
         let mut found: std::collections::HashMap<&str, (Vec<String>, i32, i32)> =
             std::collections::HashMap::new();
         for sym in &self.store.state.symbols {
-            if sym.role != "definition" {
+            // 2.5: a struct field is not what a search for its name means.
+            if sym.role != "definition" || sym.kind == "field" {
                 continue;
             }
             let Some(name) = names
@@ -436,6 +437,7 @@ impl Engine {
         for sym in &self.store.state.symbols {
             // SQLite LOWER(name) folds ASCII only.
             if sym.role != "definition"
+                || sym.kind == "field"
                 || !wanted
                     .iter()
                     .any(|want| sym.name.eq_ignore_ascii_case(want))
@@ -961,7 +963,13 @@ impl Engine {
             _ => true,
         };
         for ident in py_query_identifiers(text).into_iter().take(3) {
-            let refs = self.find_references(&ident);
+            let refs = self.find_references_with(
+                &ident,
+                &super::RefOptions {
+                    named_in: Some(false),
+                    ..super::RefOptions::default()
+                },
+            );
             for key in ["definitions", "references"] {
                 let Some(Value::Array(rows)) = field_owned(&refs, key) else {
                     continue;
@@ -1208,81 +1216,6 @@ impl Engine {
         ])
     }
 
-    pub fn find_references(&self, name: &str) -> Value {
-        self.find_references_in(name, false)
-    }
-
-    /// 2.3: references are kept to the languages the symbol is defined in
-    /// (a Rust `crc32` does not list Python's `zlib.crc32` calls) unless
-    /// `all_languages`. A symbol with no definition, or one defined in a
-    /// file of no known language, is not narrowed.
-    pub fn find_references_in(&self, name: &str, all_languages: bool) -> Value {
-        let defs = self.reference_rows(name, true);
-        let mut refs = self.reference_rows(name, false);
-        let languages: Vec<&str> = defs
-            .iter()
-            .map(|row| language_of(&crate::store::string_field(row, "document_path")))
-            .collect();
-        let mut omitted = 0usize;
-        if !all_languages && !languages.is_empty() && !languages.contains(&"") {
-            let before = refs.len();
-            refs.retain(|row| {
-                languages.contains(&language_of(&crate::store::string_field(
-                    row,
-                    "document_path",
-                )))
-            });
-            omitted = before - refs.len();
-        }
-        // 2.4: a Rust symbol also gets every other line of code that names
-        // it as a word (comments and strings skipped), so the answer has
-        // grep's recall: a call in a chunk that already names it, a fn
-        // passed as a value, `Self::name`. The symbol rows give the first
-        // line per chunk; these rows give the rest.
-        if languages.contains(&"rust") {
-            let extra = self.rust_mentions(name, &defs, &refs);
-            refs.extend(extra);
-            refs.sort_by(|left, right| {
-                crate::store::string_field(left, "document_path")
-                    .cmp(&crate::store::string_field(right, "document_path"))
-                    .then(
-                        crate::store::int_field(left, "line_number")
-                            .cmp(&crate::store::int_field(right, "line_number")),
-                    )
-            });
-        }
-        let total = (defs.len() + refs.len()) as i64;
-        let verdict = if defs.is_empty() && refs.is_empty() {
-            "not_found"
-        } else if !defs.is_empty() && refs.is_empty() {
-            "unreferenced"
-        } else if defs.is_empty() {
-            "external"
-        } else {
-            "referenced"
-        };
-        let mut out = vec![
-            ("symbol", Value::string(name)),
-            ("verdict", Value::string(verdict)),
-            ("definitions", Value::Array(defs)),
-            ("references", Value::Array(refs)),
-            ("total", Value::Int(total)),
-            ("symbol_index", self.symbol_index()),
-            (
-                "guidance",
-                if total == 0 {
-                    Value::string(guidance_empty(&self.symbol_index()))
-                } else {
-                    Value::Null
-                },
-            ),
-        ];
-        if omitted > 0 {
-            out.push(("other_language_references", Value::Int(omitted as i64)));
-        }
-        Value::object(out)
-    }
-
     pub fn impact(&self, symbol: &str) -> Value {
         self.impact_radius(symbol, None, None, 2, false)
     }
@@ -1290,6 +1223,42 @@ impl Engine {
     /// Compact blast radius. The shape matches 1.5.2 `impact_radius` with
     /// `compact=True` and `direction="dependents"`.
     pub fn impact_radius(
+        &self,
+        symbol: &str,
+        document_path: Option<&str>,
+        chunk_id: Option<&str>,
+        depth: usize,
+        summary_mode: bool,
+    ) -> Value {
+        self.impact_radius_with(symbol, document_path, chunk_id, depth, summary_mode, None)
+    }
+
+    /// `impact_radius` with 2.5's `named_in` for a symbol (`None`: scan
+    /// names that are not one plain word, `Some(true)` any, `Some(false)`
+    /// none): the files of other languages and the string literals that
+    /// name it, which a rename breaks and the symbol graph cannot see.
+    pub fn impact_radius_with(
+        &self,
+        symbol: &str,
+        document_path: Option<&str>,
+        chunk_id: Option<&str>,
+        depth: usize,
+        summary_mode: bool,
+        named_in: Option<bool>,
+    ) -> Value {
+        let mut value = self.impact_core(symbol, document_path, chunk_id, depth, summary_mode);
+        let by_symbol = chunk_id.is_none_or(str::is_empty);
+        if by_symbol {
+            if let (Some(named), Value::Object(pairs)) =
+                (self.named_in_for(symbol, named_in), &mut value)
+            {
+                pairs.push(("named_in".to_string(), named));
+            }
+        }
+        value
+    }
+
+    fn impact_core(
         &self,
         symbol: &str,
         document_path: Option<&str>,
@@ -2111,7 +2080,7 @@ impl Engine {
         ]))
     }
 
-    fn symbol_index(&self) -> Value {
+    pub(super) fn symbol_index(&self) -> Value {
         let sym_n = (self.store.state.symbols.len() + self.store.state.dynamic.len()) as i64;
         let doc_n = self.store.state.documents.len() as i64;
         Value::object(vec![
@@ -2176,6 +2145,12 @@ impl Engine {
                     ),
                     ("dynamic".to_string(), Value::Bool(dynamic)),
                 ];
+                // 2.5: a field says the type that declares it.
+                if sym.kind == "field" {
+                    if let Some(owner) = &sym.container {
+                        row.push(("owner".to_string(), Value::string(owner)));
+                    }
+                }
                 if shadowed {
                     row.push((
                         "definition_index".to_string(),
@@ -2210,86 +2185,7 @@ impl Engine {
         rows
     }
 
-    /// The lines of Rust code that name `name` as a word and that neither
-    /// a definition nor a reference row already gives, as reference rows.
-    /// `kind` says how the line uses it: `call` (`name(`), `method_call`
-    /// (`.name(` or `::name(`), `macro` (`name!`), else `mention`.
-    fn rust_mentions(&self, name: &str, defs: &[Value], refs: &[Value]) -> Vec<Value> {
-        if name.is_empty() || !name.chars().all(|ch| ch.is_alphanumeric() || ch == '_') {
-            return Vec::new();
-        }
-        let key = |row: &Value| {
-            (
-                crate::store::string_field(row, "document_path"),
-                crate::store::int_field(row, "line_number"),
-            )
-        };
-        let mut known: HashSet<(String, i64)> = defs.iter().chain(refs).map(key).collect();
-        let word = |ch: char| ch.is_alphanumeric() || ch == '_';
-        let target: Vec<char> = name.chars().collect();
-        let mut out = Vec::new();
-        for chunk in &self.store.state.chunks {
-            if language_of(&chunk.path) != "rust" || !chunk.content.contains(name) {
-                continue;
-            }
-            let code = crate::symbols::rust_code(&chunk.content);
-            let mut line = 1u32;
-            let mut at = 0usize;
-            while at < code.len() {
-                if code[at] == '\n' {
-                    line += 1;
-                    at += 1;
-                    continue;
-                }
-                let starts = code[at] == target[0]
-                    && code.len() - at >= target.len()
-                    && code[at..at + target.len()] == target[..]
-                    && !at.checked_sub(1).is_some_and(|before| word(code[before]))
-                    && !code
-                        .get(at + target.len())
-                        .is_some_and(|after| word(*after));
-                if !starts {
-                    at += 1;
-                    continue;
-                }
-                let file_line = crate::chunk::lines::absolute(&chunk.line_map, line) as i64;
-                if known.insert((chunk.path.clone(), file_line)) {
-                    let before = code[..at]
-                        .iter()
-                        .rev()
-                        .find(|ch| !ch.is_whitespace())
-                        .copied();
-                    let after = code[at + target.len()..]
-                        .iter()
-                        .find(|ch| !ch.is_whitespace())
-                        .copied();
-                    let kind = match (before, after) {
-                        (_, Some('!')) => "macro",
-                        (Some('.'), Some('(')) => "method_call",
-                        (Some(':'), Some('(')) => "method_call",
-                        (_, Some('(')) => "call",
-                        _ => "mention",
-                    };
-                    out.push(Value::object(vec![
-                        ("symbol", Value::string(name)),
-                        ("kind", Value::string(kind)),
-                        ("chunk_id", Value::string(&chunk.id)),
-                        ("document_path", Value::string(&chunk.path)),
-                        ("line_number", Value::Int(file_line)),
-                        (
-                            "content_preview",
-                            Value::string(chunk.content.chars().take(200).collect::<String>()),
-                        ),
-                        ("dynamic", Value::Bool(false)),
-                    ]));
-                }
-                at += target.len();
-            }
-        }
-        out
-    }
-
-    fn reference_rows(&self, name: &str, definitions: bool) -> Vec<Value> {
+    pub(super) fn reference_rows(&self, name: &str, definitions: bool) -> Vec<Value> {
         let role = if definitions {
             "definition"
         } else {
@@ -2353,7 +2249,7 @@ impl Engine {
                             String::new()
                         }
                     });
-                Value::object(vec![
+                let mut row = vec![
                     ("symbol", Value::string(&sym.name)),
                     ("kind", Value::string(&sym.kind)),
                     ("chunk_id", Value::string(&sym.chunk_id)),
@@ -2361,7 +2257,14 @@ impl Engine {
                     ("line_number", Value::Int(sym.line as i64)),
                     ("content_preview", Value::string(preview)),
                     ("dynamic", Value::Bool(dynamic)),
-                ])
+                ];
+                // 2.5: a field says the type that declares it.
+                if sym.kind == "field" {
+                    if let Some(owner) = &sym.container {
+                        row.push(("owner", Value::string(owner)));
+                    }
+                }
+                Value::object(row)
             })
             .chain(dynamic)
             .collect()
@@ -2485,7 +2388,7 @@ fn semantic_score(names: &HashSet<String>, symbols: &[crate::store::Symbol]) -> 
         }
         let mut files = HashSet::new();
         for sym in symbols {
-            if sym.name == *name && sym.role == "definition" {
+            if sym.name == *name && sym.role == "definition" && sym.kind != "field" {
                 files.insert(sym.path.as_str());
             }
         }
@@ -2542,7 +2445,7 @@ fn edge_block(edges: &[crate::store::Edge], id: &str) -> Option<Value> {
 }
 
 /// The language family of a file, by extension; "" when none is known.
-fn language_of(path: &str) -> &'static str {
+pub(super) fn language_of(path: &str) -> &'static str {
     let extension = path
         .rsplit(['/', '\\'])
         .next()
@@ -2565,7 +2468,7 @@ fn language_of(path: &str) -> &'static str {
     }
 }
 
-fn guidance_empty(index: &Value) -> String {
+pub(super) fn guidance_empty(index: &Value) -> String {
     let status = crate::store::string_field(index, "status");
     let docs = crate::store::int_field(index, "indexed_documents");
     if status == "ready" {

@@ -610,6 +610,18 @@ fn parity(binary: &str, python: &str) -> Option<usize> {
         let mut right_n = walk(&unwrap(&out_p), &root_s, &py_s, "");
         blank_graph(&mut left_n);
         blank_graph(&mut right_n);
+        // MIGRATION.md 2.5: the CLI answers carry `named_in` too.
+        let tool_name = match &*argv[0] {
+            "find-references" => "find_references",
+            "impact-radius" => "impact_radius",
+            _ => "",
+        };
+        if !tool_name.is_empty() {
+            let (note, _) = documented(tool_name, &mut left_n, &mut right_n);
+            if !note.is_empty() {
+                println!("documented cli {}: {note}", repr_list(&argv));
+            }
+        }
         let mut bad = Vec::new();
         let (left_n, right_n) = timestamps_ok(&left_n, &right_n, &mut bad);
         if !py_eq(&left_n, &right_n) {
@@ -1415,6 +1427,27 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
         if python_refused && rust_took && (python_holder.is_empty() || python_holder == "AGENT") {
             notes.push("index-time lock yields to an explicit acquire".to_string());
             skip = true;
+        }
+    }
+    // MIGRATION.md 2.5: find_references and impact_radius add `named_in`
+    // (other-language files and string literals that name the symbol),
+    // find_references `fields` for a struct field and a `note` when only
+    // named_in rows name an unreferenced symbol.
+    if (name == "find_references" || name == "impact_radius") && left.is_dict() {
+        let mut added = Vec::new();
+        for key in ["named_in", "fields", "note"] {
+            if left.get(key).is_some() && matches!(right.get(key), None | Some(Py::None)) {
+                if let Py::Dict(pairs) = &mut *left {
+                    pairs.retain(|(name, _)| name != key);
+                }
+                if let Py::Dict(pairs) = &mut *right {
+                    pairs.retain(|(name, _)| name != key);
+                }
+                added.push(key);
+            }
+        }
+        if !added.is_empty() {
+            notes.push(format!("2.5 adds {}", added.join(", ")));
         }
     }
     if name == "doctor" && left.is_dict() && right.is_dict() {
