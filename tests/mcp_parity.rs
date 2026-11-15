@@ -610,6 +610,18 @@ fn parity(binary: &str, python: &str) -> Option<usize> {
         let mut right_n = walk(&unwrap(&out_p), &root_s, &py_s, "");
         blank_graph(&mut left_n);
         blank_graph(&mut right_n);
+        // MIGRATION.md 2.5: the CLI answers carry `named_in` too.
+        let tool_name = match &*argv[0] {
+            "find-references" => "find_references",
+            "impact-radius" => "impact_radius",
+            _ => "",
+        };
+        if !tool_name.is_empty() {
+            let (note, _) = documented(tool_name, &mut left_n, &mut right_n);
+            if !note.is_empty() {
+                println!("documented cli {}: {note}", repr_list(&argv));
+            }
+        }
         let mut bad = Vec::new();
         let (left_n, right_n) = timestamps_ok(&left_n, &right_n, &mut bad);
         if !py_eq(&left_n, &right_n) {
@@ -1363,6 +1375,12 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
     if extra != 0 && rust_rows(left, right, extra) {
         notes.push(format!("{extra} more Rust reference rows (2.3)"));
     }
+    let extra_defs = EXTRA_RUST_DEFINITIONS.load(std::sync::atomic::Ordering::Relaxed);
+    if extra_defs != 0 && rust_definitions(left, right, extra_defs, extra - extra_defs) {
+        notes.push(format!(
+            "{extra_defs} more Rust definitions (2.4 items, 2.5 fields)"
+        ));
+    }
     // rust_args asks map for max_documents=0 (every document); 1.5.2 with
     // no cap has no documents_omitted.
     if name == "map" && matches!(right.get("documents_omitted"), None | Some(Py::None)) {
@@ -1415,6 +1433,27 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
         if python_refused && rust_took && (python_holder.is_empty() || python_holder == "AGENT") {
             notes.push("index-time lock yields to an explicit acquire".to_string());
             skip = true;
+        }
+    }
+    // MIGRATION.md 2.5: find_references and impact_radius add `named_in`
+    // (other-language files and string literals that name the symbol),
+    // find_references `fields` for a struct field and a `note` when only
+    // named_in rows name an unreferenced symbol.
+    if (name == "find_references" || name == "impact_radius") && left.is_dict() {
+        let mut added = Vec::new();
+        for key in ["named_in", "fields", "note"] {
+            if left.get(key).is_some() && matches!(right.get(key), None | Some(Py::None)) {
+                if let Py::Dict(pairs) = &mut *left {
+                    pairs.retain(|(name, _)| name != key);
+                }
+                if let Py::Dict(pairs) = &mut *right {
+                    pairs.retain(|(name, _)| name != key);
+                }
+                added.push(key);
+            }
+        }
+        if !added.is_empty() {
+            notes.push(format!("2.5 adds {}", added.join(", ")));
         }
     }
     if name == "doctor" && left.is_dict() && right.is_dict() {
@@ -1487,6 +1526,58 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
 /// references `symbols::extract_all` finds and 1.5.2's `extract` does not
 /// (MIGRATION.md). Set per scenario; 0 for a tree without `.rs` files.
 static EXTRA_RUST_SYMBOLS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Definition rows `extract_all` adds over 1.5.2's `extract` in the
+/// scenario's tree: the items 1.5.2's line patterns miss (2.4) and struct
+/// fields (2.5).
+static EXTRA_RUST_DEFINITIONS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+fn extra_rust_definitions(tree: &Path) -> i64 {
+    let mut extra = 0i64;
+    let mut stack = vec![tree.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let text = fs::read_to_string(&path).unwrap_or_default();
+                let count = |hits: Vec<stele_context::symbols::Hit>| {
+                    hits.iter().filter(|hit| hit.role == "definition").count() as i64
+                };
+                extra += count(stele_context::symbols::extract_all("rs", &text))
+                    - count(stele_context::symbols::extract("rs", &text));
+            }
+        }
+    }
+    extra
+}
+
+/// Equalize `definition_count` when it differs by exactly those rows, and
+/// `reference_count` when it differs by the other extra rows (`refs`).
+fn rust_definitions(left: &mut Py, right: &Py, extra: i64, refs: i64) -> bool {
+    let mut changed = false;
+    if let (Py::Dict(lp), Py::Dict(rp)) = (left, right) {
+        for (key, value) in lp.iter_mut() {
+            let Some(other) = lookup(rp, key) else {
+                continue;
+            };
+            let differs = value.as_float() - other.as_float();
+            if (key == "definition_count" && differs == extra as f64)
+                || (key == "reference_count" && differs == refs as f64)
+            {
+                *value = other.clone();
+                changed = true;
+            } else if matches!(value, Py::Dict(_)) {
+                changed |= rust_definitions(value, other, extra, refs);
+            }
+        }
+    }
+    changed
+}
 
 fn extra_rust_symbols(tree: &Path) -> i64 {
     let mut extra = 0i64;
@@ -2385,6 +2476,10 @@ fn compare_scenario(
     steps: &[Step],
     extra_check: impl Fn(&[Option<Outcome>], &[Option<Outcome>]) -> usize,
 ) -> usize {
+    EXTRA_RUST_DEFINITIONS.store(
+        extra_rust_definitions(tree),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     EXTRA_RUST_SYMBOLS.store(
         extra_rust_symbols(tree),
         std::sync::atomic::Ordering::Relaxed,

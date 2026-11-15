@@ -71,6 +71,9 @@ struct Parsed {
     mode: Option<String>,
     summary_mode: bool,
     all_languages: bool,
+    /// 2.5 find-references `--owner TYPE` and `--named-in` / `--no-named-in`.
+    owner: Option<String>,
+    named_in: Option<bool>,
     chunk_id: Option<String>,
     top_n: Option<usize>,
     min_tokens: Option<usize>,
@@ -363,13 +366,22 @@ impl Parsed {
                 self.max_result_tokens,
             ),
             "find-definition" => Ok(engine.find_definition(positional)),
-            "find-references" => Ok(engine.find_references_in(positional, self.all_languages)),
-            "impact-radius" => Ok(engine.impact_radius(
+            "find-references" => Ok(engine.find_references_with(
+                positional,
+                &crate::engine::RefOptions {
+                    all_languages: self.all_languages,
+                    owner: self.owner.clone(),
+                    field_limit: self.limit,
+                    named_in: self.named_in,
+                },
+            )),
+            "impact-radius" => Ok(engine.impact_radius_with(
                 self.symbol.as_deref().unwrap_or(positional),
                 self.document.as_deref(),
                 self.chunk_id.as_deref(),
                 self.depth.unwrap_or(2),
                 self.summary_mode,
+                self.named_in,
             )),
             "coupling" => Ok(engine.coupling_mode(
                 positional,
@@ -476,6 +488,8 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
         mode: None,
         summary_mode: false,
         all_languages: false,
+        owner: None,
+        named_in: None,
         chunk_id: None,
         top_n: None,
         min_tokens: None,
@@ -537,6 +551,9 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
                 "--force" | "--force-reindex" => parsed.force = true,
                 "--summary-mode" => parsed.summary_mode = true,
                 "--all-languages" => parsed.all_languages = true,
+                "--named-in" => parsed.named_in = Some(true),
+                "--no-named-in" => parsed.named_in = Some(false),
+                "--owner" => parsed.owner = Some(take_value(args, &mut index)?),
                 "--no-summary-mode" => parsed.summary_mode = false,
                 "--regex" => parsed.regex = true,
                 "--working-tree" => parsed.working_tree = true,
@@ -734,6 +751,8 @@ Flags: --storage-dir --json --regex --working-tree --confirm --path-prefix
 --no-scan-new --force --search-mode --symbol --port --host --blocking
 --chunk-id --max-documents --tags --content --type --meta
 --worktree PATH (read commands: answer for that git worktree of the project)
+--owner TYPE (find-references: one type's field rows; --limit caps field rows, 0 = all)
+--named-in / --no-named-in (find-references, impact-radius: force or skip named_in)
 "
     )
 }
@@ -761,7 +780,7 @@ mod tests {
     fn version_line_is_twenty_bytes() {
         let response = dispatch(&["--version".to_string()]);
         assert_eq!(response.code, 0);
-        assert_eq!(response.stdout, b"stele-context 2.4.0\n");
+        assert_eq!(response.stdout, b"stele-context 2.5.0\n");
         assert_eq!(response.stdout.len(), 20);
     }
 
@@ -773,7 +792,7 @@ mod tests {
         let value = json::parse(text.trim_end()).unwrap();
         let rendered = json::to_string(&value);
         assert!(rendered.contains("\"ok\":true"));
-        assert!(rendered.contains("\"version\":\"2.4.0\""));
+        assert!(rendered.contains("\"version\":\"2.5.0\""));
         assert!(rendered.contains("\"implementation\":\"rust\""));
         assert!(rendered.contains("No 2.0 store yet") || rendered.contains("native store"));
     }

@@ -101,7 +101,7 @@ For identifiers, renames, and audit proof: **grep to find, grep to cache**. Ever
 | `doctor` | Session start / index health / next_steps |
 | `query` | Broad natural-language questions (universal entry; merges search + symbols + grep) |
 | `agent_grep` | Finding usages, auditing code. Scope-aware grep with a token budget |
-| `find_references` | Looking up a specific symbol's definition and all callers |
+| `find_references` | Looking up a specific symbol's definition and all callers (Rust struct fields too; `named_in` lists scripts and docs that name it) |
 | `find_definition` | Finding where a symbol is defined |
 | `get_context` | Getting full file content from cache (records read in session) |
 | `get_search_history` | Checking what you already grep'd / queried this session |

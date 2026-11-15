@@ -26,6 +26,7 @@ Cold-start ritual (all on **MCP lite** by default):
 ## Retrieval discipline
 
 - **When Stele beats grep (2.4).** `find_definition` for "where is X defined" (definition rows only, `macro_rules!` and `pub(crate) fn` included); `find_references` for "who uses X" / "is X dead" (definition first, every code line that names X, a verdict); `impact_radius` for what a change breaks; `search` puts the defining chunk first. Grep for text in strings or comments.
+- **Fields and named_in (2.5).** `find_references` covers Rust struct and enum-variant fields: the definition (kind `field`, `owner`), reads and writes (`field_access`, `struct_field`, `write: true`), grouped by the type where the line names it (`self.x` in `impl T`, `T { x }`); other receivers are `name_only` (no type inference; macro-generated fields are not seen). `owner=T` keeps one type; field and mention rows cap at 50 (`full=true` for all). `find_references` and `impact_radius` add `named_in`: other-language files (scripts, docs) and string literals that name the symbol, which the compiler never sees. Skipped for short or plain-word names (`named_in=true` scans anyway).
 - **Worktrees (2.4).** In a git worktree, pass `worktree_root=<absolute path>` to read tools (CLI `--worktree`): main index plus an overlay of the files that differ, re-checked every call. Replies add `worktree` and `overlay_files`.
 
 - **Start with `query`** for any broad natural-language question; it merges semantic search, symbol graph, and text grep into one result list.
@@ -144,7 +145,7 @@ bash scripts/fetch_corpora.sh
   --binary target/release/stele-context --group b1 --runs 10 --check-floor
 ```
 
-`stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.4.0`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. Full mode runs the 18 old singleton names by routing them to the current tools.
+`stele-context` prints JSON by default (`--human` for text). `--version` prints `stele-context 2.5.0`. `stele-context serve-mcp` speaks newline JSON-RPC. Lite lists 25 tools, standard 43, full 61. Full mode runs the 18 old singleton names by routing them to the current tools.
 
 Fixture goldens live in `parity/goldens/`. `cargo test` checks chunks and symbols against `fixtures.json`. `bash scripts/fetch_corpora.sh` fills `parity/.cache` so the rich 13.9.4 and flask 3.1.0 round-trip tests run. Historical timings are `bench/baseline/` and `bench/rust-b1.json`.
 

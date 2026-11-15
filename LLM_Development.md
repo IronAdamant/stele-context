@@ -4,6 +4,14 @@ Chronological record of development activity on Stele Context, maintained for LL
 
 **Currency:** This file is a **historical journal**. For current product truth use [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), and [STABILITY.md](STABILITY.md). Do not treat frozen test counts in older entries as live CI truth.
 
+## 2026-11-15 - 2.5.0: fields and named_in
+
+- Rust struct, union and enum-variant fields are definitions (kind `field`, `container` the owner). `.name` not called is `field_access`; a field in a struct literal or pattern is `struct_field`. `symbols::RULES` is 2, so a 2.4 store re-extracts its Rust chunks once.
+- `find_references` code moved to `src/engine/references.rs`. For a field name, it rebuilds each Rust file from its chunks and reads it with `symbols::rust_uses`, which finds the enclosing `impl` for `self.name` and the type of `T { name }`. Otherwise only the chunks that hold the name are read, as in 2.4.
+- `named_in` scans every chunk of another language, and Rust string literals (`rust_refs::strings_only`). Plain words and names under 4 characters are skipped.
+- Edges: field uses resolve only against fields defined once; other references never resolve to a field. `search` and `query` skip field definitions when they rank defining chunks.
+- Rust tokens borrow the stripped text instead of owning a `String` each.
+
 ## 2026-11-05 - verify-4 parity gaps
 
 - Empty chunks stay out of BM25. Index times are the stored index time. Map prefixes follow `Path`. Annotation tags are OR. Blank PDF pages keep their labels. Dynamic symbol ids stay put and are findable. Embeddings accept any positive length. Detect classifies restored and reprocessed chunks. `insert_count` follows the HNSW counter. Doctor does not spawn Python.

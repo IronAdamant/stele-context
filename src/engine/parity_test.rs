@@ -264,7 +264,11 @@ print(json.dumps(payload))
     let embed = super::fingerprint::embed_text(&text);
     let search = engine.search("classify", "keyword", 10);
     let defs = engine.find_definition("classify");
-    let refs = engine.find_references("classify");
+    let mut refs = engine.find_references("classify");
+    // 2.5 adds `named_in` (MIGRATION.md), which 1.5.2 does not have.
+    if let crate::json::Value::Object(pairs) = &mut refs {
+        pairs.retain(|(key, _)| key != "named_in");
+    }
     let grep = engine
         .grep_full(
             "classify", false, None, true, true, "file", 4000, true, 0, None, false,

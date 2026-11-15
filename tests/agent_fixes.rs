@@ -16,9 +16,14 @@ struct Project {
 
 impl Project {
     fn new() -> Project {
+        // Tests run in parallel and Windows clocks are coarse: a counter
+        // keeps two projects of one process apart (one test's Drop removed
+        // the other's tree on CI).
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "stele-agent-fixes-{}-{}",
+            "stele-agent-fixes-{}-{}-{}",
             std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos())

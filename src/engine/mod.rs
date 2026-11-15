@@ -9,6 +9,9 @@ pub mod overlay;
 #[cfg(test)]
 mod parity_test;
 mod query;
+mod references;
+
+pub use references::{RefOptions, FIELD_ROWS};
 
 use crate::chunk::{self, Produced};
 use crate::config;
