@@ -1,3 +1,19 @@
+## [2.5.0] - 2026-11-15
+
+What the compiler cannot see, from Specula's M5 review. [MIGRATION.md](MIGRATION.md) lists each change against 1.5.2.
+
+### Added
+
+- **Struct fields are symbols.** The named fields of Rust structs, unions and enum variants are definitions of kind `field`, with their owner (`Index`, `Shape::Circle`). `.name` not followed by `(` is a `field_access` reference, and a field named in a struct literal or pattern (`Index { tasks: x }`, `Index { tasks, .. }`) is a `struct_field` reference. `find_references tasks` answered `not_found` before; on Specula, "find every place a reference is added or dropped" on four fields took five greps. Now each row has `owner` where the line names the type (`self.tasks` inside `impl Index`, `Index { tasks }`, `Self { tasks }`) or `name_only: true`, and `write: true` when the line assigns the field, borrows it `&mut` or calls a mutating std method on it (`push`, `insert`, `remove`, `retain`, `clear` ...). Owned rows come first, grouped by owner; `fields` counts rows per owner and name-only rows, and says which types a name-only row may belong to. `owner=T` (CLI `--owner T`) keeps one type. Field and mention rows of a field name are capped at 50 (`fields.omitted`; `full=true` or CLI `--limit 0` lists all), so `id` answers in 77 KB on Specula instead of 1,020 KB.
+- **`named_in`** on `find_references` and `impact_radius`: the files of other languages (Python scripts, Markdown, TOML, JSON) and the Rust string literals that name the symbol as a word (or its kebab-case form, `--all-languages`), as a count per file and the first three lines. On Specula, `find_references model_export` (a module, and a tool that `scripts/export_check.py` calls by string) lists 14 files and 38 lines: the script's 12, `docs/design/EXPORT.md`'s 8, the tool tables in `authority.rs`, `tools.rs` and `toolkits.rs`; 2.4 listed the two code paths only. Skipped, with the reason, for names under 4 characters and for one plain word (`tasks`, `Index`); `named_in=true` scans anyway, `named_in=false` leaves it out. The verdict does not change; an `unreferenced` symbol that `named_in` finds gets a `note` that a script or a dispatch by string may reach it.
+
+### Changed
+
+- Tool descriptions and the `initialize` instructions say what `find_references` covers (fields, `named_in`) and what it does not (type inference across receivers; fields a macro generates). Lite `tools/list` is 9,982 bytes (2.4: 9,732).
+- More Rust symbol rows: on Specula (1,772 files) 302k instead of 248k (14.5k field definitions, 40k field uses), 309k edges instead of 305k, and a fresh snapshot of 126 MB instead of 115 MB. Indexing `crates/specula/src` takes about 10% longer (fastest of five interleaved runs on a busy machine: 11.8 s against 10.7 s). A store written with older rules re-extracts its Rust chunks the first time it is opened in full.
+- A field use links an edge only to a field defined once, and other references never link to a field. `search` and `query` do not put a chunk first for defining a field.
+- Rust tokens borrow the text they were read from instead of allocating a string each.
+
 ## [2.4.0] - 2026-11-11
 
 Fixes from Specula's M5 lanes, where Stele "mostly lost to grep". [MIGRATION.md](MIGRATION.md) lists each change against 1.5.2.

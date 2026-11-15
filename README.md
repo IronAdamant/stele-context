@@ -21,7 +21,7 @@ Everything runs offline. Stele does not bundle a model and never calls one; Tier
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.4.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/IronAdamant/stele-context/v2.5.0/scripts/install.sh | sh
 ```
 
 On Windows run `scripts/install.ps1`, or download `stele-context-<target>` from the [releases](https://github.com/IronAdamant/stele-context/releases). From source: `cargo build --release` (Rust 1.89+). The binaries are `stele-context` and `stele-context-mcp`.
@@ -137,10 +137,24 @@ CLI output is JSON (`--human` for text).
 |---|---|---|
 | Where is `X` defined? | `find_definition` | The definition rows only (fn, struct, trait, `macro_rules!`, const, `pub(crate) fn` ...) with the signature line, not every call site |
 | Who uses `X`? Is it dead? | `find_references` | Definition first, then every code line that calls, method-calls, imports or names `X`, comments and strings skipped, and a `referenced` / `unreferenced` verdict |
-| What breaks if `X` changes? | `impact_radius` | Follows the symbol graph across files |
+| Where is field `x` read or written? | `find_references` | Rust struct and enum-variant fields are definitions (kind `field`, with `owner`). Each use is `field_access` (`.x`) or `struct_field` (`T { x }`), with `write: true` when the line assigns it, borrows it `&mut` or calls `push`, `insert`, `remove`, `retain` ... on it |
+| Which scripts and docs name `X`? | `find_references`, `impact_radius` | `named_in`: files of other languages (Python scripts, Markdown, TOML) and string literals that name `X`, as a count per file and the first lines. The compiler never sees these |
+| What breaks if `X` changes? | `impact_radius` | Follows the symbol graph across files, plus `named_in` |
 | Where is the `Game` trait? | `search` | The chunk that defines the names in the query comes first |
 
-Use grep for text in strings and comments, and for files outside the index.
+Use grep for other text in strings and comments, and for files outside the index.
+
+### Fields and `named_in` (2.5)
+
+```text
+find_references {"symbol": "tasks"}                    -> definition, reads and writes, by owner
+find_references {"symbol": "id", "owner": "Task"}      -> only Task's field rows
+find_references {"symbol": "model_export"}             -> named_in: scripts/check_export.py:3, docs/tools.md:2
+```
+
+- A field use has an `owner` only where the line names the type: `self.x` inside `impl T`, and `T { x }` or `Self { x }` in a literal or pattern. Stele does not infer types, so `other.x` is `name_only: true`; `fields.note` lists the types it may belong to. Fields a macro generates are not seen.
+- For a field name, field rows and plain word matches (a local of the same name) are capped at 50; `fields.omitted` counts the rest, and `total` and the verdict count them all. `owner=T` keeps one type; `full=true` (CLI `--limit 0`) lists every row.
+- `named_in` matches the name as a word, and a snake_case name also in kebab-case (`--all-languages`). Lines already in the reply are left out. It is skipped, and says so, for names under 4 characters and for one plain word (`tasks`, `Index`); `named_in=true` scans anyway, `named_in=false` leaves it out. It never changes the verdict. An `unreferenced` symbol that `named_in` finds gets a `note`: a script or a dispatch by string may reach it.
 
 ## Git worktrees
 
