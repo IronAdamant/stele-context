@@ -6,6 +6,7 @@ mod gitindex;
 mod migrate;
 mod ops;
 pub mod overlay;
+mod own_body;
 #[cfg(test)]
 mod parity_test;
 mod query;

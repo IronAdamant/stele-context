@@ -71,7 +71,7 @@ After this, **`search`**, **`get_context`**, **`find_references`**, etc. have ma
 
 ### Working in a git worktree (2.4)
 
-The server's index is the main checkout's. Pass **`worktree_root`** (the worktree's absolute path, the same value CoordinationHub's `register_agent` takes) to any read tool, or `--worktree PATH` on the CLI. Stele answers from the main index plus an in-memory overlay of the files that differ in the worktree (new, changed, deleted), re-checked by size and mtime on every call, so the answer is as current as grep. Replies add `worktree` and `overlay_files`. A server started inside a worktree that has no index of its own does this automatically.
+The server's index is the main checkout's. Pass **`worktree_root`** (the worktree's absolute path, the same value CoordinationHub's `register_agent` takes) to any read tool, or `--worktree PATH` on the CLI. Stele answers from the main index plus an in-memory overlay of the files that differ in the worktree (new, changed, deleted), re-checked by size and mtime on every call, so the answer is as current as grep. Replies add `worktree` and `overlay_files`. A server started inside a worktree that has no index of its own does this automatically. A `worktree_root` inside the server's own directory (for example a project below a parent folder the server runs in) answers from the main index.
 
 ### Grep-first: searching = caching
 
