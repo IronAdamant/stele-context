@@ -266,8 +266,19 @@ print(json.dumps(payload))
     let defs = engine.find_definition("classify");
     let mut refs = engine.find_references("classify");
     // 2.5 adds `named_in` (MIGRATION.md), which 1.5.2 does not have.
+    // `total` now counts references only (CHANGELOG); 1.5.2 added the definitions.
     if let crate::json::Value::Object(pairs) = &mut refs {
         pairs.retain(|(key, _)| key != "named_in");
+        let len = |key: &str| match pairs.iter().find(|(k, _)| k == key) {
+            Some((_, crate::json::Value::Array(items))) => items.len(),
+            _ => 0,
+        };
+        let total_152 = len("definitions") + len("references");
+        for (key, value) in pairs.iter_mut() {
+            if key == "total" {
+                *value = crate::json::Value::Int(total_152 as i64);
+            }
+        }
     }
     let grep = engine
         .grep_full(

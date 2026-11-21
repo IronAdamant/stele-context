@@ -403,7 +403,10 @@ mod tests {
             .into_iter()
             .map(|path| path.replace('\\', "/"))
             .collect();
-        assert_eq!(found, vec!["README.md", "main.py", "web/index.html"]);
+        // Windows orders paths case-insensitively, as 1.5.2's `sorted()` did there.
+        let mut want = vec!["README.md", "main.py", "web/index.html"];
+        want.sort_by(|left, right| path_order(left, right));
+        assert_eq!(found, want);
         // A user's own index.html in a Wikifier root stays.
         fs::write(
             root.join("index.html"),
