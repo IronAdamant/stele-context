@@ -341,7 +341,7 @@ fn field_rows_are_capped_and_counted() {
         "{capped}"
     );
     assert!(capped.contains(r#""omitted":10"#), "{capped}");
-    assert!(capped.contains(r#""total":61"#), "{capped}");
+    assert!(capped.contains(r#""total":60"#), "{capped}");
     assert!(capped.contains(r#""Wide":60"#), "{capped}");
     let full = server.call("find_references", r#"{"symbol":"slot","full":true}"#);
     assert_eq!(full.matches(r#""kind":"field_access""#).count(), 60);

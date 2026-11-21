@@ -228,6 +228,93 @@ fn bad_worktree_roots_get_one_line_errors() {
     assert!(err.contains("worktree list"), "{err}");
 }
 
+/// A/B run, 2026-11-21: the server ran in a parent folder that is not a git
+/// checkout, and `find_references` with `worktree_root=<a project below
+/// it>` was rejected ("is a git checkout but this project ... is not").
+/// A checkout (or any folder) inside the server's directory is the base.
+#[test]
+fn a_checkout_below_a_non_git_server_directory_is_the_base() {
+    let trees = Trees::new("parent");
+    let mut base = Engine::open_at(trees.root.clone(), trees.root.join(".stele-context")).unwrap();
+    base.index(&[], false).unwrap();
+    let mut overlays = Overlays::new();
+    for inner in [
+        trees.main.clone(),
+        trees.main.join("src"),
+        trees.tree.clone(),
+    ] {
+        let (found, ran) = overlays
+            .run(&mut base, &inner.display().to_string(), |engine| {
+                engine.find_references("beta")
+            })
+            .unwrap();
+        assert_eq!(crate::store::string_field(&found, "verdict"), "referenced");
+        assert_eq!(ran.overlay_files, 0);
+        assert!(
+            same_path(Path::new(&ran.worktree), &trees.root),
+            "{}",
+            ran.worktree
+        );
+    }
+    assert!(!base.storage.join("overlays").exists());
+    // A linked worktree outside the server's directory has no main index
+    // to overlay: one line that names the checkout to start the server in.
+    let outside = crate::test_dir("overlay-outside");
+    fs::create_dir_all(&outside).unwrap();
+    let gitdir = trees.main.join(".git").join("worktrees").join("wt");
+    fs::write(
+        outside.join(".git"),
+        format!("gitdir: {}\n", gitdir.display()),
+    )
+    .unwrap();
+    let err = overlays
+        .run(&mut base, &outside.display().to_string(), |_| ())
+        .err()
+        .unwrap();
+    let _ = fs::remove_dir_all(&outside);
+    assert!(err.contains("outside this server's directory"), "{err}");
+    assert!(err.contains("Start the server in"), "{err}");
+    assert!(
+        err.contains(&crate::root::resolved(&trees.main).display().to_string()),
+        "{err}"
+    );
+    assert!(!err.contains('\n'), "{err}");
+}
+
+/// A linked worktree inside the main checkout (`.claude/worktrees/<name>`)
+/// is still a worktree: its own files answer, not the base's.
+#[test]
+fn a_worktree_inside_the_main_checkout_still_gets_an_overlay() {
+    let trees = Trees::new("nested-wt");
+    let inner = trees.main.join(".claude").join("worktrees").join("w2");
+    let gitdir = trees.main.join(".git").join("worktrees").join("w2");
+    fs::create_dir_all(&gitdir).unwrap();
+    fs::write(gitdir.join("commondir"), "../..\n").unwrap();
+    fs::create_dir_all(inner.join("src")).unwrap();
+    for name in ["a.rs", "b.rs", "c.rs"] {
+        fs::copy(
+            trees.main.join("src").join(name),
+            inner.join("src").join(name),
+        )
+        .unwrap();
+    }
+    fs::write(
+        inner.join(".git"),
+        format!("gitdir: {}\n", gitdir.display()),
+    )
+    .unwrap();
+    fs::write(inner.join("src/c.rs"), "pub fn gamma_two() {}\n").unwrap();
+    let mut base = trees.base();
+    let (found, ran) = Overlays::new()
+        .run(&mut base, &inner.display().to_string(), |engine| {
+            engine.find_definition("gamma_two")
+        })
+        .unwrap();
+    assert_eq!(count(&found), 1);
+    assert_eq!(ran.overlay_files, 1);
+    assert!(same_path(Path::new(&ran.worktree), &inner));
+}
+
 #[test]
 fn overlays_of_removed_worktrees_are_pruned() {
     let trees = Trees::new("prune");

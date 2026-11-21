@@ -153,6 +153,7 @@ find_references {"symbol": "model_export"}             -> named_in: scripts/chec
 ```
 
 - A field use has an `owner` only where the line names the type: `self.x` inside `impl T`, and `T { x }` or `Self { x }` in a literal or pattern. Stele does not infer types, so `other.x` is `name_only: true`; `fields.note` lists the types it may belong to. Fields a macro generates are not seen.
+- `total` counts the reference rows, one per line, not the definitions. A use inside the symbol's own definition (a recursive call, `Vec<Tree>` inside `struct Tree`) is under `self_references` and not counted; a symbol that only names itself is `unreferenced`, with a `self_note`. With more than one definition of the name, every use stays a reference.
 - For a field name, field rows and plain word matches (a local of the same name) are capped at 50; `fields.omitted` counts the rest, and `total` and the verdict count them all. `owner=T` keeps one type; `full=true` (CLI `--limit 0`) lists every row.
 - `named_in` matches the name as a word, and a snake_case name also in kebab-case (`--all-languages`). Lines already in the reply are left out. It is skipped, and says so, for names under 4 characters and for one plain word (`tasks`, `Index`); `named_in=true` scans anyway, `named_in=false` leaves it out. It never changes the verdict. An `unreferenced` symbol that `named_in` finds gets a `note`: a script or a dispatch by string may reach it.
 
@@ -166,9 +167,11 @@ find_references {"symbol": "game_frame", "worktree_root": "/repo/.claude/worktre
 
 Stele answers from the main index plus an in-memory overlay of the files that differ in that worktree: new and changed files are re-indexed, deleted ones vanish. Every call re-checks the tree by size and mtime (then the two checkouts' git indexes, then the content hash), so the answer is as current as grep, and nothing is written to the main index. The first call on a fresh worktree of a 1,600-file project takes under a second; later calls about 0.1 s. Replies add `"worktree"` and `"overlay_files"` (files that differ from main). A server started inside a worktree that has no index of its own does this by itself.
 
+A `worktree_root` inside the server's own directory (a server started in a parent folder, asked about a project below it) answers from the main index, which already holds those files. A git checkout outside a server directory that is not itself a git checkout has no main index to overlay; the error names the checkout to start the server in.
+
 ## How it works
 
-1. **Walk.** The project root is the nearest directory with `.git` or `.stele-context.toml` (an empty file is enough). `.gitignore`, dot-directories and the usual build/vendor folders are skipped. With no marker, paths are stored as absolute paths and the store lives in `~/.stele-context/`.
+1. **Walk.** The project root is the nearest directory with `.git` or `.stele-context.toml` (an empty file is enough). `.gitignore` files (the walked directory's, those below it, and inside a git checkout those above it up to the root), dot-directories and the usual build/vendor folders are skipped, and so are the state files Wikifier writes into a project (`file_health.*`, `library.md`, `pending_updates.md`, `journal/`, its `index.html` dashboard ...) unless named explicitly. With no marker, paths are stored as absolute paths and the store lives in `~/.stele-context/`.
 2. **Chunk.** Code is split at definitions and text into passages near `chunk_size` tokens; similar neighbours merge. PDFs are read page by page. Images, audio and video become metadata chunks.
 3. **Index.** Each chunk gets a 128-value signature, BM25 postings, and symbol rows (definitions and references for Python, JS/TS, Go, Rust, Java, C#, Swift and more), linked into a cross-file edge graph.
 4. **Store.** Everything is JSON under `<project>/.stele-context/store/` (`snapshot.json`, `signatures.bin`, `bm25.bin`). Cross-worktree locks live in `<git-common-dir>/stele-context/coordination.json`.
