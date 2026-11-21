@@ -214,7 +214,15 @@ struct Walk<'a> {
 
 impl Walk<'_> {
     fn dir(&mut self, dir: &Path) -> io::Result<()> {
-        let pushed = if self.respect_gitignore {
+        let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        // The listing answers what used to cost a stat per name per directory.
+        let has = |name: &str| entries.iter().any(|entry| entry.file_name() == name);
+        let has_gitignore = has(".gitignore");
+        let wikifier = has("file_health.json")
+            || has("map_paths.txt")
+            || (has(".wikifier_staging") && is_wikifier_root(dir));
+        let pushed = if self.respect_gitignore && has_gitignore {
             match Gitignore::load(dir) {
                 Some(rules) => {
                     let mut strip = normalize_under(self.root, dir).replace('\\', "/");
@@ -235,17 +243,14 @@ impl Walk<'_> {
         } else {
             false
         };
-        let result = self.entries(dir);
+        let result = self.entries(entries, wikifier);
         if pushed {
             self.stack.pop();
         }
         result
     }
 
-    fn entries(&mut self, dir: &Path) -> io::Result<()> {
-        let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
-        entries.sort_by_key(|entry| entry.file_name());
-        let wikifier = is_wikifier_root(dir);
+    fn entries(&mut self, entries: Vec<fs::DirEntry>, wikifier: bool) -> io::Result<()> {
         for entry in entries {
             let name = entry.file_name();
             let name = name.to_string_lossy();
