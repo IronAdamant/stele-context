@@ -187,7 +187,10 @@ pub fn annotate(value: Value, ran: &Ran) -> Value {
 /// `worktree` must be an existing absolute path in a checkout of the same
 /// project: for a git project, one whose git common directory is the
 /// base's. A path inside the worktree means its checkout, at the same
-/// offset as the base engine's directory below its project root.
+/// offset as the base engine's directory below its project root. A path
+/// inside the base engine's own directory (a server started in a parent
+/// folder that is not a git checkout, asked about a project below it) is
+/// the base itself: the main index already holds those files.
 fn validate(base: &Engine, worktree: &str) -> Result<PathBuf, String> {
     let given = Path::new(worktree);
     if worktree.trim().is_empty() || !given.is_absolute() {
@@ -206,6 +209,11 @@ fn validate(base: &Engine, worktree: &str) -> Result<PathBuf, String> {
     let base_root = crate::root::detect_project_root(&base_cwd).unwrap_or_else(|| base_cwd.clone());
     let base_git = crate::root::git_common_dir(&base_root);
     let tree_git = crate::root::git_common_dir(&tree_root);
+    let same_repo =
+        matches!((&base_git, &tree_git), (Some(left), Some(right)) if same_path(left, right));
+    if !same_repo && given.starts_with(&base_cwd) {
+        return Ok(base_cwd);
+    }
     match (&base_git, &tree_git) {
         (Some(left), Some(right)) if same_path(left, right) => {}
         (None, None) => {}
@@ -220,10 +228,12 @@ fn validate(base: &Engine, worktree: &str) -> Result<PathBuf, String> {
                 base_root.display()
             ));
         }
-        (None, Some(_)) => {
+        (None, Some(common)) => {
+            let main = main_checkout(common).unwrap_or_else(|| tree_root.clone());
             return Err(format!(
-                "worktree_root '{worktree}' is a git checkout but this project ({}) is not. Run the server in that checkout instead.",
-                base_root.display()
+                "worktree_root '{worktree}' is a git checkout outside this server's directory ({}), which is not a git checkout, so there is no main index of it to overlay. Start the server in {} (or omit worktree_root and index that path).",
+                base_cwd.display(),
+                main.display()
             ));
         }
     }
@@ -233,6 +243,15 @@ fn validate(base: &Engine, worktree: &str) -> Result<PathBuf, String> {
     } else {
         Ok(tree_root.join(offset))
     }
+}
+
+/// The main checkout a git common directory belongs to: the folder that
+/// holds `.git`. None for a bare or unusual layout.
+fn main_checkout(common: &Path) -> Option<PathBuf> {
+    if common.file_name()? != ".git" {
+        return None;
+    }
+    common.parent().map(Path::to_path_buf)
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {

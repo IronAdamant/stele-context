@@ -129,13 +129,20 @@ impl Engine {
             refs.extend(extra);
         }
         let mut field_block = None;
+        let mut own = Vec::new();
         if fields {
             field_block = Some(self.group_fields(&mut defs, &mut refs, &uses, owner));
         } else {
             sort_rows(&mut refs);
+            // One row per line: two uses on one line are one place.
+            let mut lines = HashSet::new();
+            refs.retain(|row| lines.insert(row_key(row)));
+            own = self.split_own_body(name, &defs, &mut refs);
         }
-        let total = (defs.len() + refs.len()) as i64;
-        let verdict = if defs.is_empty() && refs.is_empty() {
+        // `total` counts references only: not the definitions, not the
+        // lines inside the symbol's own body.
+        let total = refs.len() as i64;
+        let verdict = if defs.is_empty() && refs.is_empty() && own.is_empty() {
             "not_found"
         } else if !defs.is_empty() && refs.is_empty() {
             "unreferenced"
@@ -146,7 +153,8 @@ impl Engine {
         };
         let mut named = Value::Null;
         if options.named_in != Some(false) {
-            let known: HashSet<(String, i64)> = defs.iter().chain(&refs).map(row_key).collect();
+            let known: HashSet<(String, i64)> =
+                defs.iter().chain(&refs).chain(&own).map(row_key).collect();
             named = self.named_in(name, &languages, &known, options.named_in == Some(true));
         }
         // The field cap applies after the verdict and `total`.
@@ -179,22 +187,38 @@ impl Engine {
                 }
             }
         }
+        let own_count = own.len();
+        let not_found = verdict == "not_found";
         let mut out = vec![
             ("symbol", Value::string(name)),
             ("verdict", Value::string(verdict)),
             ("definitions", Value::Array(defs)),
             ("references", Value::Array(refs)),
             ("total", Value::Int(total)),
+        ];
+        if own_count > 0 {
+            out.push(("self_references", Value::Array(own)));
+        }
+        out.extend([
             ("symbol_index", self.symbol_index()),
             (
                 "guidance",
-                if total == 0 {
+                if not_found {
                     Value::string(super::query::guidance_empty(&self.symbol_index()))
                 } else {
                     Value::Null
                 },
             ),
-        ];
+        ]);
+        if own_count > 0 && verdict == "unreferenced" {
+            out.push((
+                "self_note",
+                Value::string(format!(
+                    "{name} is named only inside its own definition ({own_count} {}: recursion or its own type); nothing else uses it.",
+                    if own_count == 1 { "line" } else { "lines" }
+                )),
+            ));
+        }
         if omitted > 0 {
             out.push(("other_language_references", Value::Int(omitted as i64)));
         }
@@ -223,6 +247,35 @@ impl Engine {
             ));
         }
         Value::object(out)
+    }
+
+    /// Move the reference rows inside the one definition's own body (and
+    /// on its line) out of `refs`; returns them. With several definitions
+    /// a use inside one may reach another, so nothing moves.
+    fn split_own_body(&self, name: &str, defs: &[Value], refs: &mut Vec<Value>) -> Vec<Value> {
+        let [def] = defs else {
+            return Vec::new();
+        };
+        let dynamic = matches!(def, Value::Object(pairs) if pairs.iter().any(|(key, value)| key == "dynamic" && matches!(value, Value::Bool(true))));
+        if dynamic {
+            return Vec::new();
+        }
+        let (path, line) = row_key(def);
+        let Some(body) = self.own_body(name, &path, line) else {
+            return Vec::new();
+        };
+        let mut own = Vec::new();
+        refs.retain(|row| {
+            let (row_path, row_line) = row_key(row);
+            let scope = self.reference_scope(name, &row_path, row_line);
+            let inside =
+                (row_path == path && row_line == line) || body.holds(&row_path, row_line, scope);
+            if inside {
+                own.push(row.clone());
+            }
+            !inside
+        });
+        own
     }
 
     /// 2.5: the field rows of a symbol with field definitions: each field
@@ -552,7 +605,7 @@ fn sort_rows(rows: &mut [Value]) {
 
 /// A file's text rebuilt from its chunks (sorted by start), with file
 /// lines in place, and the chunk that holds each 1-based line.
-fn file_text<'a>(chunks: &[&'a Chunk]) -> (String, Vec<Option<&'a Chunk>>) {
+pub(super) fn file_text<'a>(chunks: &[&'a Chunk]) -> (String, Vec<Option<&'a Chunk>>) {
     let mut lines: Vec<Option<(&'a str, &'a Chunk)>> = vec![None];
     for chunk in chunks {
         for (index, text) in crate::chunk::lines::content_lines(&chunk.content)

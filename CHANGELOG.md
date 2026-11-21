@@ -1,3 +1,14 @@
+## [Unreleased]
+
+Friction from an A/B run on a 4k-line Python project (agents with and without the tools, 2026-11-21).
+
+### Fixed
+
+- **`worktree_root` on a project below the server's directory.** The server ran in a parent folder that is not a git checkout, and `find_references {"symbol": "IndexSchema", "worktree_root": "<that folder>/ABTest-MiniSQL-WithTools"}` answered "is a git checkout but this project (...) is not. Run the server in that checkout instead." The agent spent a retry. A path inside the server's own directory (a checkout below it, or any folder in it) now answers from the main index, which already holds those files (`overlay_files: 0`). A linked worktree of the server's own repository, including one inside the main checkout (`.claude/worktrees/<name>`), still gets its overlay. A git checkout outside a non-git server directory gets one line that names the checkout to start the server in.
+- **`find_references` counts.** `total` counted the definitions with the references (`TableAccess`: one use, `total: 2`). It now counts the references only. Two uses on one line are one row (`Join(..), Join(..)` gave two identical rows). A use inside the symbol's own definition (a recursive call, a class built in its own method, `Vec<Tree>` inside `struct Tree`) is listed under `self_references` and is not a reference: a symbol that only names itself is `unreferenced`, with a `self_note`. Python uses the parser's scopes; Rust, JS/TS, JVM, Go, C, C#, Swift and PHP use the definition's braces (a span that cannot be told leaves every row a reference). With more than one definition of the name nothing moves, since a use inside one may reach another.
+- **Generated files in the index.** `wikifier init` puts its dashboard (`index.html`, about 11k tokens) and state files in the project root, and a project-wide `index` picked them up. A directory walk now skips Wikifier's files in a directory that holds Wikifier state (`file_health.json`, `map_paths.txt` or `.wikifier_staging/wk_cache`): `file_health.json`, `file_health.md`, `library.md`, `pending_updates.md`, `map_paths.txt`, `monitored_paths.txt`, `exclude_patterns.txt`, `journal/`, `Logged_issues/`, and `index.html` when its title names Wikifier. A file or directory named explicitly is still indexed.
+- **Gitignore below and above the walked directory.** Only the walked directory's own `.gitignore` applied, so `index src` in a repository skipped none of the root `.gitignore`'s rules, and a project indexed from a parent folder kept its `__pycache__` and `*.db`. A walk now applies every `.gitignore` below it to its own subtree and, inside a git checkout, those of the directories above it up to the checkout root; a deeper file's match wins. `respect_gitignore = false` still turns all of it off.
+
 ## [2.5.0] - 2026-11-15
 
 What the compiler cannot see, from an M5 review of a large Rust workspace. [MIGRATION.md](MIGRATION.md) lists each change against 1.5.2.

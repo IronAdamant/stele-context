@@ -1456,6 +1456,71 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
             notes.push(format!("2.5 adds {}", added.join(", ")));
         }
     }
+    // A/B run 2026-11-21: find_references lists one row per line, moves the
+    // lines inside the symbol's own body to `self_references` (`self_note`
+    // when nothing else uses it, and the verdict is then `unreferenced`),
+    // and `total` counts the references only. Compared as 1.5.2 counts:
+    // own-body rows back in place, 1.5.2's rows one per line, totals as
+    // definitions plus references.
+    if name == "find_references" && left.is_dict() && right.is_dict() {
+        let row_key = |row: &Py| {
+            (
+                row.get("document_path").map(py_str).unwrap_or_default(),
+                row.get("line_number").map(py_str).unwrap_or_default(),
+            )
+        };
+        let own = match left.get("self_references") {
+            Some(Py::List(rows)) => rows.clone(),
+            _ => Vec::new(),
+        };
+        let had_own = !own.is_empty();
+        let before = left.get("total").map(py_str);
+        if let Some(Py::List(rows)) = left.get_mut("references") {
+            rows.extend(own);
+            rows.sort_by(|a, b| {
+                let (pa, la) = row_key(a);
+                let (pb, lb) = row_key(b);
+                pa.cmp(&pb).then(
+                    la.parse::<i64>()
+                        .unwrap_or(0)
+                        .cmp(&lb.parse::<i64>().unwrap_or(0)),
+                )
+            });
+        }
+        if let Some(Py::List(rows)) = right.get_mut("references") {
+            let mut seen = std::collections::HashSet::new();
+            rows.retain(|row| seen.insert(row_key(row)));
+        }
+        if had_own {
+            if let (Some(Py::Str(verdict)), Some(theirs)) =
+                (left.get("verdict").cloned(), right.get("verdict").cloned())
+            {
+                if verdict == "unreferenced" {
+                    if let Some(slot) = left.get_mut("verdict") {
+                        *slot = theirs;
+                    }
+                }
+            }
+        }
+        for side in [&mut *left, &mut *right] {
+            let count = |key: &str| match side.get(key) {
+                Some(Py::List(rows)) => rows.len() as i64,
+                _ => 0,
+            };
+            let total = count("definitions") + count("references");
+            if let Some(slot) = side.get_mut("total") {
+                *slot = int(total);
+            }
+            if let Py::Dict(pairs) = side {
+                pairs.retain(|(key, _)| key != "self_references" && key != "self_note");
+            }
+        }
+        if had_own || before != left.get("total").map(py_str) {
+            notes.push(
+                "references one per line, own-body rows apart, total of references".to_string(),
+            );
+        }
+    }
     if name == "doctor" && left.is_dict() && right.is_dict() {
         for side in [&mut *left, &mut *right] {
             if let Some(Py::Dict(health)) = side.get_mut("db_health") {

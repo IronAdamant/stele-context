@@ -1,6 +1,7 @@
-//! Gitignore matcher. Same rules as the Python 1.5.2 matcher: one file at
-//! the root, last match wins, `**`, `*`, `?`, classes, and directory-only
-//! patterns. No regular-expression crate.
+//! Gitignore matcher. Same rules as the Python 1.5.2 matcher (last match
+//! wins, `**`, `*`, `?`, classes, and directory-only patterns). One
+//! matcher per `.gitignore` file; `walk` combines them. No
+//! regular-expression crate.
 
 use std::fs;
 use std::path::Path;
@@ -79,6 +80,13 @@ impl Gitignore {
             }
         }
         self.last_match(&rel, is_dir) == Some(true)
+    }
+
+    /// The last rule that matches `rel` itself: Some(true) ignored,
+    /// Some(false) re-included, None no rule. Used to combine the files
+    /// of nested directories, where a deeper file's match wins.
+    pub fn verdict(&self, rel_path: &str, is_dir: bool) -> Option<bool> {
+        self.last_match(&rel_path.replace('\\', "/"), is_dir)
     }
 
     fn last_match(&self, rel: &str, is_dir: bool) -> Option<bool> {
