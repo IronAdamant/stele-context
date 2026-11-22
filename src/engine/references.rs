@@ -109,7 +109,8 @@ impl Engine {
             .map(|row| language_of(&string_field(row, "document_path")))
             .collect();
         let mut omitted = 0usize;
-        if !options.all_languages && !languages.is_empty() && !languages.contains(&"") {
+        let narrowed = !options.all_languages && !languages.is_empty() && !languages.contains(&"");
+        if narrowed {
             let before = refs.len();
             refs.retain(|row| {
                 languages.contains(&language_of(&string_field(row, "document_path")))
@@ -123,6 +124,13 @@ impl Engine {
         // line per chunk; these rows give the rest. 2.5: each line also
         // says how it uses the name and, for a field, the owning type
         // where the code writes it.
+        // 2.6: a Python chunk that holds the name is read again for the uses
+        // 1.5.2's walk does not record (`exp.Name` as a dict key, an
+        // annotation, an attribute chain), with their scopes.
+        let mut scopes = super::python_mentions::Scopes::new();
+        if !narrowed || languages.contains(&"python") {
+            scopes = self.python_mentions(name, &mut refs);
+        }
         let mut uses: HashMap<(String, i64), Vec<RustUse>> = HashMap::new();
         if languages.contains(&"rust") {
             let (extra, found) = self.rust_mentions(name, &defs, &refs, fields);
@@ -138,7 +146,7 @@ impl Engine {
             // One row per line: two uses on one line are one place.
             let mut lines = HashSet::new();
             refs.retain(|row| lines.insert(row_key(row)));
-            own = self.split_own_body(name, &defs, &mut refs);
+            own = self.split_own_body(name, &defs, &mut refs, &scopes);
         }
         // `total` counts references only: not the definitions, not the
         // lines inside the symbol's own body.
@@ -271,7 +279,13 @@ impl Engine {
     /// Move the reference rows inside the one definition's own body (and
     /// on its line) out of `refs`; returns them. With several definitions
     /// a use inside one may reach another, so nothing moves.
-    fn split_own_body(&self, name: &str, defs: &[Value], refs: &mut Vec<Value>) -> Vec<Value> {
+    fn split_own_body(
+        &self,
+        name: &str,
+        defs: &[Value],
+        refs: &mut Vec<Value>,
+        scopes: &super::python_mentions::Scopes,
+    ) -> Vec<Value> {
         let [def] = defs else {
             return Vec::new();
         };
@@ -286,7 +300,11 @@ impl Engine {
         let mut own = Vec::new();
         refs.retain(|row| {
             let (row_path, row_line) = row_key(row);
-            let scope = self.reference_scope(name, &row_path, row_line);
+            let key = (row_path.clone(), row_line);
+            let scope = match scopes.get(&key) {
+                Some(scope) => scope.as_deref(),
+                None => self.reference_scope(name, &row_path, row_line),
+            };
             let inside =
                 (row_path == path && row_line == line) || body.holds(&row_path, row_line, scope);
             if inside {

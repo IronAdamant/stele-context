@@ -34,11 +34,8 @@ pub(crate) use edges::build as build_edges;
 /// method calls, macro invocations, `macro_rules!` and the definitions the
 /// line patterns miss. 2: 2.5 adds struct and enum-variant fields
 /// (`field`), field accesses (`field_access`) and struct literal and
-/// pattern fields (`struct_field`). 3: 2.6 adds the Python name uses the
-/// `ast` walk misses (attributes that are not called, assignment targets,
-/// the names of chunks that are not valid modules: kind `attribute` or
-/// `name`), so Python chunks are extracted again too.
-pub const RULES: i64 = 3;
+/// pattern fields (`struct_field`).
+pub const RULES: i64 = 2;
 
 pub(crate) use rust_refs::Use as RustUse;
 
@@ -80,21 +77,13 @@ pub fn extract(extension: &str, content: &str) -> Vec<Hit> {
 /// `extract` plus what 2.3 adds on top of 1.5.2's patterns: the Rust
 /// references of grouped imports, `::` paths and type names
 /// (`rust_refs`). The empty name 1.5.2 records for `use a::{..}` is dropped.
-/// 2.6: Python adds every name use the `ast` walk does not record
-/// (`lang::python_symbols::extract_all`).
 /// The index uses this; `extract` stays 1.5.2's, checked by the goldens.
 pub fn extract_all(extension: &str, content: &str) -> Vec<Hit> {
+    let mut hits = extract(extension, content);
     let ext = extension
         .strip_prefix('.')
         .unwrap_or(extension)
         .to_ascii_lowercase();
-    if is_python(&ext) {
-        return crate::lang::python_symbols::extract_all(content)
-            .into_iter()
-            .map(python_hit)
-            .collect();
-    }
-    let mut hits = extract(extension, content);
     if ext == "rs" {
         hits.retain(|hit| !hit.name.is_empty());
         let extra = rust_refs::extra(content, &hits);
@@ -103,25 +92,16 @@ pub fn extract_all(extension: &str, content: &str) -> Vec<Hit> {
     hits
 }
 
-/// The extensions (and chunk language) `extract` reads as Python.
-pub(crate) fn is_python(ext: &str) -> bool {
-    matches!(ext, "py" | "pyw" | "pyx" | "python")
-}
-
-fn python_hit(hit: crate::syntax::query::SymbolHit) -> Hit {
-    Hit {
-        name: hit.name,
-        kind: hit.kind.to_string(),
-        role: hit.role.to_string(),
-        line: hit.line,
-        container: hit.container,
-    }
-}
-
 fn from_python(content: &str) -> Vec<Hit> {
     crate::lang::python_symbols::extract(content)
         .into_iter()
-        .map(python_hit)
+        .map(|hit| Hit {
+            name: hit.name,
+            kind: hit.kind.to_string(),
+            role: hit.role.to_string(),
+            line: hit.line,
+            container: hit.container,
+        })
         .collect()
 }
 

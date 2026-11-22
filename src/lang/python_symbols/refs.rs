@@ -1,5 +1,6 @@
 //! Python name uses that CPython's `ast` walk (and so 1.5.2) does not
-//! record as symbols (2.6).
+//! record as symbols (2.6). `find_references` adds them for the chunks that
+//! hold the name (`engine::python_mentions`); they are not index rows.
 //!
 //! The walk records a Name load and a called attribute, so `exp.Name(..)`
 //! is a reference and `exp.Name` is not: a dict key (`exp.Name: render`),

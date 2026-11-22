@@ -27,7 +27,9 @@ pub fn extract(source: &str) -> Vec<SymbolHit> {
 /// `extract` plus every other use of a name (2.6, `refs`): attributes that
 /// are not called (`exp.Name` as a dict key, an annotation, `exp.Name.attr`),
 /// assignment targets, and every name in a chunk that is not a valid module
-/// (which 1.5.2 reads with the regex fallback). The index uses this.
+/// (which 1.5.2 reads with the regex fallback). `find_references` reads
+/// it for the chunks that hold the name; the index keeps 1.5.2's rows, so
+/// every command that loads the store pays nothing for it.
 pub fn extract_all(source: &str) -> Vec<SymbolHit> {
     let tokens = lex(source);
     let valid = valid::module_is_valid(source);

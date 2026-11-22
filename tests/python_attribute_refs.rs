@@ -9,8 +9,7 @@ use std::process::{Command, Stdio};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_stele-context");
 
-const EXPRESSIONS: &str =
-    "class Func:\n    pass\n\n\nclass StrPosition(Func):\n    arg_types = {\"this\": True}\n";
+const EXPRESSIONS: &str = "from pkg import exp\n\n\nclass Func:\n    pass\n\n\nclass StrPosition(Func):\n    arg_types = {\"this\": True}\n\n    def again(self):\n        return exp.StrPosition.from_arg_list\n";
 
 const GENERATOR: &str = r#"from sqlglot import exp
 from sqlglot.dialects.dialect import (
@@ -105,6 +104,13 @@ fn every_use_of_a_python_class_is_a_reference() {
         assert!(refs.contains(&place(path, line)), "{path}:{line}: {refs}");
     }
     assert!(refs.contains(r#""total":4"#), "{refs}");
+    // A use inside the class's own body is a self reference, by the scope
+    // the query-time read gives it.
+    let own = refs.find(r#""self_references":"#).expect(&refs);
+    assert!(
+        refs[own..].contains(&place("pkg/expressions.py", 12)),
+        "{refs}"
+    );
     // The string "STR_POSITION" is not a code use of the name.
     assert!(
         !refs.contains(&place("pkg/generators/base.py", 14)),

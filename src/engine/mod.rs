@@ -10,6 +10,7 @@ pub mod overlay;
 mod own_body;
 #[cfg(test)]
 mod parity_test;
+mod python_mentions;
 mod query;
 mod references;
 
@@ -180,8 +181,8 @@ impl Engine {
     }
 
     /// A store extracted with older symbol rules (`symbols::RULES`) gets its
-    /// Rust and Python chunks extracted again from the stored text and line
-    /// maps; the other languages' rules did not change. Runs once per store.
+    /// Rust chunks extracted again from the stored text and line maps; the
+    /// other languages' rules did not change. Runs once per store.
     fn symbol_rules_once(&mut self) {
         if self.store.state.symbol_rules >= symbols::RULES {
             return;
@@ -191,12 +192,11 @@ impl Engine {
             return;
         }
         // The extension commit_piece hands to the extractor.
-        let ext_of = |path: &str, language: Option<&str>| {
+        let rust = |path: &str, language: Option<&str>| {
             language
                 .unwrap_or_else(|| extension_of(path))
-                .to_ascii_lowercase()
+                .eq_ignore_ascii_case("rs")
         };
-        let refreshed = |ext: &str| ext == "rs" || symbols::is_python(ext);
         let mut fresh: Vec<Symbol> = Vec::new();
         let mut touched: HashSet<String> = HashSet::new();
         let mut positions: std::collections::HashMap<String, usize> =
@@ -204,17 +204,14 @@ impl Engine {
         for sym in &self.store.state.symbols {
             positions.insert(sym.chunk_id.clone(), sym.chunk_index);
         }
-        type Row = (String, String, String, String, Vec<(u32, u32)>);
-        let chunks: Vec<Row> = self
+        let chunks: Vec<(String, String, String, Vec<(u32, u32)>)> = self
             .store
             .state
             .chunks
             .iter()
-            .map(|chunk| (ext_of(&chunk.path, chunk.language.as_deref()), chunk))
-            .filter(|(ext, _)| refreshed(ext))
-            .map(|(ext, chunk)| {
+            .filter(|chunk| rust(&chunk.path, chunk.language.as_deref()))
+            .map(|chunk| {
                 (
-                    ext,
                     chunk.id.clone(),
                     chunk.path.clone(),
                     chunk.content.clone(),
@@ -222,9 +219,9 @@ impl Engine {
                 )
             })
             .collect();
-        for (ext, id, path, content, line_map) in chunks {
+        for (id, path, content, line_map) in chunks {
             let position = positions.get(&id).copied().unwrap_or(0);
-            for hit in symbols::extract_all(&ext, &content) {
+            for hit in symbols::extract_all("rs", &content) {
                 let _id = self.take_symbol_id();
                 fresh.push(Symbol {
                     name: hit.name,

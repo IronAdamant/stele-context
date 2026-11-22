@@ -310,9 +310,7 @@ fn resolve(symbols: &[Symbol]) -> Vec<Edge> {
         // every caller forty false edges.
         // A field use names no receiver type either (2.5): `.id` links only
         // to a field `id` declared once.
-        // 2.6: a Python attribute that is not called (`exp.Name`,
-        // `self.args`) names no receiver type either.
-        if (sym.kind == "method_call" || sym.kind == "attribute" || field_use) && defs.len() > 1 {
+        if (sym.kind == "method_call" || field_use) && defs.len() > 1 {
             continue;
         }
         // Python's rebuild drops `container` before resolution, so the
