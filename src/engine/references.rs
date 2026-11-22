@@ -1,7 +1,8 @@
 //! `find_references` (2.3 to 2.5): definition rows, reference rows, Rust
 //! word matches, struct fields grouped by owning type (2.5) and the
 //! `named_in` section: files of other languages and string literals that
-//! name the symbol (2.5).
+//! name the symbol (2.5), and the dispatch spellings of a CamelCase name
+//! (2.6, `name_variants`).
 
 use super::query::language_of;
 use super::Engine;
@@ -108,7 +109,8 @@ impl Engine {
             .map(|row| language_of(&string_field(row, "document_path")))
             .collect();
         let mut omitted = 0usize;
-        if !options.all_languages && !languages.is_empty() && !languages.contains(&"") {
+        let narrowed = !options.all_languages && !languages.is_empty() && !languages.contains(&"");
+        if narrowed {
             let before = refs.len();
             refs.retain(|row| {
                 languages.contains(&language_of(&string_field(row, "document_path")))
@@ -122,6 +124,13 @@ impl Engine {
         // line per chunk; these rows give the rest. 2.5: each line also
         // says how it uses the name and, for a field, the owning type
         // where the code writes it.
+        // 2.6: a Python chunk that holds the name is read again for the uses
+        // 1.5.2's walk does not record (`exp.Name` as a dict key, an
+        // annotation, an attribute chain), with their scopes.
+        let mut scopes = super::python_mentions::Scopes::new();
+        if !narrowed || languages.contains(&"python") {
+            scopes = self.python_mentions(name, &mut refs);
+        }
         let mut uses: HashMap<(String, i64), Vec<RustUse>> = HashMap::new();
         if languages.contains(&"rust") {
             let (extra, found) = self.rust_mentions(name, &defs, &refs, fields);
@@ -137,7 +146,7 @@ impl Engine {
             // One row per line: two uses on one line are one place.
             let mut lines = HashSet::new();
             refs.retain(|row| lines.insert(row_key(row)));
-            own = self.split_own_body(name, &defs, &mut refs);
+            own = self.split_own_body(name, &defs, &mut refs, &scopes);
         }
         // `total` counts references only: not the definitions, not the
         // lines inside the symbol's own body.
@@ -155,7 +164,13 @@ impl Engine {
         if options.named_in != Some(false) {
             let known: HashSet<(String, i64)> =
                 defs.iter().chain(&refs).chain(&own).map(row_key).collect();
-            named = self.named_in(name, &languages, &known, options.named_in == Some(true));
+            named = self.named_in(
+                name,
+                &languages,
+                &known,
+                options.named_in == Some(true),
+                options.field_limit == Some(0),
+            );
         }
         // The field cap applies after the verdict and `total`.
         let mut field_omitted = 0usize;
@@ -235,14 +250,26 @@ impl Engine {
             out.push(("error", Value::string(miss)));
         }
         let named_lines = int_field(&named, "lines_total");
+        let variant_lines = match object_field(&named, "variants") {
+            Some(block) => int_field(block, "lines_total"),
+            None => 0,
+        };
         if !matches!(named, Value::Null) {
             out.push(("named_in", named));
         }
-        if named_lines > 0 && (verdict == "unreferenced" || verdict == "not_found") {
+        let dead = verdict == "unreferenced" || verdict == "not_found";
+        if named_lines > 0 && dead {
             out.push((
                 "note",
                 Value::string(format!(
                     "No code uses {name}, but {named_lines} lines of other files or string literals name it (named_in): a script, a doc or a dispatch by string may reach it."
+                )),
+            ));
+        } else if variant_lines > 0 && dead {
+            out.push((
+                "note",
+                Value::string(format!(
+                    "No code uses {name} by name, but {variant_lines} lines spell it another way (named_in.variants): a dispatch by a built name may reach it."
                 )),
             ));
         }
@@ -252,7 +279,13 @@ impl Engine {
     /// Move the reference rows inside the one definition's own body (and
     /// on its line) out of `refs`; returns them. With several definitions
     /// a use inside one may reach another, so nothing moves.
-    fn split_own_body(&self, name: &str, defs: &[Value], refs: &mut Vec<Value>) -> Vec<Value> {
+    fn split_own_body(
+        &self,
+        name: &str,
+        defs: &[Value],
+        refs: &mut Vec<Value>,
+        scopes: &super::python_mentions::Scopes,
+    ) -> Vec<Value> {
         let [def] = defs else {
             return Vec::new();
         };
@@ -267,7 +300,11 @@ impl Engine {
         let mut own = Vec::new();
         refs.retain(|row| {
             let (row_path, row_line) = row_key(row);
-            let scope = self.reference_scope(name, &row_path, row_line);
+            let key = (row_path.clone(), row_line);
+            let scope = match scopes.get(&key) {
+                Some(scope) => scope.as_deref(),
+                None => self.reference_scope(name, &row_path, row_line),
+            };
             let inside =
                 (row_path == path && row_line == line) || body.holds(&row_path, row_line, scope);
             if inside {
@@ -474,6 +511,7 @@ impl Engine {
         languages: &[&str],
         known: &HashSet<(String, i64)>,
         force: bool,
+        all_variants: bool,
     ) -> Value {
         let length = name.chars().count();
         if name.is_empty() || !name.chars().all(|ch| ch.is_alphanumeric() || ch == '_') {
@@ -574,6 +612,10 @@ impl Engine {
                 Value::Int((files_total - NAMED_FILES) as i64),
             ));
         }
+        // 2.6: the dispatch spellings of a CamelCase name, anywhere.
+        if let Some(variants) = self.name_variants(name, all_variants) {
+            out.push(("variants", variants));
+        }
         Value::object(out)
     }
 
@@ -590,7 +632,17 @@ impl Engine {
             .map(|row| language_of(&string_field(row, "document_path")))
             .collect();
         let known: HashSet<(String, i64)> = defs.iter().map(row_key).collect();
-        Some(self.named_in(symbol, &languages, &known, mode == Some(true)))
+        Some(self.named_in(symbol, &languages, &known, mode == Some(true), false))
+    }
+}
+
+fn object_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    match value {
+        Value::Object(pairs) => pairs
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, item)| item),
+        _ => None,
     }
 }
 

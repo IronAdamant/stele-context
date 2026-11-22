@@ -4,11 +4,13 @@
 mod fingerprint;
 mod gitindex;
 mod migrate;
+mod name_variants;
 mod ops;
 pub mod overlay;
 mod own_body;
 #[cfg(test)]
 mod parity_test;
+mod python_mentions;
 mod query;
 mod references;
 
