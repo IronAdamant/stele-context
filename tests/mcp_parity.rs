@@ -1373,7 +1373,9 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
     let mut skip = false;
     let extra = EXTRA_RUST_SYMBOLS.load(std::sync::atomic::Ordering::Relaxed);
     if extra != 0 && rust_rows(left, right, extra) {
-        notes.push(format!("{extra} more Rust reference rows (2.3)"));
+        notes.push(format!(
+            "{extra} more Rust (2.3) and Python (2.6) reference rows"
+        ));
     }
     let extra_defs = EXTRA_RUST_DEFINITIONS.load(std::sync::atomic::Ordering::Relaxed);
     if extra_defs != 0 && rust_definitions(left, right, extra_defs, extra - extra_defs) {
@@ -1589,7 +1591,8 @@ fn documented(name: &str, left: &mut Py, right: &mut Py) -> (String, bool) {
 /// Lock calls whose 1.5.2 answer follows from an index-time lock.
 /// Symbol rows 2.3 adds over 1.5.2 in the scenario's tree: the Rust
 /// references `symbols::extract_all` finds and 1.5.2's `extract` does not
-/// (MIGRATION.md). Set per scenario; 0 for a tree without `.rs` files.
+/// (MIGRATION.md), and (2.6) the Python name uses the `ast` walk misses.
+/// Set per scenario; 0 for a tree without `.rs` or `.py` files.
 static EXTRA_RUST_SYMBOLS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 /// Definition rows `extract_all` adds over 1.5.2's `extract` in the
@@ -1655,10 +1658,15 @@ fn extra_rust_symbols(tree: &Path) -> i64 {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
+            } else if let Some(ext) = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .filter(|ext| *ext == "rs" || *ext == "py")
+            {
+                // 2.6: Python name uses the `ast` walk misses are rows too.
                 let text = fs::read_to_string(&path).unwrap_or_default();
-                let old = stele_context::symbols::extract("rs", &text).len() as i64;
-                let new = stele_context::symbols::extract_all("rs", &text).len() as i64;
+                let old = stele_context::symbols::extract(ext, &text).len() as i64;
+                let new = stele_context::symbols::extract_all(ext, &text).len() as i64;
                 extra += new - old;
             }
         }

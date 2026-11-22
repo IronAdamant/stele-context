@@ -6,6 +6,7 @@
 
 mod call_line;
 mod expr;
+mod refs;
 mod store;
 mod valid;
 
@@ -15,15 +16,34 @@ use crate::syntax::cst::Token;
 use crate::syntax::query::SymbolHit;
 
 pub fn extract(source: &str) -> Vec<SymbolHit> {
-    let tokens = lex(source);
     // ast.parse failures use the regex fallback, including a chunk that was
     // cut through a list, a dict, or a decorator.
     if !valid::module_is_valid(source) {
         return regex_fallback(source);
     }
+    walk(source, &lex(source))
+}
+
+/// `extract` plus every other use of a name (2.6, `refs`): attributes that
+/// are not called (`exp.Name` as a dict key, an annotation, `exp.Name.attr`),
+/// assignment targets, and every name in a chunk that is not a valid module
+/// (which 1.5.2 reads with the regex fallback). The index uses this.
+pub fn extract_all(source: &str) -> Vec<SymbolHit> {
+    let tokens = lex(source);
+    let valid = valid::module_is_valid(source);
+    let mut hits = if valid {
+        walk(source, &tokens)
+    } else {
+        regex_fallback(source)
+    };
+    refs::extend(source, &tokens, &mut hits, valid);
+    hits
+}
+
+fn walk(source: &str, tokens: &[Token]) -> Vec<SymbolHit> {
     let mut cursor = Cursor {
         source,
-        tokens: &tokens,
+        tokens,
         index: 0,
         symbols: Vec::new(),
         scope: Vec::new(),
@@ -515,6 +535,7 @@ fn intern_kind(kind_name: &str) -> &'static str {
         "class" => "class",
         "module" => "module",
         "import" => "import",
+        "attribute" => "attribute",
         _ => "name",
     }
 }

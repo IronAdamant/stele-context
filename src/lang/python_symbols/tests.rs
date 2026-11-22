@@ -253,3 +253,127 @@ fn object_get<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
         .find(|(name, _)| name == key)
         .map(|(_, item)| item)
 }
+
+/// sqlglot renames (A/B run): `exp.StrPosition` used as a dict key, an
+/// annotation, the head of an attribute chain and a tuple element is a use
+/// the `ast` walk does not record. `extract_all` records it; `extract`
+/// stays 1.5.2's.
+#[test]
+fn extract_all_records_attribute_uses_the_walk_misses() {
+    let source = r#"from sqlglot import exp
+
+
+class Generator:
+    TRANSFORMS = {
+        exp.StrPosition: lambda self, e: self.func("POS", e.this),
+    }
+
+    def build(self, expression: exp.StrPosition) -> exp.StrPosition:
+        parser = exp.StrPosition.from_arg_list
+        kinds = (exp.Concat, exp.StrPosition)
+        return exp.StrPosition(this=parser)  # exp.StrPosition in a comment
+        "exp.StrPosition in a string"
+"#;
+    let lines = |hits: &[SymbolHit], name: &str| -> Vec<u32> {
+        let mut lines: Vec<u32> = hits
+            .iter()
+            .filter(|hit| hit.name == name && hit.role == "reference")
+            .map(|hit| hit.line)
+            .collect();
+        lines.sort();
+        lines.dedup();
+        lines
+    };
+    let walk = extract(source);
+    assert_eq!(lines(&walk, "StrPosition"), vec![12], "{walk:?}");
+    let all = extract_all(source);
+    assert_eq!(
+        lines(&all, "StrPosition"),
+        vec![6, 9, 10, 11, 12],
+        "{all:?}"
+    );
+    // The walk's rows come first, unchanged.
+    assert_eq!(&all[..walk.len()], &walk[..]);
+    let dict_key = all
+        .iter()
+        .find(|hit| hit.name == "StrPosition" && hit.line == 6)
+        .unwrap();
+    assert_eq!(dict_key.kind, "attribute");
+    assert_eq!(dict_key.container.as_deref(), Some("Generator"));
+    let annotation = all
+        .iter()
+        .find(|hit| hit.name == "StrPosition" && hit.line == 9)
+        .unwrap();
+    assert_eq!(annotation.container.as_deref(), Some("Generator.build"));
+    assert_eq!(lines(&all, "from_arg_list"), vec![10]);
+    // A class attribute is kept; a function's locals, parameters and
+    // keyword-argument names are bindings, not uses.
+    assert_eq!(lines(&all, "TRANSFORMS"), vec![5]);
+    assert!(
+        lines(&all, "parser").iter().all(|line| *line == 12),
+        "{all:?}"
+    );
+    assert!(lines(&all, "kinds").is_empty(), "{all:?}");
+    assert!(lines(&all, "expression").is_empty(), "{all:?}");
+    assert!(lines(&all, "e").iter().all(|line| *line == 6), "{all:?}");
+    // `e.this` is an attribute use; `this=` on line 12 is a keyword name.
+    assert_eq!(lines(&all, "this"), vec![6], "{all:?}");
+    // The definitions are not references to themselves.
+    assert!(lines(&all, "Generator").is_empty(), "{all:?}");
+    assert!(lines(&all, "build").is_empty(), "{all:?}");
+}
+
+#[test]
+fn extract_all_reads_names_of_a_chunk_that_is_not_a_module() {
+    // A chunk cut inside a dict: 1.5.2's regex fallback keeps no uses.
+    let source = "        exp.StrPosition: strposition_sql,\n        exp.Upper: rename_func(\"UPPER\"),\n    }\n";
+    assert!(extract(source).is_empty());
+    let all = extract_all(source);
+    let names: Vec<(&str, u32)> = all
+        .iter()
+        .map(|hit| (hit.name.as_str(), hit.line))
+        .collect();
+    for want in [
+        ("exp", 1),
+        ("StrPosition", 1),
+        ("strposition_sql", 1),
+        ("Upper", 2),
+        ("rename_func", 2),
+    ] {
+        assert!(names.contains(&want), "{want:?}: {names:?}");
+    }
+    assert!(!names.iter().any(|(name, _)| *name == "UPPER"), "{names:?}");
+}
+
+#[test]
+fn extract_all_puts_parenthesized_imports_on_their_own_lines() {
+    let source = "from sqlglot.dialects.dialect import (\n    rename_func,\n    strposition_sql as _pos,\n)\nimport os.path\n";
+    let all = extract_all(source);
+    let at = |name: &str| -> Vec<u32> {
+        all.iter()
+            .filter(|hit| hit.name == name)
+            .map(|hit| hit.line)
+            .collect()
+    };
+    assert_eq!(at("rename_func"), vec![2], "{all:?}");
+    assert_eq!(at("strposition_sql"), vec![3], "{all:?}");
+    // Module paths and `as` names are not name uses.
+    assert!(at("dialects").is_empty(), "{all:?}");
+    assert!(at("path").is_empty(), "{all:?}");
+    assert!(at("_pos").is_empty(), "{all:?}");
+}
+
+#[test]
+fn extract_all_keeps_one_line_bodies_and_fstrings_apart() {
+    let source =
+        "def first(): return exp.Upper\nvalue = exp.Lower\ntext = f\"{value!r:>10} {count:.1f}\"\n";
+    let all = extract_all(source);
+    let upper = all.iter().find(|hit| hit.name == "Upper").unwrap();
+    assert_eq!(upper.container.as_deref(), Some("first"));
+    let lower = all.iter().find(|hit| hit.name == "Lower").unwrap();
+    assert_eq!(lower.container, None, "{all:?}");
+    assert!(
+        all.iter().all(|hit| hit.name != "r" && hit.name != "f"),
+        "{all:?}"
+    );
+}
