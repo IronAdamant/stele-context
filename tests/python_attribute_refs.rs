@@ -41,8 +41,12 @@ struct Project {
 
 impl Project {
     fn new() -> Project {
+        // A counter keeps parallel tests apart: macOS clocks tick in microseconds, so two tests
+        // that start together could get the same nanos and one's Drop would delete the other's dir.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "stele-pyattr-{}-{}",
+            "stele-pyattr-{}-{n}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
